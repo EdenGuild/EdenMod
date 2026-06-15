@@ -326,6 +326,23 @@ public final class BridgeWebSocketClient {
         current.sendText(obj.toString(), true);
     }
 
+    /** Send a rendered shared-item card (base64 PNG) to be relayed as the sender. */
+    public void sendItemCard(String username, String nickname, String imageBase64, String signature) {
+        WebSocket current = socket;
+        if (current == null) {
+            return;
+        }
+        JsonObject obj = new JsonObject();
+        obj.addProperty("type", "itemCard");
+        obj.addProperty("username", username);
+        if (nickname != null && !nickname.isEmpty()) {
+            obj.addProperty("nickname", nickname);
+        }
+        obj.addProperty("image", imageBase64);
+        obj.addProperty("signature", signature);
+        current.sendText(obj.toString(), true);
+    }
+
     /** Send the authoritative handout count for a completed {@code /gift} run. */
     public void sendGuildRewardSummary(String giver, String receiver, String reward, int count) {
         WebSocket current = socket;

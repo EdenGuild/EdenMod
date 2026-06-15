@@ -50,6 +50,12 @@ public final class BridgeConfig {
      */
     public boolean partyAnnounce = true;
 
+    /**
+     * Whether shared Wynncraft item strings seen in guild chat are decoded (via
+     * Wynntils) and relayed to the bridge channel as a rendered item card.
+     */
+    public boolean relayItemCards = true;
+
     /** Load the config from disk, or return defaults (and write them) if absent. */
     public static BridgeConfig load() {
         if (Files.isRegularFile(PATH)) {

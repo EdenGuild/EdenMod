@@ -24,6 +24,10 @@ import com.edenguild.bridge.chat.RankChangeParser;
 import com.edenguild.bridge.chat.ShoutParser;
 import com.edenguild.bridge.config.BridgeConfig;
 import com.edenguild.bridge.gui.BridgeConfigScreen;
+import com.edenguild.bridge.item.DecodedItem;
+import com.edenguild.bridge.item.ItemCardRenderer;
+import com.edenguild.bridge.item.ItemStringDetector;
+import com.edenguild.bridge.item.WynntilsItemDecoder;
 import com.edenguild.bridge.net.BridgeWebSocketClient;
 import com.edenguild.bridge.net.PartyInfo;
 import com.edenguild.bridge.net.PendingEntry;
@@ -36,9 +40,12 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import java.util.Base64;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -72,6 +79,13 @@ public final class EdenBridgeClient implements ClientModInitializer {
     private final ChatRelay levelUpRelay = new ChatRelay();
     private final ChatRelay shoutRelay = new ChatRelay();
     private final ChatRelay annihilationRelay = new ChatRelay();
+    private final ChatRelay itemCardRelay = new ChatRelay();
+    // Decoding (Wynntils reflection) + image rendering run off the game thread.
+    private final ExecutorService itemCardExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "eden-bridge-item-card");
+        t.setDaemon(true);
+        return t;
+    });
     // Deterministic per-occurrence index so rapid identical bank events stay distinct.
     // Short window: only the current burst counts, so stale earlier deposits can't
     // make different clients assign divergent seqs (which duplicated Discord posts).
@@ -612,6 +626,9 @@ public final class EdenBridgeClient implements ClientModInitializer {
         if (!GuildChatParser.looksLikeGuildChat(message)) {
             return;
         }
+        // A shared Wynncraft item string (rendered to a card) may ride alongside or
+        // instead of normal guild-chat text; handle it before the text relay.
+        maybeRelayItemCard(current, message);
         Optional<CapturedMessage> captured = GuildChatParser.parse(message);
         if (captured.isPresent() && chatRelay.shouldSend(captured.get())) {
             CapturedMessage line = captured.get();
@@ -632,6 +649,49 @@ public final class EdenBridgeClient implements ClientModInitializer {
         if (sent) {
             current.sendRaidCompletion(line.party(), line.raidName(),
                     line.aspects(), line.emeralds(), line.guildExp());
+        }
+    }
+
+    /**
+     * If this guild-chat line carries a shared Wynncraft item string, decode it (via
+     * Wynntils), render a card, and relay it to the bridge as the sender — off-thread.
+     * No-op unless enabled, Wynntils is installed, and a sender can be resolved.
+     */
+    private void maybeRelayItemCard(BridgeWebSocketClient current, Component message) {
+        if (!config.relayItemCards || !WynntilsItemDecoder.isAvailable()) {
+            return;
+        }
+        Optional<ItemStringDetector.Detected> detected = ItemStringDetector.detect(message.getString());
+        Optional<CapturedMessage> sender = GuildChatParser.parseSender(message);
+        if (detected.isEmpty() || sender.isEmpty()) {
+            return;
+        }
+        ItemStringDetector.Detected item = detected.get();
+        CapturedMessage who = sender.get();
+        // Local dedup: each system-chat line is delivered twice (netty + render thread).
+        if (!itemCardRelay.shouldSend(
+                new CapturedMessage(who.username(), null, item.itemString()))) {
+            return;
+        }
+        itemCardExecutor.submit(() -> renderAndSendItemCard(current, who, item));
+    }
+
+    private void renderAndSendItemCard(
+            BridgeWebSocketClient current, CapturedMessage who, ItemStringDetector.Detected item) {
+        try {
+            Optional<DecodedItem> decoded =
+                    WynntilsItemDecoder.decode(item.itemString(), item.craftedName());
+            if (decoded.isEmpty()) {
+                return;
+            }
+            DecodedItem card = decoded.get();
+            String image = Base64.getEncoder().encodeToString(ItemCardRenderer.render(card));
+            String overall = card.hasOverall()
+                    ? String.format(Locale.ROOT, "%.2f", card.overallPercent())
+                    : "";
+            current.sendItemCard(who.username(), who.nickname(), image, card.name() + "|" + overall);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to render/relay shared item card", e);
         }
     }
 

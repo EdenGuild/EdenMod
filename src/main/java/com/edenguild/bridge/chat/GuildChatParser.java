@@ -55,6 +55,18 @@ public final class GuildChatParser {
 
     /** Parse a system-chat component, returning a captured message if it is guild chat. */
     public static Optional<CapturedMessage> parse(Component message) {
+        Optional<CapturedMessage> captured = parseSender(message);
+        // A non-empty body is required for a relayable chat line (a lone shared-item
+        // string normalizes to an empty body, but still has a resolvable sender).
+        return captured.filter(line -> !line.message().isEmpty());
+    }
+
+    /**
+     * Resolve the sender (and any body) of a guild-chat component, even when the body
+     * is empty — e.g. a message that is only a shared-item string, whose private-use
+     * code points are stripped during normalization.
+     */
+    public static Optional<CapturedMessage> parseSender(Component message) {
         if (!hasLeadingGuildChatColor(message)) {
             return Optional.empty();
         }
@@ -66,9 +78,6 @@ public final class GuildChatParser {
         }
         String displayed = matcher.group(1).trim();
         String content = matcher.group(2).trim();
-        if (content.isEmpty()) {
-            return Optional.empty();
-        }
 
         String real = findRealUsername(segments, displayed);
         String username = resolveAvatarUsername(displayed, real);
