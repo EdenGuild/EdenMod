@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "eden-bridge",
+  "version": "${version}",
+  "name": "EdenMod",
+  "description": "EdenMod — the companion mod for members of the Eden Wynncraft Guild.",
+  "authors": ["Eden Guild"],
+  "icon": "assets/eden-bridge/icon.png",
+  "contact": {
+    "homepage": "https://github.com/EdenGuild"
+  },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.edenguild.bridge.EdenBridgeClient"],
+    "modmenu": ["com.edenguild.bridge.gui.EdenModMenu"]
+  },
+  "mixins": [
+    {
+      "config": "eden-bridge.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "wynntils": "*",
+    "modmenu": "*"
+  }
+}

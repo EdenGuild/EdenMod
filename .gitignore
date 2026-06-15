@@ -1,0 +1,20 @@
+# Gradle / build output
+.gradle/
+build/
+run/
+*.class
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+bin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backups
+*.bak
