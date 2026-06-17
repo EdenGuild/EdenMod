@@ -7,9 +7,11 @@
   "authors": ["Eden Guild"],
   "icon": "assets/edenmod/icon.png",
   "contact": {
-    "homepage": "https://github.com/EdenGuild"
+    "homepage": "https://github.com/EdenGuild",
+    "sources": "https://github.com/EdenGuild/EdenMod",
+    "issues": "https://github.com/EdenGuild/EdenMod/issues"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "environment": "client",
   "entrypoints": {
     "client": ["tel.eden.mod.EdenModClient"],
@@ -30,5 +32,12 @@
   "suggests": {
     "wynntils": "*",
     "modmenu": "*"
+  },
+  "custom": {
+    "modmenu": {
+      "links": {
+        "modmenu.discord": "https://discord.gg/P4bss3w"
+      }
+    }
   }
 }

@@ -129,6 +129,7 @@ public final class EdenModClient implements ClientModInitializer {
     private volatile UpdateInfo pendingUpdate;
     private volatile boolean updateChecked;
     private volatile boolean updateStaged;
+    private volatile boolean pendingUpdateNotification;
     // Set on game join, sent once the bridge connects, cleared on send/disconnect, so
     // a "logged in" notice fires per game session (not on every WS reconnect).
     private volatile boolean loginPending;
@@ -213,6 +214,13 @@ public final class EdenModClient implements ClientModInitializer {
     private void onClientTick(Minecraft client) {
         while (openConfigKey.consumeClick()) {
             client.setScreen(new BridgeConfigScreen(client.screen, this));
+        }
+        if (pendingUpdateNotification && client.player != null) {
+            pendingUpdateNotification = false;
+            UpdateInfo update = pendingUpdate;
+            if (update != null) {
+                display(() -> DiscordChatFormatter.updateAvailable(update.version(), update.pageUrl()));
+            }
         }
     }
 
@@ -324,7 +332,7 @@ public final class EdenModClient implements ClientModInitializer {
         updateChecked = true;
         Thread thread = new Thread(() -> updateChecker.check().ifPresent(update -> {
             pendingUpdate = update;
-            display(() -> DiscordChatFormatter.updateAvailable(update.version(), update.pageUrl()));
+            pendingUpdateNotification = true;
         }), "edenmod-update-check");
         thread.setDaemon(true);
         thread.start();
