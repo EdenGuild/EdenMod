@@ -3,6 +3,7 @@ package tel.eden.mod.chat;
 import tel.eden.mod.net.PartyInfo;
 import java.util.List;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
@@ -59,7 +60,7 @@ public final class PartyFormatter {
         return line(body);
     }
 
-    /** "Party #id (<raid>) is full!" */
+    /** "Party #id (<raid>) is full!  [Create party]" (the button shows for the host). */
     public static Component partyFull(PartyInfo party) {
         MutableComponent body = Component.empty()
                 .append(Component.literal("Party #" + party.id() + " ").withStyle(ChatFormatting.GOLD))
@@ -67,7 +68,29 @@ public final class PartyFormatter {
                 .append(Component.literal("is full! ").withStyle(ChatFormatting.GREEN))
                 .append(Component.literal(String.join(", ", party.members()))
                         .withStyle(ChatFormatting.GRAY));
+        // Offer the host a one-click "make the in-game party" prompt.
+        String self = localName();
+        if (self != null && self.equalsIgnoreCase(party.host()) && !party.members().isEmpty()) {
+            body.append(Component.literal("  ")).append(createButton(party));
+        }
         return line(body);
+    }
+
+    /** Clickable that runs {@code /eden party makeingame <igns...>} to form the in-game party. */
+    private static Component createButton(PartyInfo party) {
+        Style style = Style.EMPTY
+                .withColor(ChatFormatting.GOLD)
+                .withUnderlined(true)
+                .withClickEvent(new ClickEvent.RunCommand(
+                        "/eden party makeingame " + String.join(" ", party.members())))
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal(
+                        "Click to create the in-game party and invite everyone")));
+        return Component.literal("[Create party]").setStyle(style);
+    }
+
+    private static String localName() {
+        Minecraft mc = Minecraft.getInstance();
+        return mc.player != null ? mc.player.getGameProfile().name() : null;
     }
 
     /** A header plus one clickable line per open party (the {@code /eden party list} reply). */

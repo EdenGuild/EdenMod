@@ -41,12 +41,16 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -88,6 +92,15 @@ public final class EdenModClient implements ClientModInitializer {
         t.setDaemon(true);
         return t;
     });
+    // Spaces out the "party create" + each "party <ign>" invite so Wynncraft has time
+    // to register the new party before the invites land.
+    private static final long PARTY_COMMAND_DELAY_MS = 400L;
+    private final ScheduledExecutorService partyCommandExecutor =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "edenmod-party-cmd");
+                t.setDaemon(true);
+                return t;
+            });
     // Deterministic per-occurrence index so rapid identical bank events stay distinct.
     // Short window: only the current burst counts, so stale earlier deposits can't
     // make different clients assign divergent seqs (which duplicated Discord posts).
@@ -199,7 +212,7 @@ public final class EdenModClient implements ClientModInitializer {
         // tunnel URL changes and the user re-links); otherwise a stale client can
         // get stuck retrying the old URL forever.
         if (socket != null) {
-            if (config.backendBaseUrl.equals(socketUrl) && config.jwt().equals(socketJwt)) {
+            if (config.backendBaseUrl.equals(socketUrl) && config.jwt.equals(socketJwt)) {
                 return;
             }
             socket.close();
@@ -208,7 +221,7 @@ public final class EdenModClient implements ClientModInitializer {
         try {
             socket = BridgeWebSocketClient.create(
                     config.backendBaseUrl,
-                    config.jwt(),
+                    config.jwt,
                     new BridgeWebSocketClient.MessageSink() {
                         @Override
                         public void onDiscordMessage(
@@ -267,7 +280,7 @@ public final class EdenModClient implements ClientModInitializer {
                     },
                     this::onBridgeConnected);
             socketUrl = config.backendBaseUrl;
-            socketJwt = config.jwt();
+            socketJwt = config.jwt;
             socket.start();
         } catch (IllegalArgumentException e) {
             LOGGER.warn("Not connecting: {}", e.getMessage());
@@ -397,7 +410,46 @@ public final class EdenModClient implements ClientModInitializer {
                         .then(ClientCommandManager.literal("on")
                                 .executes(ctx -> partyAnnounce(ctx.getSource(), true)))
                         .then(ClientCommandManager.literal("off")
-                                .executes(ctx -> partyAnnounce(ctx.getSource(), false))));
+                                .executes(ctx -> partyAnnounce(ctx.getSource(), false))))
+                // Driven by the "[Create party]" prompt shown when a party fills: runs
+                // /party create then invites each listed member in-game.
+                .then(ClientCommandManager.literal("makeingame")
+                        .then(ClientCommandManager.argument("members", StringArgumentType.greedyString())
+                                .executes(ctx -> makeInGameParty(
+                                        ctx.getSource(), StringArgumentType.getString(ctx, "members")))));
+    }
+
+    /** Run {@code /party create} then {@code /party <ign>} for each member except yourself. */
+    private int makeInGameParty(FabricClientCommandSource source, String membersArg) {
+        String self = playerName();
+        List<String> invites = new ArrayList<>();
+        for (String name : membersArg.trim().split("\\s+")) {
+            if (!name.isEmpty() && (self == null || !name.equalsIgnoreCase(self))) {
+                invites.add(name);
+            }
+        }
+        sendServerCommandLater("party create", 0L);
+        long delay = PARTY_COMMAND_DELAY_MS;
+        for (String ign : invites) {
+            sendServerCommandLater("party " + ign, delay);
+            delay += PARTY_COMMAND_DELAY_MS;
+        }
+        source.sendFeedback(PartyFormatter.feedback(
+                "Creating your in-game party and inviting " + invites.size() + " player(s)..."));
+        return 1;
+    }
+
+    /** Send one server command after {@code delayMs}, on the client thread. */
+    private void sendServerCommandLater(String command, long delayMs) {
+        partyCommandExecutor.schedule(
+                () -> Minecraft.getInstance().execute(() -> {
+                    var connection = Minecraft.getInstance().getConnection();
+                    if (connection != null) {
+                        connection.sendCommand(command);
+                    }
+                }),
+                delayMs,
+                TimeUnit.MILLISECONDS);
     }
 
     private LiteralArgumentBuilder<FabricClientCommandSource> raidLiteral(String alias, String raid) {
@@ -733,7 +785,7 @@ public final class EdenModClient implements ClientModInitializer {
         new AuthFlow().begin(config.backendBaseUrl, new AuthFlow.Callback() {
             @Override
             public void onSuccess(String jwt, long expiresAt) {
-                config.setJwt(jwt);
+                config.jwt = jwt;
                 config.jwtExpiresAt = expiresAt;
                 config.save();
                 Minecraft.getInstance().execute(() -> {

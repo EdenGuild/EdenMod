@@ -33,17 +33,10 @@ public final class BridgeConfig {
     /** Public HTTPS base URL of the EdenBot backend (e.g. https://eden.example.com). */
     public String backendBaseUrl = DEFAULT_BACKEND_URL;
 
-    /**
-     * Backend-signed JWT as persisted to disk: encrypted at rest (see
-     * {@link TokenCipher}). This field is for (de)serialization only — read the live
-     * token via {@link #jwt()}, never this field directly.
-     */
-    private String jwt = "";
+    /** Backend-signed JWT obtained from the link flow; empty until linked. */
+    public String jwt = "";
 
-    /** Decrypted JWT held in memory for the bridge client; never persisted. */
-    private transient String jwtPlain = "";
-
-    /** Unix epoch seconds at which the JWT expires (0 when unknown). */
+    /** Unix epoch seconds at which {@link #jwt} expires (0 when unknown). */
     public long jwtExpiresAt = 0L;
 
     /** Whether the bridge should connect while on Wynncraft. */
@@ -63,16 +56,6 @@ public final class BridgeConfig {
      */
     public boolean relayItemCards = true;
 
-    /** The decrypted backend JWT, or "" when unlinked. */
-    public String jwt() {
-        return jwtPlain;
-    }
-
-    /** Set the backend JWT; it is encrypted on the next {@link #save()}. */
-    public void setJwt(String token) {
-        this.jwtPlain = token == null ? "" : token;
-    }
-
     /** Load the config from disk, or return defaults (and write them) if absent. */
     public static BridgeConfig load() {
         if (Files.isRegularFile(PATH)) {
@@ -80,7 +63,6 @@ public final class BridgeConfig {
                 String json = Files.readString(PATH, StandardCharsets.UTF_8);
                 BridgeConfig config = GSON.fromJson(json, BridgeConfig.class);
                 if (config != null) {
-                    config.jwtPlain = TokenCipher.decrypt(config.jwt);
                     if (config.backendBaseUrl == null || config.backendBaseUrl.isBlank()) {
                         config.backendBaseUrl = DEFAULT_BACKEND_URL;
                     }
@@ -95,10 +77,9 @@ public final class BridgeConfig {
         return fresh;
     }
 
-    /** Persist this config to disk (the JWT is encrypted at rest). */
+    /** Persist this config to disk. */
     public synchronized void save() {
         try {
-            this.jwt = TokenCipher.encrypt(this.jwtPlain);
             Files.createDirectories(PATH.getParent());
             Files.writeString(PATH, GSON.toJson(this), StandardCharsets.UTF_8);
         } catch (IOException e) {
@@ -108,6 +89,6 @@ public final class BridgeConfig {
 
     /** Whether we currently hold a non-expired JWT. */
     public boolean hasValidJwt() {
-        return !jwtPlain.isEmpty() && jwtExpiresAt > (System.currentTimeMillis() / 1000L);
+        return !jwt.isEmpty() && jwtExpiresAt > (System.currentTimeMillis() / 1000L);
     }
 }
