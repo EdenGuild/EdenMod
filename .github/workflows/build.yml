@@ -32,14 +32,14 @@ jobs:
       - name: Stage release jar
         id: jar
         run: |
-          jar=$(ls build/libs/eden-bridge-*.jar | grep -v -- '-sources' | head -n1)
+          jar=$(ls build/libs/edenmod-*.jar | grep -v -- '-sources' | head -n1)
           echo "path=$jar" >> "$GITHUB_OUTPUT"
           echo "Built $jar"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: eden-bridge-jar
+          name: edenmod-jar
           path: ${{ steps.jar.outputs.path }}
 
       # On a version tag (e.g. v1.0.0), publish a GitHub Release with the jar attached.
