@@ -3,11 +3,10 @@ name: build
 on:
   push:
     branches: [master]
-    tags: ['v*']
   pull_request:
 
 permissions:
-  contents: write          # needed to create a Release on tag pushes
+  contents: write          # needed to create the tag + Release
 
 jobs:
   build:
@@ -42,10 +41,39 @@ jobs:
           name: edenmod-jar
           path: ${{ steps.jar.outputs.path }}
 
-      # On a version tag (e.g. v1.0.0), publish a GitHub Release with the jar attached.
+      # --- Auto-release on a version bump -------------------------------------
+      # On master, read mod_version from gradle.properties. If no release with the
+      # matching tag (v<version>) exists yet, tag this commit and publish a Release
+      # with the jar. So bumping the version in gradle.properties and pushing is all
+      # it takes to cut a release — no manual `git tag` needed. Re-pushing without a
+      # bump just rebuilds (the release already exists, so it is skipped).
+      - name: Read mod version
+        id: version
+        if: github.ref == 'refs/heads/master'
+        run: |
+          v=$(grep -E '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          echo "Mod version: $v"
+
+      - name: Check whether the release already exists
+        id: release
+        if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ steps.version.outputs.tag }} already exists — skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No release for ${{ steps.version.outputs.tag }} yet — will publish."
+          fi
+
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref == 'refs/heads/master' && steps.release.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           files: ${{ steps.jar.outputs.path }}
           generate_release_notes: true
