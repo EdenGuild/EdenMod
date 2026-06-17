@@ -1,28 +1,10 @@
-# Eden Bridge — Fabric mod
+# EdenMod
 
 A client-side Minecraft **1.21.11** Fabric mod that powers the live Discord ↔
 in-game guild-chat bridge for the Eden guild. It captures Wynncraft guild chat,
-forwards it to the **Eden Bot** backend (its own repository) over an authenticated
+forwards it to the **EdenBot** backend over an authenticated
 WebSocket, and renders relayed Discord messages in-game. Account linking uses
 Wynncraft v3 OAuth2.
-
-## Toolchain
-
-Verified against the Fabric meta endpoints (`meta.fabricmc.net`) and Modrinth on
-2026-06-10. Pinned in [`gradle.properties`](gradle.properties):
-
-| Component      | Version            |
-| -------------- | ------------------ |
-| Minecraft      | 1.21.11            |
-| Fabric Loom    | 1.17.8             |
-| Fabric Loader  | 0.19.3             |
-| Fabric API     | 0.141.4+1.21.11    |
-| Mappings       | Official Mojang    |
-| Java           | 21                 |
-
-> Mojang official mappings are used so the in-game names match the spec exactly
-> (`ClientPacketListener#handleSystemChat`). Wynntils is an *optional* dependency
-> (used for nickname/rank info if present) — the mod never hard-requires it.
 
 ## Build
 
@@ -32,42 +14,26 @@ Requires JDK 21 on your `PATH`.
 ./gradlew build        # Windows: gradlew.bat build
 ```
 
-The installable jar is written to `build/libs/eden-bridge-1.0.0.jar` (ignore the
-`-sources` jar).
-
-> The Gradle wrapper (9.5.1, required by Loom 1.17.8) is committed. If the wrapper
-> jar is ever missing, regenerate it with a local Gradle:
-> `gradle wrapper --gradle-version 9.5.1`.
-
-## Install
-
-1. Install [Fabric Loader](https://fabricmc.net/use/installer/) for Minecraft
-   1.21.11.
-2. Put **Fabric API** (`fabric-api-0.141.4+1.21.11.jar`) and
-   `eden-bridge-1.0.0.jar` in your `mods/` folder.
-3. Launch the 1.21.11 Fabric profile.
+The installable jar is then at `build/libs/edenmod-*.jar`.
 
 ## Usage
 
 1. Press **B** (rebindable in Controls, or open the config from
    [Mod Menu](https://modrinth.com/mod/modmenu) if installed) to open the Eden
    Bridge screen.
-2. Enter the backend base URL (the `PUBLIC_BASE_URL` of the Eden Bot deployment,
-   e.g. `https://eden.example.com`) and click **Link account**.
+2. Click **Link account** (you can also change the backend url here, if needed).
 3. Your browser opens the Wynncraft authorization page; approve it. When it says
    "Linked", return to Minecraft.
 4. Join Wynncraft. While you are on a `*.wynncraft.com` server and linked, guild
-   chat is bridged both ways automatically. Relayed Discord messages render in
-   chat styled to match native guild chat — a guild-emblem shield, a green
-   `discord` pill, then `author: message`.
+   chat is bridged both ways automatically.
 
-Config persists to `config/eden-bridge.json`. The bridge only runs on Wynncraft
+Config persists to `config/edenmod.json`. The bridge only runs on Wynncraft
 servers and tears down when you leave; switching Minecraft accounts drops the
 session so one account's token cannot be reused by another.
 
 ### In-game commands
 
-These are available in Minecraft once linked (type them in chat):
+These are available in Minecraft once linked:
 
 | Command | What it does |
 | ------- | ------------ |

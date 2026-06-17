@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "edenmod",
+  "version": "${version}",
+  "name": "EdenMod",
+  "description": "EdenMod — the companion mod for members of the Eden Wynncraft Guild.",
+  "authors": ["Eden Guild"],
+  "icon": "assets/edenmod/icon.png",
+  "contact": {
+    "homepage": "https://github.com/EdenGuild"
+  },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["tel.eden.mod.EdenModClient"],
+    "modmenu": ["tel.eden.mod.gui.EdenModMenu"]
+  },
+  "mixins": [
+    {
+      "config": "edenmod.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "wynntils": "*",
+    "modmenu": "*"
+  }
+}

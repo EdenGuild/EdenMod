@@ -10,12 +10,17 @@ base {
     archivesName = project.archives_base_name
 }
 
+sourceSets {
+    main {
+        java { srcDirs = ['src'] }
+        resources { srcDirs = ['resources'] }
+    }
+}
+
 loom {
     mixin {
-        // Generate a mixin refmap so the Mojmap-named @Inject targets are mapped
-        // to intermediary names at runtime (production environment).
         useLegacyMixinAp = true
-        defaultRefmapName = "eden-bridge.refmap.json"
+        defaultRefmapName = "edenmod.refmap.json"
     }
 }
 
