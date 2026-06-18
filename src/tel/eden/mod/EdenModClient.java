@@ -176,8 +176,12 @@ public final class EdenModClient implements ClientModInitializer {
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			loginPending = true;
+			// Capture whether this server is Wynncraft before evaluateGating() may call
+			// disconnect(), which clears onWynncraft even when the player is still on
+			// Wynncraft (e.g. expired JWT). remindIfUnlinked needs the real server state.
+			boolean joinedWynncraft = client.getSingleplayerServer() == null && client.getCurrentServer() != null && Wynncraft.isWynncraft(client.getCurrentServer().ip);
 			evaluateGating(client);
-			remindIfUnlinked();
+			remindIfUnlinked(joinedWynncraft);
 			checkForUpdateOnce();
 			checkTokenRenewal();
 			if (onWynncraft) {
@@ -187,7 +191,7 @@ public final class EdenModClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> disconnect());
 		ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) -> {
-			dispatcher.register(ClientCommandManager.literal("eden").then(ClientCommandManager.literal("open").executes(ctx -> {
+			dispatcher.register(ClientCommandManager.literal("eden").then(ClientCommandManager.literal("config").executes(ctx -> {
 				Minecraft mc = Minecraft.getInstance();
 				mc.execute(() -> mc.setScreen(new BridgeConfigScreen(mc.screen, EdenModClient.instance())));
 				return 1;
@@ -335,13 +339,13 @@ public final class EdenModClient implements ClientModInitializer {
 	/** A clickable "[B]" button (or whatever key is bound) that opens the config screen. */
 	private Component openConfigButton() {
 		String keyName = openConfigKey.getTranslatedKeyMessage().getString();
-		Style style = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden open")).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open EdenMod settings")));
+		Style style = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden config")).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open EdenMod settings")));
 		return Component.literal("[" + keyName + "]").setStyle(style);
 	}
 
 	/** On login, nudge players who haven't linked yet to do so. */
-	private void remindIfUnlinked() {
-		if (!onWynncraft || !config.enabled)
+	private void remindIfUnlinked(boolean isOnWynncraft) {
+		if (!isOnWynncraft || !config.enabled)
 			return;
 		Component btn = openConfigButton();
 		if (config.jwt.isEmpty()) {
@@ -613,7 +617,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden open", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party announce on|off", "toggle the party feed"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party announce on|off", "toggle the party feed"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
 
 	/** Print the in-game command list client-side. */
 	private void showHelp(FabricClientCommandSource source) {
