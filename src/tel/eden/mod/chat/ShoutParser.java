@@ -35,7 +35,13 @@ public final class ShoutParser {
 		if (!matcher.matches()) {
 			return Optional.empty();
 		}
-		return Optional.of(resolve(message, matcher.group(1)) + " shouts: " + matcher.group(2).trim());
+		String body = stripLinkSchemes(matcher.group(2).trim());
+		return Optional.of(resolve(message, matcher.group(1)) + " shouts: " + body);
+	}
+
+	/** Strip http(s):// from any links so Discord doesn't auto-embed them when relayed. */
+	private static String stripLinkSchemes(String text) {
+		return text.replaceAll("(?i)https?://", "");
 	}
 
 	/** Real account name from hover, else the displayed name minus any "/nick". */
