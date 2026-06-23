@@ -35,8 +35,7 @@ public final class ShoutParser {
 	 * Used to suppress that preview so an unsent shout isn't relayed.
 	 */
 	public static boolean isComposePrompt(Component message) {
-		return message != null
-			&& message.getString().toLowerCase(Locale.ROOT).contains("would like to display");
+		return message != null && message.getString().toLowerCase(Locale.ROOT).contains("would like to display");
 	}
 
 	/** Parse a shout into its bridge-chat line ("<name> shouts: <message>"), if it is one. */
