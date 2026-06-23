@@ -32,7 +32,7 @@ import net.minecraft.resources.Identifier;
 public final class DiscordChatFormatter {
 	private static final FontDescription PILL_FONT = new FontDescription.Resource(Identifier.parse("banner/pill"));
 	private static final FontDescription PREFIX_FONT = new FontDescription.Resource(Identifier.parse("chat/prefix"));
-	private static final Style PREFIX_STYLE = Style.EMPTY.withFont(PREFIX_FONT).withColor(ChatFormatting.GREEN);
+	private static final Style PREFIX_STYLE = Style.EMPTY.withFont(PREFIX_FONT).withColor(ChatFormatting.AQUA);
 
 	// banner/pill font: left cap, lowercase letters from U+E030, fill spacer, right cap.
 	private static final int PILL_LEFT_CAP = 0xE060;
@@ -76,9 +76,9 @@ public final class DiscordChatFormatter {
 		}
 	}
 
-	/** A green client-side notice that a bridge user has logged in. */
+	/** A cyan client-side notice that a bridge user has logged in. */
 	public static Component loginNotice(String username) {
-		return Component.empty().append(prefix(SHIELD)).append(Component.literal(username + " has logged in!").withStyle(ChatFormatting.GREEN));
+		return Component.empty().append(prefix(SHIELD)).append(Component.literal(username + " has logged in!").withStyle(ChatFormatting.AQUA));
 	}
 
 	/** A red client-side notice that a bridge user has fully logged out. */
@@ -86,9 +86,9 @@ public final class DiscordChatFormatter {
 		return Component.empty().append(prefix(SHIELD)).append(Component.literal(username + " has logged out!").withStyle(ChatFormatting.RED));
 	}
 
-	/** A green client-side notice that this account just linked to the bridge. */
+	/** A cyan client-side notice that this account just linked to the bridge. */
 	public static Component linkSuccess() {
-		return Component.empty().append(prefix(SHIELD)).append(Component.literal("Successfully linked your account to the Eden bridge!").withStyle(ChatFormatting.GREEN));
+		return Component.empty().append(prefix(SHIELD)).append(Component.literal("Successfully linked your account to the Eden bridge!").withStyle(ChatFormatting.AQUA));
 	}
 
 	/** A gold client-side reminder shown on login when the account is not yet linked. */
@@ -177,7 +177,7 @@ public final class DiscordChatFormatter {
 
 	/** The "replyTo (excerpt)" segment: name in green, inline quote gray, full quote on hover. */
 	private static MutableComponent replyTarget(String replyTo, String replyExcerpt) {
-		MutableComponent segment = Component.literal(replyTo).withStyle(ChatFormatting.GREEN);
+		MutableComponent segment = Component.literal(replyTo).withStyle(ChatFormatting.AQUA);
 		String quote = replyExcerpt == null ? "" : ChatText.normalize(replyExcerpt);
 		if (!quote.isEmpty()) {
 			String shown = quote.length() > EXCERPT_MAX ? quote.substring(0, EXCERPT_MAX).strip() + "…" : quote;
@@ -194,14 +194,14 @@ public final class DiscordChatFormatter {
 		int last = 0;
 		while (matcher.find()) {
 			if (matcher.start() > last) {
-				out.append(Component.literal(content.substring(last, matcher.start())).withStyle(ChatFormatting.GREEN));
+				out.append(Component.literal(content.substring(last, matcher.start())).withStyle(ChatFormatting.AQUA));
 			}
 			String url = matcher.group();
 			out.append(Component.literal(url).withStyle(linkStyle(url)));
 			last = matcher.end();
 		}
 		if (last < content.length()) {
-			out.append(Component.literal(content.substring(last)).withStyle(ChatFormatting.GREEN));
+			out.append(Component.literal(content.substring(last)).withStyle(ChatFormatting.AQUA));
 		}
 		return out;
 	}
@@ -212,7 +212,7 @@ public final class DiscordChatFormatter {
 			return base.withClickEvent(new ClickEvent.OpenUrl(URI.create(url))).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open " + url)));
 		} catch (IllegalArgumentException e) {
 			// Not a valid URI after all — show it plainly rather than as a dead link.
-			return Style.EMPTY.withColor(ChatFormatting.GREEN);
+			return Style.EMPTY.withColor(ChatFormatting.AQUA);
 		}
 	}
 

@@ -318,6 +318,25 @@ public final class BridgeWebSocketClient {
 		current.sendText(obj.toString(), true);
 	}
 
+	/** Send a parsed quick reaction event (prompt, success, or failed response). */
+	public void sendReaction(String type, String player, String content, String details) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "reaction");
+		obj.addProperty("reactionType", type);
+		if (player != null && !player.isEmpty()) {
+			obj.addProperty("player", player);
+		}
+		obj.addProperty("content", content);
+		if (details != null && !details.isEmpty()) {
+			obj.addProperty("details", details);
+		}
+		current.sendText(obj.toString(), true);
+	}
+
 	/** Mirror a guild flavour announcement (weekly objective/boost) into bridge chat. */
 	public void sendGuildAnnounce(String message) {
 		WebSocket current = socket;

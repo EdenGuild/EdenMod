@@ -22,6 +22,7 @@ import tel.eden.mod.chat.RaidCompletion;
 import tel.eden.mod.chat.RaidCompletionParser;
 import tel.eden.mod.chat.RankChange;
 import tel.eden.mod.chat.RankChangeParser;
+import tel.eden.mod.chat.ReactionsParser;
 import tel.eden.mod.chat.ShoutParser;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.gui.BridgeConfigScreen;
@@ -37,6 +38,7 @@ import tel.eden.mod.update.UpdateChecker;
 import tel.eden.mod.update.UpdateInfo;
 import tel.eden.mod.update.UpdateInstaller;
 import tel.eden.mod.util.Wynncraft;
+import tel.eden.mod.util.WynntilsChatBridge;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -94,6 +96,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private final ChatRelay guildLevelUpRelay = new ChatRelay();
 	private final ChatRelay shoutRelay = new ChatRelay();
 	private final ChatRelay annihilationRelay = new ChatRelay();
+	private final ChatRelay reactionRelay = new ChatRelay();
 	private final ChatRelay itemCardRelay = new ChatRelay();
 	// Decoding (Wynntils reflection) + image rendering run off the game thread.
 	private final ExecutorService itemCardExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -353,6 +356,13 @@ public final class EdenModClient implements ClientModInitializer {
 				@Override
 				public void onPillMessage(String label, String content) {
 					display(() -> DiscordChatFormatter.pill(label, content));
+					// Relay REACTIONS events back to the guild tab so they appear in Discord.
+					BridgeWebSocketClient current = socket;
+					if (current != null && "REACTIONS".equalsIgnoreCase(label)) {
+						if (reactionRelay.shouldSend(new CapturedMessage("reactions", label, content))) {
+							current.sendReaction("pill", label, content, "");
+						}
+					}
 				}
 			}, this::onBridgeConnected);
 			socketJwt = config.jwt;
@@ -804,6 +814,16 @@ public final class EdenModClient implements ClientModInitializer {
 			}
 			return;
 		}
+		// Quick reactions (guesses, dice rolls, coin flips) captured from guild chat.
+		Optional<ReactionsParser.ReactionEvent> reaction = ReactionsParser.parse(message);
+		if (reaction.isPresent()) {
+			ReactionsParser.ReactionEvent event = reaction.get();
+			String key = event.type() + "|" + event.player() + "|" + event.content();
+			if (reactionRelay.shouldSend(new CapturedMessage(event.player(), event.type(), event.content()))) {
+				current.sendReaction(event.type(), event.player(), event.content(), event.details());
+			}
+			return;
+		}
 		// Level-up announcements, relayed to the bridge chat ONLY for Eden members
 		// (the member list is fetched from the API on join and refreshed periodically).
 		Optional<LevelUp> levelUp = LevelUpParser.parse(message);
@@ -902,12 +922,18 @@ public final class EdenModClient implements ClientModInitializer {
 	 * Build and show a client-side chat line on the game thread. The component is
 	 * built inside {@code execute} because the formatter touches the font/text
 	 * splitter, which must run on the client thread (not the WebSocket thread).
+	 * If Wynntils chat tabs are enabled, the message is routed to the focused tab;
+	 * otherwise it displays in vanilla chat.
 	 */
 	private void display(java.util.function.Supplier<Component> builder) {
 		Minecraft client = Minecraft.getInstance();
 		client.execute(() -> {
 			if (client.player != null) {
-				client.player.displayClientMessage(builder.get(), false);
+				Component component = builder.get();
+				// Try to send via Wynntils chat tabs first
+				WynntilsChatBridge.sendToTab(component);
+				// Also send to vanilla chat as a fallback/companion
+				client.player.displayClientMessage(component, false);
 			}
 		});
 	}
