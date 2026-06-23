@@ -6,14 +6,7 @@ import java.util.regex.Pattern;
 import net.minecraft.network.chat.Component;
 
 /**
- * Detects Wynncraft guild reactions (Quick Reactions events) in system chat, e.g.:
- *
- * <pre>
- *   REACTIONS » Solve 374 - 71 first to win! (answer in guild chat)
- *   ✅ neyuo got it in 4.0s! The answer was 303. (+1 point — 7 total)
- *   ❌ iceblue failed! The answer was 303.
- * </pre>
- *
+ * Detects Wynncraft guild reactions (Quick Reactions events) in system chat
  * <p>These are typically gold-pill system messages from the bridge that also appear
  * in guild chat. This parser captures them for relaying through the bridge chat channel.
  */
