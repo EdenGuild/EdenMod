@@ -257,6 +257,18 @@ public final class BridgeWebSocketClient {
 		sendType("diceroll");
 	}
 
+	/** Ask the backend for a magic 8-ball answer to {@code question}, announced to everyone. */
+	public void send8ball(String question) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "8ball");
+		obj.addProperty("question", question);
+		current.sendText(obj.toString(), true);
+	}
+
 	/**
 	 * Tell the server whether this client is active in a game world ({@code true})
 	 * or dormant (in queue, hub, or AFK with no recent guild activity — {@code false}).

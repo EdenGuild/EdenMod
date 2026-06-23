@@ -95,6 +95,10 @@ public final class EdenModClient implements ClientModInitializer {
 	private final ChatRelay shoutRelay = new ChatRelay();
 	private final ChatRelay annihilationRelay = new ChatRelay();
 	private final ChatRelay itemCardRelay = new ChatRelay();
+	// Single-shot suppression of the shout-composition preview, armed by the compose prompt.
+	private long shoutPreviewSuppressUntil;
+	// Client-side per-command cooldowns for the local player's /eden cf|diceroll|8ball.
+	private final java.util.Map<String, Long> gameCommandReadyAt = new java.util.HashMap<>();
 	// Decoding (Wynntils reflection) + image rendering run off the game thread.
 	private final ExecutorService itemCardExecutor = Executors.newSingleThreadExecutor(r -> {
 		Thread t = new Thread(r, "edenmod-item-card");
@@ -210,7 +214,10 @@ public final class EdenModClient implements ClientModInitializer {
 			})).then(ClientCommandManager.literal("diceroll").executes(ctx -> {
 				requestDiceroll(ctx.getSource());
 				return 1;
-			})).then(buildPartyCommand()).then(buildAnnihilationCommand()).then(ClientCommandManager.literal("update").executes(ctx -> {
+			})).then(ClientCommandManager.literal("8ball").then(ClientCommandManager.argument("question", StringArgumentType.greedyString()).executes(ctx -> {
+				request8ball(ctx.getSource(), StringArgumentType.getString(ctx, "question"));
+				return 1;
+			}))).then(buildPartyCommand()).then(buildAnnihilationCommand()).then(ClientCommandManager.literal("update").executes(ctx -> {
 				updatePrompt(ctx.getSource());
 				return 1;
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
@@ -488,6 +495,9 @@ public final class EdenModClient implements ClientModInitializer {
 			source.sendFeedback(notConnected());
 			return;
 		}
+		if (onGameCommandCooldown(source, "cf")) {
+			return;
+		}
 		current.sendCoinflip();
 	}
 
@@ -497,7 +507,35 @@ public final class EdenModClient implements ClientModInitializer {
 			source.sendFeedback(notConnected());
 			return;
 		}
+		if (onGameCommandCooldown(source, "diceroll")) {
+			return;
+		}
 		current.sendDiceroll();
+	}
+
+	private void request8ball(FabricClientCommandSource source, String question) {
+		BridgeWebSocketClient current = socket;
+		if (current == null) {
+			source.sendFeedback(notConnected());
+			return;
+		}
+		if (onGameCommandCooldown(source, "8ball")) {
+			return;
+		}
+		current.send8ball(question);
+	}
+
+	/** True (with feedback) if {@code command} is still cooling down; otherwise starts a new window. */
+	private boolean onGameCommandCooldown(FabricClientCommandSource source, String command) {
+		long now = System.currentTimeMillis();
+		Long readyAt = gameCommandReadyAt.get(command);
+		if (readyAt != null && now < readyAt) {
+			long secondsLeft = (readyAt - now + 999L) / 1000L;
+			source.sendFeedback(Component.literal("On cooldown — " + secondsLeft + "s left.").withStyle(net.minecraft.ChatFormatting.YELLOW));
+			return true;
+		}
+		gameCommandReadyAt.put(command, now + GAME_COMMAND_COOLDOWN_MS);
+		return false;
 	}
 
 	private void requestAspectsPending(FabricClientCommandSource source) {
@@ -648,6 +686,12 @@ public final class EdenModClient implements ClientModInitializer {
 		return 1;
 	}
 
+	// Suppress a shout preview for this long after the compose prompt (bounds the rare
+	// cancel-before-preview case); the single-shot consume is the real guard.
+	private static final long SHOUT_PREVIEW_WINDOW_MS = 5_000L;
+	// Per-person in-game cooldown for /eden cf|diceroll|8ball.
+	private static final long GAME_COMMAND_COOLDOWN_MS = 60_000L;
+
 	private static Component notConnected() {
 		return Component.literal("Not connected to the Eden bridge.").withStyle(net.minecraft.ChatFormatting.RED);
 	}
@@ -655,7 +699,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden 8ball <question>", "ask the magic 8-ball"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
 
 	/** Print the in-game command list client-side. */
 	private void showHelp(FabricClientCommandSource source) {
@@ -795,9 +839,19 @@ public final class EdenModClient implements ClientModInitializer {
 			}
 			return;
 		}
+		// The compose prompt precedes a live "<name> shouts: ..." preview of an as-yet-unsent
+		// shout; arm a short single-shot so that preview isn't relayed. (Handles the prompt and
+		// preview arriving as separate messages or one bundled component — the check runs first.)
+		if (ShoutParser.isComposePrompt(message)) {
+			shoutPreviewSuppressUntil = System.currentTimeMillis() + SHOUT_PREVIEW_WINDOW_MS;
+		}
 		// Guild shouts, mirrored into the bridge chat channel.
 		Optional<String> shout = ShoutParser.parse(message);
 		if (shout.isPresent()) {
+			if (System.currentTimeMillis() < shoutPreviewSuppressUntil) {
+				shoutPreviewSuppressUntil = 0L; // consume: this is the preview, not a sent shout
+				return;
+			}
 			String text = shout.get();
 			if (shoutRelay.shouldSend(new CapturedMessage("shout", null, text))) {
 				current.sendGuildAnnounce(text);

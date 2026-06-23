@@ -105,7 +105,9 @@ public final class GuildEventParser {
 		}
 		m = ALLIANCE_FORMED.matcher(text);
 		if (m.matches()) {
-			return Optional.of(new GuildEvent("alliance_formed", "", m.group(2).trim()));
+			// Keep the forming guild (group 1) as the actor — it isn't always Eden
+			// ("OtherGuild formed an alliance with Eden"), so the backend must not assume.
+			return Optional.of(new GuildEvent("alliance_formed", m.group(1).trim(), m.group(2).trim()));
 		}
 		return Optional.empty();
 	}

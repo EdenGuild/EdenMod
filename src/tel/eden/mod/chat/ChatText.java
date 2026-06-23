@@ -32,9 +32,19 @@ final class ChatText {
 		String text = text(chars);
 		int start = text.indexOf(displayed);
 		if (start >= 0) {
-			for (int i = start; i < start + displayed.length() && i < chars.size(); i++) {
+			int end = Math.min(start + displayed.length(), chars.size());
+			for (int i = start; i < end; i++) {
 				if (chars.get(i).hover() != null) {
 					return chars.get(i).hover();
+				}
+			}
+			// No hover on the name: a nicked sender's real account name may instead ride
+			// along as the name's shift-click insertion (guild chat relies on this too).
+			String trimmed = displayed.trim();
+			for (int i = start; i < end; i++) {
+				String insertion = chars.get(i).insertion();
+				if (insertion != null && IGN.matcher(insertion).matches() && !insertion.equalsIgnoreCase(trimmed)) {
+					return insertion;
 				}
 			}
 		}
@@ -46,19 +56,20 @@ final class ChatText {
 		List<MetaChar> out = new ArrayList<>();
 		message.visit((style, fragment) -> {
 			String hover = hoverRealName(style);
+			String insertion = style.getInsertion();
 			boolean previousWasSpace = !out.isEmpty() && out.get(out.size() - 1).value() == ' ';
 			for (int index = 0; index < fragment.length();) {
 				int codePoint = fragment.codePointAt(index);
 				index += Character.charCount(codePoint);
 				if (Character.isWhitespace(codePoint) || isIgnorable(codePoint)) {
 					if (!previousWasSpace) {
-						out.add(new MetaChar(' ', hover));
+						out.add(new MetaChar(' ', hover, insertion));
 						previousWasSpace = true;
 					}
 					continue;
 				}
 				for (char ch : Character.toChars(codePoint)) {
-					out.add(new MetaChar(ch, hover));
+					out.add(new MetaChar(ch, hover, insertion));
 				}
 				previousWasSpace = false;
 			}
@@ -88,7 +99,7 @@ final class ChatText {
 		return null;
 	}
 
-	private record MetaChar(char value, String hover) {
+	private record MetaChar(char value, String hover, String insertion) {
 	}
 
 	/**

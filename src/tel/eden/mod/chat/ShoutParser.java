@@ -1,5 +1,6 @@
 package tel.eden.mod.chat;
 
+import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -16,7 +17,9 @@ import net.minecraft.network.chat.Component;
  * custom-font glyph stripped by {@link ChatText#normalize}; the name is hover-resolved.
  */
 public final class ShoutParser {
-	private static final Pattern SHOUT = Pattern.compile("^(.+?)\\s+shouts:\\s+(.+)$");
+	// The name group excludes ':' so a copied shout pasted into another channel — which
+	// always arrives as "<Sender>: <pasted text>" — can't be misread as a real shout.
+	private static final Pattern SHOUT = Pattern.compile("^([^:]+?)\\s+shouts:\\s+(.+)$");
 
 	private ShoutParser() {
 	}
@@ -24,6 +27,16 @@ public final class ShoutParser {
 	/** Cheap keyword gate before the regex/cleanup runs. */
 	public static boolean isCandidate(Component message) {
 		return message != null && message.getString().contains("shouts:");
+	}
+
+	/**
+	 * Whether this is the shout-composition prompt ("Type in chat the message you would
+	 * like to display to the entire server..."), shown just before the live shout preview.
+	 * Used to suppress that preview so an unsent shout isn't relayed.
+	 */
+	public static boolean isComposePrompt(Component message) {
+		return message != null
+			&& message.getString().toLowerCase(Locale.ROOT).contains("would like to display");
 	}
 
 	/** Parse a shout into its bridge-chat line ("<name> shouts: <message>"), if it is one. */
