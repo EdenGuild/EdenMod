@@ -30,7 +30,10 @@ public final class GuildChatParser {
 
 	// Nicknames may contain spaces (e.g. "Emanant Force"); DOTALL so the message
 	// group spans the newlines Wynncraft inserts for long lines.
-	private static final Pattern CHAT_PATTERN = Pattern.compile("^(?:<\\d+>\\s*)?" + "([a-zA-Z0-9_][a-zA-Z0-9_ ]*[a-zA-Z0-9_]|[a-zA-Z0-9_]{3,16})" + "\\s*:\\s*(.*)$", Pattern.DOTALL);
+	// The single-token alternative allows 1 char so a one-letter nickname (e.g. "Real/r")
+	// still splits into name + message; the real username is recovered from hover and must
+	// itself be a valid IGN, so a stray single letter with no hover is dropped downstream.
+	private static final Pattern CHAT_PATTERN = Pattern.compile("^(?:<\\d+>\\s*)?" + "([a-zA-Z0-9_][a-zA-Z0-9_ ]*[a-zA-Z0-9_]|[a-zA-Z0-9_]{1,16})" + "\\s*:\\s*(.*)$", Pattern.DOTALL);
 
 	// "<nick>'s real name is <ign>" (also "<nick>' real name is" for names ending
 	// in s) and the legacy "Real Username: <ign>".

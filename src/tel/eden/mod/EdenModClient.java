@@ -97,8 +97,6 @@ public final class EdenModClient implements ClientModInitializer {
 	private final ChatRelay itemCardRelay = new ChatRelay();
 	// Single-shot suppression of the shout-composition preview, armed by the compose prompt.
 	private long shoutPreviewSuppressUntil;
-	// Client-side per-command cooldowns for the local player's /eden cf|diceroll|8ball.
-	private final java.util.Map<String, Long> gameCommandReadyAt = new java.util.HashMap<>();
 	// Decoding (Wynntils reflection) + image rendering run off the game thread.
 	private final ExecutorService itemCardExecutor = Executors.newSingleThreadExecutor(r -> {
 		Thread t = new Thread(r, "edenmod-item-card");
@@ -359,6 +357,10 @@ public final class EdenModClient implements ClientModInitializer {
 
 				@Override
 				public void onPillMessage(String label, String content) {
+					// Games (cf/diceroll/8ball) ride the "eden" pill; let the user hide them.
+					if (GAMES_PILL_LABEL.equals(label) && !config.showGameMessages) {
+						return;
+					}
 					display(() -> DiscordChatFormatter.pill(label, content));
 				}
 			}, this::onBridgeConnected);
@@ -495,9 +497,6 @@ public final class EdenModClient implements ClientModInitializer {
 			source.sendFeedback(notConnected());
 			return;
 		}
-		if (onGameCommandCooldown(source, "cf")) {
-			return;
-		}
 		current.sendCoinflip();
 	}
 
@@ -505,9 +504,6 @@ public final class EdenModClient implements ClientModInitializer {
 		BridgeWebSocketClient current = socket;
 		if (current == null) {
 			source.sendFeedback(notConnected());
-			return;
-		}
-		if (onGameCommandCooldown(source, "diceroll")) {
 			return;
 		}
 		current.sendDiceroll();
@@ -519,23 +515,7 @@ public final class EdenModClient implements ClientModInitializer {
 			source.sendFeedback(notConnected());
 			return;
 		}
-		if (onGameCommandCooldown(source, "8ball")) {
-			return;
-		}
 		current.send8ball(question);
-	}
-
-	/** True (with feedback) if {@code command} is still cooling down; otherwise starts a new window. */
-	private boolean onGameCommandCooldown(FabricClientCommandSource source, String command) {
-		long now = System.currentTimeMillis();
-		Long readyAt = gameCommandReadyAt.get(command);
-		if (readyAt != null && now < readyAt) {
-			long secondsLeft = (readyAt - now + 999L) / 1000L;
-			source.sendFeedback(Component.literal("On cooldown — " + secondsLeft + "s left.").withStyle(net.minecraft.ChatFormatting.YELLOW));
-			return true;
-		}
-		gameCommandReadyAt.put(command, now + GAME_COMMAND_COOLDOWN_MS);
-		return false;
 	}
 
 	private void requestAspectsPending(FabricClientCommandSource source) {
@@ -689,8 +669,8 @@ public final class EdenModClient implements ClientModInitializer {
 	// Suppress a shout preview for this long after the compose prompt (bounds the rare
 	// cancel-before-preview case); the single-shot consume is the real guard.
 	private static final long SHOUT_PREVIEW_WINDOW_MS = 5_000L;
-	// Per-person in-game cooldown for /eden cf|diceroll|8ball.
-	private static final long GAME_COMMAND_COOLDOWN_MS = 60_000L;
+	// The pill label the bridge games (cf/diceroll/8ball) ride on; hidden by config toggle.
+	private static final String GAMES_PILL_LABEL = "eden";
 
 	private static Component notConnected() {
 		return Component.literal("Not connected to the Eden bridge.").withStyle(net.minecraft.ChatFormatting.RED);
