@@ -37,6 +37,7 @@ import tel.eden.mod.update.UpdateChecker;
 import tel.eden.mod.update.UpdateInfo;
 import tel.eden.mod.update.UpdateInstaller;
 import tel.eden.mod.util.Wynncraft;
+import tel.eden.mod.util.WynntilsChatBridge;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -941,7 +942,10 @@ public final class EdenModClient implements ClientModInitializer {
 		Minecraft client = Minecraft.getInstance();
 		client.execute(() -> {
 			if (client.player != null) {
-				client.player.displayClientMessage(builder.get(), false);
+				Component component = builder.get();
+				if (!WynntilsChatBridge.sendToTab(component)) {
+					client.player.displayClientMessage(component, false);
+				}
 			}
 		});
 	}
