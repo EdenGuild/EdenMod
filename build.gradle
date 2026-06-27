@@ -70,6 +70,7 @@ jar {
 }
 
 spotless {
+    lineEndings 'UNIX'
     java {
         target 'src/**/*.java'
         eclipse().configFile('eclipse-formatter.xml')
