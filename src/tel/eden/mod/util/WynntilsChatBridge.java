@@ -86,30 +86,48 @@ public final class WynntilsChatBridge {
 	}
 
 	/**
-	 * Send the component to the currently focused tab.
+	 * Add the component directly to the Guild tab's ChatComponent, bypassing
+	 * Wynntils' recipient-type matching so the message keeps its original color.
 	 */
 	private static boolean sendToChatTab(Component component) throws Exception {
-		// Get the ChatTabService instance: Services.ChatTab
 		Object chatTabServiceInstance = chatTabField.get(null);
 		if (chatTabServiceInstance == null) {
 			LOGGER.debug("ChatTabService instance is null");
 			return false;
 		}
 
-		// Check if chat tabs are enabled by checking for focused tab
+		// Check if chat tabs are enabled
 		java.lang.reflect.Method getFocusedTab = chatTabServiceClass.getMethod("getFocusedTab");
 		Object focusedTab = getFocusedTab.invoke(chatTabServiceInstance);
 
 		if (focusedTab == null) {
-			return false; // Chat tabs disabled or no tab focused
+			return false;
 		}
 
-		// Call Services.ChatTab.addMessage(component, null, null)
-		// This properly routes the message through Wynntils' chat tab system
-		java.lang.reflect.Method addMessage = chatTabServiceClass.getMethod("addMessage", Component.class, Object.class, Object.class);
-		addMessage.invoke(chatTabServiceInstance, component, null, null);
+		// Get all chat tabs and find the Guild tab
+		java.lang.reflect.Method getChatTabs = chatTabServiceClass.getMethod("getChatTabs");
+		java.util.List<?> tabs = (java.util.List<?>) getChatTabs.invoke(chatTabServiceInstance);
 
-		LOGGER.debug("Message sent to Wynntils chat tab successfully via ChatTabService.addMessage()");
-		return true;
+		for (Object tab : tabs) {
+			java.lang.reflect.Method getName = tab.getClass().getMethod("name");
+			String name = (String) getName.invoke(tab);
+			if ("Guild".equalsIgnoreCase(name) || name.toLowerCase(java.util.Locale.ROOT).contains("guild")) {
+				java.lang.reflect.Method getChatComponent = chatTabServiceClass.getMethod("getChatComponent", tab.getClass());
+				Object optional = getChatComponent.invoke(chatTabServiceInstance, tab);
+				java.lang.reflect.Method isPresent = optional.getClass().getMethod("isPresent");
+				if ((boolean) isPresent.invoke(optional)) {
+					java.lang.reflect.Method get = optional.getClass().getMethod("get");
+					Object chatComponent = get.invoke(optional);
+					// Minecraft's public ChatComponent.addMessage(Component)
+					java.lang.reflect.Method addMsg = chatComponent.getClass().getMethod("addMessage", Component.class);
+					addMsg.invoke(chatComponent, component);
+					LOGGER.debug("Message added directly to '{}' tab", name);
+					return true;
+				}
+			}
+		}
+
+		LOGGER.debug("No Guild tab found among {} tabs", tabs.size());
+		return false;
 	}
 }
