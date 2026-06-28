@@ -20,7 +20,7 @@ import net.minecraft.resources.Identifier;
 
 /**
  * Renders a relayed Discord message for in-game display so it sits flush with
- * native Wynncraft guild chat: a green guild-emblem shield, then a green
+ * native Wynncraft guild chat: a AQUA guild-emblem shield, then a AQUA
  * {@code discord} pill, then {@code author: content}. Long messages wrap with the
  * guild continuation glyph under the shield.
  *
@@ -32,7 +32,7 @@ import net.minecraft.resources.Identifier;
 public final class DiscordChatFormatter {
 	private static final FontDescription PILL_FONT = new FontDescription.Resource(Identifier.parse("banner/pill"));
 	private static final FontDescription PREFIX_FONT = new FontDescription.Resource(Identifier.parse("chat/prefix"));
-	private static final Style PREFIX_STYLE = Style.EMPTY.withFont(PREFIX_FONT).withColor(ChatFormatting.GREEN);
+	private static final Style PREFIX_STYLE = Style.EMPTY.withFont(PREFIX_FONT).withColor(ChatFormatting.AQUA);
 
 	// banner/pill font: left cap, lowercase letters from U+E030, fill spacer, right cap.
 	private static final int PILL_LEFT_CAP = 0xE060;
@@ -64,7 +64,7 @@ public final class DiscordChatFormatter {
 	private DiscordChatFormatter() {
 	}
 
-	/** The green guild-emblem shield prefix, reused by other client-side notices. */
+	/** The AQUA guild-emblem shield prefix, reused by other client-side notices. */
 	public static Component shieldPrefix() {
 		return prefix(SHIELD);
 	}
@@ -76,9 +76,9 @@ public final class DiscordChatFormatter {
 		}
 	}
 
-	/** A green client-side notice that a bridge user has logged in. */
+	/** A cyan client-side notice that a bridge user has logged in. */
 	public static Component loginNotice(String username) {
-		return Component.empty().append(prefix(SHIELD)).append(Component.literal(username + " has logged in!").withStyle(ChatFormatting.GREEN));
+		return Component.empty().append(prefix(SHIELD)).append(Component.literal(username + " has logged in!").withStyle(ChatFormatting.AQUA));
 	}
 
 	/** A red client-side notice that a bridge user has fully logged out. */
@@ -86,9 +86,9 @@ public final class DiscordChatFormatter {
 		return Component.empty().append(prefix(SHIELD)).append(Component.literal(username + " has logged out!").withStyle(ChatFormatting.RED));
 	}
 
-	/** A green client-side notice that this account just linked to the bridge. */
+	/** A cyan client-side notice that this account just linked to the bridge. */
 	public static Component linkSuccess() {
-		return Component.empty().append(prefix(SHIELD)).append(Component.literal("Successfully linked your account to the Eden bridge!").withStyle(ChatFormatting.GREEN));
+		return Component.empty().append(prefix(SHIELD)).append(Component.literal("Successfully linked your account to the Eden bridge!").withStyle(ChatFormatting.AQUA));
 	}
 
 	/** A gold client-side reminder shown on login when the account is not yet linked. */
@@ -103,7 +103,7 @@ public final class DiscordChatFormatter {
 
 	/** "EdenMod — update available (x.y.z)  [Download] [Link]" with clickable actions. */
 	public static Component updateAvailable(String version, String pageUrl) {
-		Style download = Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden update download")).withHoverEvent(new HoverEvent.ShowText(Component.literal("Download it now; it applies when you close the game")));
+		Style download = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden update download")).withHoverEvent(new HoverEvent.ShowText(Component.literal("Download it now; it applies when you close the game")));
 		MutableComponent line = Component.empty().append(prefix(SHIELD)).append(Component.literal("EdenMod — update available (" + version + ")  ").withStyle(ChatFormatting.GOLD)).append(Component.literal("[Download]").setStyle(download));
 		if (pageUrl != null && !pageUrl.isEmpty()) {
 			Style link = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.OpenUrl(URI.create(pageUrl))).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open the release on GitHub")));
@@ -112,7 +112,7 @@ public final class DiscordChatFormatter {
 		return line;
 	}
 
-	/** A green/gold/red client-side notice line with the guild shield prefix. */
+	/** A AQUA/gold/red client-side notice line with the guild shield prefix. */
 	public static Component systemLine(String text, ChatFormatting color) {
 		return Component.empty().append(prefix(SHIELD)).append(Component.literal(text).withStyle(color));
 	}
@@ -120,7 +120,7 @@ public final class DiscordChatFormatter {
 	/** A client-side list of who is currently connected to the bridge. */
 	public static Component onlineList(java.util.List<String> users) {
 		String body = users.isEmpty() ? "No one is online with the bridge." : "Online with the bridge (" + users.size() + "): " + String.join(", ", users);
-		return Component.empty().append(prefix(SHIELD)).append(Component.literal(body).withStyle(ChatFormatting.GREEN));
+		return Component.empty().append(prefix(SHIELD)).append(Component.literal(body).withStyle(ChatFormatting.AQUA));
 	}
 
 	/** A client-side list of who has how many pending aspects (Chiefs' reward helper). */
@@ -129,9 +129,9 @@ public final class DiscordChatFormatter {
 			return Component.empty().append(prefix(SHIELD)).append(Component.literal(error).withStyle(ChatFormatting.RED));
 		}
 		if (entries.isEmpty()) {
-			return Component.empty().append(prefix(SHIELD)).append(Component.literal("No members have pending aspects.").withStyle(ChatFormatting.GREEN));
+			return Component.empty().append(prefix(SHIELD)).append(Component.literal("No members have pending aspects.").withStyle(ChatFormatting.AQUA));
 		}
-		MutableComponent out = Component.empty().append(prefix(SHIELD)).append(Component.literal("Pending aspects (" + entries.size() + "):").withStyle(ChatFormatting.GREEN));
+		MutableComponent out = Component.empty().append(prefix(SHIELD)).append(Component.literal("Pending aspects (" + entries.size() + "):").withStyle(ChatFormatting.AQUA));
 		for (PendingEntry entry : entries) {
 			String command = "/eden gift " + entry.name() + " aspect " + entry.aspects();
 			Style click = Style.EMPTY.withColor(ChatFormatting.YELLOW).withUnderlined(true).withClickEvent(new ClickEvent.SuggestCommand(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to fill: " + command)));
@@ -155,11 +155,11 @@ public final class DiscordChatFormatter {
 	 * message is shown inline (gray) and the full quote appears on hover.
 	 */
 	public static Component format(String author, String content, String replyTo, String replyExcerpt) {
-		MutableComponent body = Component.empty().append(Component.literal(pillLabel("discord")).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(ChatFormatting.GREEN)));
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel("discord")).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(ChatFormatting.AQUA)));
 		if (replyTo != null && !replyTo.isEmpty()) {
-			body.append(Component.literal(" " + author).withStyle(ChatFormatting.GREEN)).append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt)).append(Component.literal(": ").withStyle(ChatFormatting.GREEN));
+			body.append(Component.literal(" " + author).withStyle(ChatFormatting.AQUA)).append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt)).append(Component.literal(": ").withStyle(ChatFormatting.AQUA));
 		} else {
-			body.append(Component.literal(" " + author + ": ").withStyle(ChatFormatting.GREEN));
+			body.append(Component.literal(" " + author + ": ").withStyle(ChatFormatting.AQUA));
 		}
 		body.append(linkify(content));
 		return withGuildPrefix(body);
@@ -168,16 +168,16 @@ public final class DiscordChatFormatter {
 	/**
 	 * Build a gold-pill bridge line (Quick Reactions, {@code /eden cf}/{@code diceroll}):
 	 * a gold pill labelled {@code label}, then the {@code content} in gold. Mirrors
-	 * {@link #format} but in gold rather than the green {@code discord} styling.
+	 * {@link #format} but in gold rather than the AQUA {@code discord} styling.
 	 */
 	public static Component pill(String label, String content) {
 		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(ChatFormatting.GOLD))).append(Component.literal(" " + content).withStyle(ChatFormatting.GOLD));
 		return withGuildPrefix(body);
 	}
 
-	/** The "replyTo (excerpt)" segment: name in green, inline quote gray, full quote on hover. */
+	/** The "replyTo (excerpt)" segment: name in cyan, inline quote gray, full quote on hover. */
 	private static MutableComponent replyTarget(String replyTo, String replyExcerpt) {
-		MutableComponent segment = Component.literal(replyTo).withStyle(ChatFormatting.GREEN);
+		MutableComponent segment = Component.literal(replyTo).withStyle(ChatFormatting.AQUA);
 		String quote = replyExcerpt == null ? "" : ChatText.normalize(replyExcerpt);
 		if (!quote.isEmpty()) {
 			String shown = quote.length() > EXCERPT_MAX ? quote.substring(0, EXCERPT_MAX).strip() + "…" : quote;
@@ -194,14 +194,14 @@ public final class DiscordChatFormatter {
 		int last = 0;
 		while (matcher.find()) {
 			if (matcher.start() > last) {
-				out.append(Component.literal(content.substring(last, matcher.start())).withStyle(ChatFormatting.GREEN));
+				out.append(Component.literal(content.substring(last, matcher.start())).withStyle(ChatFormatting.AQUA));
 			}
 			String url = matcher.group();
 			out.append(Component.literal(url).withStyle(linkStyle(url)));
 			last = matcher.end();
 		}
 		if (last < content.length()) {
-			out.append(Component.literal(content.substring(last)).withStyle(ChatFormatting.GREEN));
+			out.append(Component.literal(content.substring(last)).withStyle(ChatFormatting.AQUA));
 		}
 		return out;
 	}
@@ -212,7 +212,7 @@ public final class DiscordChatFormatter {
 			return base.withClickEvent(new ClickEvent.OpenUrl(URI.create(url))).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open " + url)));
 		} catch (IllegalArgumentException e) {
 			// Not a valid URI after all — show it plainly rather than as a dead link.
-			return Style.EMPTY.withColor(ChatFormatting.GREEN);
+			return Style.EMPTY.withColor(ChatFormatting.AQUA);
 		}
 	}
 
