@@ -155,11 +155,11 @@ public final class DiscordChatFormatter {
 	 * message is shown inline (gray) and the full quote appears on hover.
 	 */
 	public static Component format(String author, String content, String replyTo, String replyExcerpt) {
-		MutableComponent body = Component.empty().append(Component.literal(pillLabel("discord")).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(ChatFormatting.AQUA)));
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel("discord")).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(ChatFormatting.GREEN)));
 		if (replyTo != null && !replyTo.isEmpty()) {
-			body.append(Component.literal(" " + author).withStyle(ChatFormatting.AQUA)).append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt)).append(Component.literal(": ").withStyle(ChatFormatting.AQUA));
+			body.append(Component.literal(" " + author).withStyle(ChatFormatting.GREEN)).append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt)).append(Component.literal(": ").withStyle(ChatFormatting.GREEN));
 		} else {
-			body.append(Component.literal(" " + author + ": ").withStyle(ChatFormatting.AQUA));
+			body.append(Component.literal(" " + author + ": ").withStyle(ChatFormatting.GREEN));
 		}
 		body.append(linkify(content));
 		return withGuildPrefix(body);
@@ -177,7 +177,7 @@ public final class DiscordChatFormatter {
 
 	/** The "replyTo (excerpt)" segment: name in cyan, inline quote gray, full quote on hover. */
 	private static MutableComponent replyTarget(String replyTo, String replyExcerpt) {
-		MutableComponent segment = Component.literal(replyTo).withStyle(ChatFormatting.AQUA);
+		MutableComponent segment = Component.literal(replyTo).withStyle(ChatFormatting.GREEN);
 		String quote = replyExcerpt == null ? "" : ChatText.normalize(replyExcerpt);
 		if (!quote.isEmpty()) {
 			String shown = quote.length() > EXCERPT_MAX ? quote.substring(0, EXCERPT_MAX).strip() + "…" : quote;
@@ -187,32 +187,32 @@ public final class DiscordChatFormatter {
 		return segment;
 	}
 
-	/** Render message text with any http(s) URLs as clickable, underlined aqua links. */
+	/** Render message text with any http(s) URLs as clickable, underlined green links. */
 	private static MutableComponent linkify(String content) {
 		MutableComponent out = Component.empty();
 		Matcher matcher = URL_PATTERN.matcher(content);
 		int last = 0;
 		while (matcher.find()) {
 			if (matcher.start() > last) {
-				out.append(Component.literal(content.substring(last, matcher.start())).withStyle(ChatFormatting.AQUA));
+				out.append(Component.literal(content.substring(last, matcher.start())).withStyle(ChatFormatting.GREEN));
 			}
 			String url = matcher.group();
 			out.append(Component.literal(url).withStyle(linkStyle(url)));
 			last = matcher.end();
 		}
 		if (last < content.length()) {
-			out.append(Component.literal(content.substring(last)).withStyle(ChatFormatting.AQUA));
+			out.append(Component.literal(content.substring(last)).withStyle(ChatFormatting.GREEN));
 		}
 		return out;
 	}
 
 	private static Style linkStyle(String url) {
-		Style base = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true);
+		Style base = Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true);
 		try {
 			return base.withClickEvent(new ClickEvent.OpenUrl(URI.create(url))).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open " + url)));
 		} catch (IllegalArgumentException e) {
 			// Not a valid URI after all — show it plainly rather than as a dead link.
-			return Style.EMPTY.withColor(ChatFormatting.AQUA);
+			return Style.EMPTY.withColor(ChatFormatting.GREEN);
 		}
 	}
 
