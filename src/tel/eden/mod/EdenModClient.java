@@ -1,6 +1,7 @@
 package tel.eden.mod;
 
 import tel.eden.mod.auth.AuthFlow;
+
 import tel.eden.mod.chat.AnnihilationParser;
 import tel.eden.mod.chat.BankEvent;
 import tel.eden.mod.chat.BankEventParser;
