@@ -62,6 +62,72 @@ processResources {
         expand version: project.version
     }
 }
+ext.emoteFontId = 'edenmod:emotes'
+ext.emoteCodepointBase = 0xF000
+ext.emoteDirs = ['catplush']
+ext.emoteAscent = 7
+ext.emoteHeight = 8
+
+tasks.register('generateEmoteAssets') {
+    def assetsDir = file('resources/assets/edenmod')
+    def texturesDir = new File(assetsDir, 'textures')
+    def fontFile = new File(assetsDir, 'font/emotes.json')
+    def manifestFile = new File(assetsDir, 'emotes_manifest.json')
+
+    inputs.files(fileTree(texturesDir) { include '**/*.png' }).skipWhenEmpty(false)
+    outputs.files(fontFile, manifestFile)
+
+    doLast {
+        def images = []
+        emoteDirs.each { dirName ->
+            def dir = new File(texturesDir, dirName)
+            if (dir.directory) {
+                dir.listFiles({ f -> f.isFile() && f.name.toLowerCase().endsWith('.png') } as FileFilter)?.each {
+                    images << [dir: dirName, file: it]
+                }
+            }
+        }
+        // Natural sort so catplush2 sorts before catplush10.
+        images.sort { a, b ->
+            def numOf = { java.io.File f ->
+                def m = (f.name =~ /(\d+)/)
+                m.find() ? m.group(1).toInteger() : 0
+            }
+            def na = numOf(a.file)
+            def nb = numOf(b.file)
+            na != nb ? na <=> nb : a.file.name <=> b.file.name
+        }
+
+        def providers = []
+        def emotes = [:]
+        images.eachWithIndex { img, idx ->
+            def name = img.file.name
+            def shortcode = name.take(name.lastIndexOf('.'))
+            int codepoint = emoteCodepointBase + idx
+            // "file" is resolved under assets/<namespace>/textures/, so it must
+            // NOT repeat the "textures" segment.
+            providers << [
+                type  : 'bitmap',
+                file  : "edenmod:${img.dir}/${name}".toString(),
+                ascent: emoteAscent,
+                height: emoteHeight,
+                chars : [new String(Character.toChars(codepoint))]
+            ]
+            emotes[shortcode] = codepoint
+        }
+
+        fontFile.parentFile.mkdirs()
+        fontFile.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([providers: providers])), 'UTF-8')
+        manifestFile.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([font: emoteFontId, emotes: emotes])), 'UTF-8')
+
+        logger.lifecycle("EdenMod: generated ${images.size()} chat emote(s)" + (images.isEmpty() ? '' : ": " + emotes.keySet().join(', ')))
+    }
+}
+
+processResources.dependsOn generateEmoteAssets
+tasks.named('sourcesJar').configure {
+    dependsOn 'generateEmoteAssets'
+}
 
 jar {
     from('LICENSE') {

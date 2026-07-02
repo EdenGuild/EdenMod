@@ -32,7 +32,7 @@ import net.minecraft.resources.Identifier;
 public final class DiscordChatFormatter {
 	private static final FontDescription PILL_FONT = new FontDescription.Resource(Identifier.parse("banner/pill"));
 	private static final FontDescription PREFIX_FONT = new FontDescription.Resource(Identifier.parse("chat/prefix"));
-	private static final Style PREFIX_STYLE = Style.EMPTY.withFont(PREFIX_FONT).withColor(ChatFormatting.GREEN);
+	private static final Style PREFIX_STYLE = Style.EMPTY.withFont(PREFIX_FONT).withColor(ChatFormatting.AQUA);
 
 	// banner/pill font: left cap, lowercase letters from U+E030, fill spacer, right cap.
 	private static final int PILL_LEFT_CAP = 0xE060;
@@ -45,8 +45,13 @@ public final class DiscordChatFormatter {
 	private static final int[] SHIELD = {0xCFFFC, 0xE006, 0xCFFFF, 0xE002, 0xCFFFE};
 	private static final int[] CONTINUATION = {0xCFFFC, 0xE001, 0xD0006};
 
-	// Bare http(s) links in relayed Discord messages become clickable in-game.
-	private static final Pattern URL_PATTERN = Pattern.compile("https?://\\S+");
+	// Bare http(s) links become clickable, and :shortcode: tokens matching a
+	// known emote (see EmoteRegistry) become an inline image, in a single pass
+	// over relayed message content so both interleave correctly with plain text.
+	private static final Pattern TOKEN_PATTERN = Pattern.compile("(?<url>https?://\\S+)|:(?<emote>[a-zA-Z0-9_+\\-]{2,32}):");
+
+	// Matches any :shortcode: token (shared with linkify).
+	private static final Pattern EMOTE_PATTERN = Pattern.compile(":(?<emote>[a-zA-Z0-9_+\\-]{2,32}):");
 
 	// Wynncraft chat line width: floor(chatWidth * 280 + 40), then divided by the
 	// chat scale (mirrors ChatComponent's internal wrap width).
@@ -187,17 +192,30 @@ public final class DiscordChatFormatter {
 		return segment;
 	}
 
-	/** Render message text with any http(s) URLs as clickable, underlined aqua links. */
+	/** Render text with http(s) URLs as clickable, underlined aqua links. */
+	/**
+	 * Render message text with any http(s) URLs as clickable, underlined aqua links,
+	 * and any {@code :shortcode:} token matching a known emote (see
+	 * {@link EmoteRegistry}) as an inline image. Unknown shortcodes are left as
+	 * plain literal text (e.g. {@code :notarealemote:} stays exactly that), so a
+	 * message never loses information just because an emote isn't recognized.
+	 */
 	private static MutableComponent linkify(String content) {
 		MutableComponent out = Component.empty();
-		Matcher matcher = URL_PATTERN.matcher(content);
+		Matcher matcher = TOKEN_PATTERN.matcher(content);
 		int last = 0;
 		while (matcher.find()) {
 			if (matcher.start() > last) {
 				out.append(Component.literal(content.substring(last, matcher.start())).withStyle(ChatFormatting.GREEN));
 			}
-			String url = matcher.group();
-			out.append(Component.literal(url).withStyle(linkStyle(url)));
+			String url = matcher.group("url");
+			if (url != null) {
+				out.append(Component.literal(url).withStyle(linkStyle(url)));
+			} else {
+				String shortcode = matcher.group("emote");
+				Component emote = emoteComponent(shortcode);
+				out.append(emote != null ? emote : Component.literal(matcher.group()).withStyle(ChatFormatting.GREEN));
+			}
 			last = matcher.end();
 		}
 		if (last < content.length()) {
@@ -206,14 +224,67 @@ public final class DiscordChatFormatter {
 		return out;
 	}
 
+	/** The inline glyph for {@code shortcode}, hoverable to show its name, or {@code null} if unknown. */
+	private static Component emoteComponent(String shortcode) {
+		Integer codepoint = EmoteRegistry.codepointFor(shortcode);
+		if (codepoint == null) {
+			return null;
+		}
+		String glyph = new String(Character.toChars(codepoint));
+		// WHITE is deliberate: Minecraft tints bitmap-font glyphs by the current
+		// text color, and these are full-color images, not glyph masks — white
+		// leaves the PNG's own colors untouched instead of dyeing it chat-green.
+		Style style = Style.EMPTY.withFont(EmoteRegistry.font()).withColor(ChatFormatting.WHITE).withHoverEvent(new HoverEvent.ShowText(Component.literal(":" + shortcode + ":").withStyle(ChatFormatting.GRAY)));
+		return Component.literal(glyph).withStyle(style);
+	}
+
 	private static Style linkStyle(String url) {
 		Style base = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true);
 		try {
 			return base.withClickEvent(new ClickEvent.OpenUrl(URI.create(url))).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open " + url)));
 		} catch (IllegalArgumentException e) {
-			// Not a valid URI after all — show it plainly rather than as a dead link.
 			return Style.EMPTY.withColor(ChatFormatting.GREEN);
 		}
+	}
+
+	/**
+	 * Process any chat component for {@code :shortcode:} patterns and replace
+	 * known emotes with inline image glyphs via {@link EmoteRegistry}, preserving
+	 * per-element styles (Wynncraft rank tags, colours, etc.). Unknown shortcodes
+	 * are left as literal text. Returns the original component unchanged if no
+	 * emote pattern is found.
+	 */
+	public static Component processEmotes(Component message) {
+		String text = message.getString();
+		if (!EMOTE_PATTERN.matcher(text).find()) {
+			return message;
+		}
+		MutableComponent result = Component.empty();
+		// Visit each styled leaf segment preserving its original style.
+		message.visit((style, segment) -> {
+			Matcher matcher = EMOTE_PATTERN.matcher(segment);
+			int last = 0;
+			while (matcher.find()) {
+				if (matcher.start() > last) {
+					result.append(Component.literal(segment.substring(last, matcher.start())).withStyle(style));
+				}
+				String shortcode = matcher.group("emote");
+				Integer codepoint = EmoteRegistry.codepointFor(shortcode);
+				if (codepoint != null) {
+					String glyph = new String(Character.toChars(codepoint));
+					Style emoteStyle = Style.EMPTY.withFont(EmoteRegistry.font()).withColor(ChatFormatting.WHITE).withHoverEvent(new HoverEvent.ShowText(Component.literal(":" + shortcode + ":").withStyle(ChatFormatting.GRAY)));
+					result.append(Component.literal(glyph).withStyle(emoteStyle));
+				} else {
+					result.append(Component.literal(":" + shortcode + ":").withStyle(style));
+				}
+				last = matcher.end();
+			}
+			if (last < segment.length()) {
+				result.append(Component.literal(segment.substring(last)).withStyle(style));
+			}
+			return Optional.empty();
+		}, Style.EMPTY);
+		return result;
 	}
 
 	/** Wrap the body to chat width, prefixing line 1 with the shield and the rest with bars. */
