@@ -44,12 +44,14 @@ public final class RaidCompletionParser {
 	private static final Pattern ASPECTS = Pattern.compile("(\\d+)x Aspects");
 	private static final Pattern EMERALDS = Pattern.compile("(\\d+)x Emeralds");
 	private static final Pattern GUILD_EXP = Pattern.compile("\\+([\\d.]+)m Guild Experience");
-	private static final Pattern HOVER_REAL_NAME = Pattern.compile("(?:'(?:s)? real name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
+	private static final Pattern HOVER_REAL_NAME_PATTERN = Pattern.compile("(?:'(?:s)? real name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
 	private static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
 	private static final Pattern COMMA = Pattern.compile("\\s*,\\s*");
-	private static final String FINISHED = " finished ";
 
 	private RaidCompletionParser() {
+	}
+
+	private record Segment(String text, Style style, String hover) {
 	}
 
 	/** Cheap keyword gate so the regex/cleanup runs only for plausible raid lines. */
@@ -62,8 +64,9 @@ public final class RaidCompletionParser {
 		if (!isRaidCandidate(message)) {
 			return Optional.empty();
 		}
-		List<MetaChar> chars = flatten(message);
-		String cleaned = ChatText.normalize(text(chars)).replace(",and ", ", and ");
+		// Flatten color codes/formatting for regex parsing
+		String rawText = message.getString();
+		String cleaned = ChatText.normalize(rawText).replace(",and ", ", and ");
 		Matcher detect = RAID_DETECT.matcher(cleaned);
 		if (!detect.find()) {
 			return Optional.empty();
@@ -73,7 +76,7 @@ public final class RaidCompletionParser {
 		if (raidName == null || !names.find()) {
 			return Optional.empty();
 		}
-		List<String> party = resolveParty(splitNames(names.group(1)), chars);
+		List<String> party = resolveParty(splitNames(names.group(1)), message);
 		if (party.isEmpty()) {
 			return Optional.empty();
 		}
@@ -110,32 +113,101 @@ public final class RaidCompletionParser {
 		return names;
 	}
 
+	private static String cleanName(String name) {
+		if (name == null) {
+			return null;
+		}
+		String cleaned = name.replaceAll("&<\\d+>", "").replaceAll("&[a-f0-9k-or]", "");
+		int slash = cleaned.indexOf('/');
+		if (slash >= 0) {
+			cleaned = cleaned.substring(0, slash);
+		}
+		int paren = cleaned.indexOf('(');
+		if (paren >= 0) {
+			cleaned = cleaned.substring(0, paren);
+		}
+		return cleaned.trim();
+	}
+
+	private static String hoverUsername(String hover) {
+		if (hover == null || hover.isBlank()) {
+			return null;
+		}
+		String text = hover.replace('’', '\'').replace('‘', '\'');
+		Matcher matcher = HOVER_REAL_NAME_PATTERN.matcher(text);
+		return matcher.find() ? matcher.group(1) : null;
+	}
+
+	private static List<Segment> collect(Component message) {
+		List<Segment> segments = new ArrayList<>();
+		message.visit((style, text) -> {
+			if (!text.isEmpty()) {
+				HoverEvent hover = style.getHoverEvent();
+				String hoverStr = (hover instanceof HoverEvent.ShowText showText) ? showText.value().getString() : null;
+				segments.add(new Segment(text, style, hoverStr));
+			}
+			return Optional.empty();
+		}, Style.EMPTY);
+		return segments;
+	}
+
 	/**
 	 * Resolve each displayed party name to a real username using the hover/insertion
-	 * metadata carried on the characters that make up the name. Falls back to the
-	 * displayed name when it is already a valid username.
+	 * metadata carried on the style segments matching the name. Falls back to the
+	 * cleaned displayed name when it is already a valid username.
 	 */
-	private static List<String> resolveParty(List<String> displayed, List<MetaChar> chars) {
-		String prefix = prefixText(chars);
+	private static List<String> resolveParty(List<String> displayed, Component message) {
+		List<Segment> segments = collect(message);
 		Set<String> resolved = new LinkedHashSet<>();
-		int searchFrom = 0;
 		for (String name : displayed) {
-			int start = findWord(prefix, name, searchFrom);
-			String hover = null;
-			String insertion = null;
-			if (start >= 0) {
-				for (int i = start; i < start + name.length() && i < chars.size(); i++) {
-					MetaChar mc = chars.get(i);
-					if (hover == null && mc.hover() != null) {
-						hover = mc.hover();
+			String cleanedName = cleanName(name);
+			if (cleanedName.isEmpty()) {
+				continue;
+			}
+			String real = null;
+
+			// Pass 1: try exact match on cleaned segment name
+			for (Segment seg : segments) {
+				String cleanedSegText = cleanName(seg.text());
+				if (cleanedSegText.equalsIgnoreCase(cleanedName)) {
+					String hover = hoverUsername(seg.hover());
+					if (hover != null) {
+						real = hover;
+						break;
 					}
-					if (insertion == null && mc.insertion() != null) {
-						insertion = mc.insertion();
+					String insertion = seg.style().getInsertion();
+					if (insertion != null && isIgn(insertion)) {
+						real = insertion;
+						break;
 					}
 				}
-				searchFrom = start + name.length();
 			}
-			String real = hover != null ? hover : (isIgn(name) ? name : insertion);
+
+			// Pass 2: partial match fallback (avoid matching single letters to longer segments)
+			if (real == null) {
+				for (Segment seg : segments) {
+					String cleanedSegText = cleanName(seg.text());
+					if (!cleanedSegText.isEmpty() && (cleanedSegText.contains(cleanedName) || cleanedName.contains(cleanedSegText))) {
+						if (cleanedName.length() == 1 && !cleanedSegText.equalsIgnoreCase(cleanedName)) {
+							continue;
+						}
+						String hover = hoverUsername(seg.hover());
+						if (hover != null) {
+							real = hover;
+							break;
+						}
+						String insertion = seg.style().getInsertion();
+						if (insertion != null && isIgn(insertion)) {
+							real = insertion;
+							break;
+						}
+					}
+				}
+			}
+
+			if (real == null && isIgn(cleanedName)) {
+				real = cleanedName;
+			}
 			if (real != null && isIgn(real)) {
 				resolved.add(real);
 			}
@@ -143,92 +215,7 @@ public final class RaidCompletionParser {
 		return List.copyOf(new ArrayList<>(resolved));
 	}
 
-	private static int findWord(String text, String word, int searchFrom) {
-		int index = searchFrom;
-		while ((index = text.indexOf(word, index)) >= 0) {
-			boolean startOk = (index == 0) || !isWordChar(text.charAt(index - 1));
-			boolean endOk = (index + word.length() == text.length()) || !isWordChar(text.charAt(index + word.length()));
-			if (startOk && endOk) {
-				return index;
-			}
-			index += 1;
-		}
-		return -1;
-	}
-
-	private static boolean isWordChar(char ch) {
-		return Character.isLetterOrDigit(ch) || ch == '_';
-	}
-
-	/** Whitespace-collapsed character stream up to the " finished " boundary. */
-	private static String prefixText(List<MetaChar> chars) {
-		String full = text(chars);
-		int boundary = full.indexOf(FINISHED);
-		return boundary < 0 ? full : full.substring(0, boundary);
-	}
-
-	/**
-	 * Flatten the component into a per-character stream that carries each character's
-	 * hover-resolved real name and insertion, with private-use/whitespace runs
-	 * collapsed to single spaces so it aligns with {@link ChatText#normalize}.
-	 */
-	private static List<MetaChar> flatten(Component message) {
-		List<MetaChar> out = new ArrayList<>();
-		message.visit((style, fragment) -> {
-			appendFragment(out, fragment, hoverRealName(style), insertionName(style));
-			return Optional.empty();
-		}, Style.EMPTY);
-		return out;
-	}
-
-	private static void appendFragment(List<MetaChar> out, String text, String hover, String insertion) {
-		boolean previousWasSpace = !out.isEmpty() && out.get(out.size() - 1).value() == ' ';
-		for (int index = 0; index < text.length();) {
-			int codePoint = text.codePointAt(index);
-			index += Character.charCount(codePoint);
-			if (Character.isWhitespace(codePoint) || ChatText.isIgnorable(codePoint)) {
-				if (!previousWasSpace) {
-					out.add(new MetaChar(' ', hover, insertion));
-					previousWasSpace = true;
-				}
-				continue;
-			}
-			for (char ch : Character.toChars(codePoint)) {
-				out.add(new MetaChar(ch, hover, insertion));
-			}
-			previousWasSpace = false;
-		}
-	}
-
-	private static String text(List<MetaChar> chars) {
-		StringBuilder builder = new StringBuilder(chars.size());
-		for (MetaChar mc : chars) {
-			builder.append(mc.value());
-		}
-		return builder.toString().trim();
-	}
-
-	private static String hoverRealName(Style style) {
-		HoverEvent hover = style.getHoverEvent();
-		if (hover instanceof HoverEvent.ShowText showText) {
-			String text = showText.value().getString().replace('’', '\'').replace('‘', '\'');
-			Matcher matcher = HOVER_REAL_NAME.matcher(text);
-			if (matcher.find()) {
-				return matcher.group(1);
-			}
-		}
-		return null;
-	}
-
-	private static String insertionName(Style style) {
-		String insertion = style.getInsertion();
-		return insertion != null && isIgn(insertion) ? insertion : null;
-	}
-
 	private static boolean isIgn(String value) {
 		return value != null && IGN.matcher(value).matches();
-	}
-
-	private record MetaChar(char value, String hover, String insertion) {
 	}
 }
