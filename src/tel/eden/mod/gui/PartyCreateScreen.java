@@ -265,7 +265,7 @@ public final class PartyCreateScreen extends Screen {
 		if (btn != null) {
 			int iconX = btn.getX() + 6;
 			int iconY = btn.getY() + 2;
-			g.blit(icon, iconX, iconY, 16, 16, 0.0f, 0.0f, 1.0f, 1.0f);
+			g.blit(icon, iconX, iconY, 16, 16, 0.0f, 0.0f, 256.0f, 256.0f);
 		}
 	}
 }
