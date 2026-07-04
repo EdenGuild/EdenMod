@@ -184,8 +184,9 @@ public final class EdenModClient implements ClientModInitializer {
 			}
 		});
 
-		openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, new KeyMapping.Category(net.minecraft.resources.Identifier.parse("edenmod"))));
-		createPartyKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.create_party", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_L, new KeyMapping.Category(net.minecraft.resources.Identifier.parse("edenmod"))));
+		KeyMapping.Category edenCategory = new KeyMapping.Category(net.minecraft.resources.Identifier.parse("edenmod"));
+		openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, edenCategory));
+		createPartyKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.create_party", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_L, edenCategory));
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			loginPending = true;

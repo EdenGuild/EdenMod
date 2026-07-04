@@ -1,3 +1,5 @@
 {
-  "key.edenmod.open_config": "Open EdenMod config"
+  "key.edenmod.open_config": "Open EdenMod config",
+  "key.edenmod.create_party": "Create Eden Party",
+  "key.category.minecraft.edenmod": "EdenMod"
 }
