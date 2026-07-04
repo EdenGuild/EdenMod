@@ -25,6 +25,7 @@ import tel.eden.mod.chat.RankChangeParser;
 import tel.eden.mod.chat.ShoutParser;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.gui.BridgeConfigScreen;
+import tel.eden.mod.gui.PartyCreateScreen;
 import tel.eden.mod.item.DecodedItem;
 import tel.eden.mod.item.ItemCardRenderer;
 import tel.eden.mod.item.ItemStringDetector;
@@ -125,7 +126,12 @@ public final class EdenModClient implements ClientModInitializer {
 	private final OccurrenceSequencer chatSeq = new OccurrenceSequencer(15_000L);
 	private final GuildRewards guildRewards = new GuildRewards();
 	private KeyMapping openConfigKey;
+	private KeyMapping createPartyKey;
 	private BridgeWebSocketClient socket;
+
+	public BridgeWebSocketClient socket() {
+		return socket;
+	}
 	private String socketJwt;
 	private boolean onWynncraft;
 	// GitHub update check: run once per game session; the prompt offers a one-click
@@ -178,7 +184,8 @@ public final class EdenModClient implements ClientModInitializer {
 			}
 		});
 
-		openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, KeyMapping.Category.MISC));
+		openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, new KeyMapping.Category(net.minecraft.resources.Identifier.parse("edenmod"))));
+		createPartyKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.create_party", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_L, new KeyMapping.Category(net.minecraft.resources.Identifier.parse("edenmod"))));
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			loginPending = true;
@@ -231,6 +238,13 @@ public final class EdenModClient implements ClientModInitializer {
 	private void onClientTick(Minecraft client) {
 		while (openConfigKey.consumeClick()) {
 			client.setScreen(BridgeConfigScreen.create(client.screen, this));
+		}
+		while (createPartyKey.consumeClick()) {
+			if (onWynncraft) {
+				client.setScreen(new PartyCreateScreen(client.screen, this));
+			} else {
+				display(() -> Component.literal("You must be on Wynncraft to open the party creator screen.").withStyle(net.minecraft.ChatFormatting.RED));
+			}
 		}
 		if (pendingUpdateNotification && client.player != null) {
 			pendingUpdateNotification = false;
@@ -576,9 +590,19 @@ public final class EdenModClient implements ClientModInitializer {
 		return Minecraft.getInstance().player != null ? Minecraft.getInstance().player.getGameProfile().name() : null;
 	}
 
+	private int openCreationGui(FabricClientCommandSource source) {
+		Minecraft mc = Minecraft.getInstance();
+		mc.execute(() -> mc.setScreen(new PartyCreateScreen(mc.screen, this)));
+		return 1;
+	}
+
+	private LiteralArgumentBuilder<FabricClientCommandSource> otherLiteral() {
+		return ClientCommandManager.literal("other").executes(ctx -> partyOpen(ctx.getSource(), "Other", 4, "", 0)).then(ClientCommandManager.argument("size", IntegerArgumentType.integer(2, 10)).executes(ctx -> partyOpen(ctx.getSource(), "Other", IntegerArgumentType.getInteger(ctx, "size"), "", 0)).then(ClientCommandManager.argument("filled", IntegerArgumentType.integer(0, 8)).executes(ctx -> partyOpen(ctx.getSource(), "Other", IntegerArgumentType.getInteger(ctx, "size"), "", IntegerArgumentType.getInteger(ctx, "filled"))).then(ClientCommandManager.argument("note", StringArgumentType.greedyString()).executes(ctx -> partyOpen(ctx.getSource(), "Other", IntegerArgumentType.getInteger(ctx, "size"), StringArgumentType.getString(ctx, "note"), IntegerArgumentType.getInteger(ctx, "filled"))))).then(ClientCommandManager.argument("note", StringArgumentType.greedyString()).executes(ctx -> partyOpen(ctx.getSource(), "Other", IntegerArgumentType.getInteger(ctx, "size"), StringArgumentType.getString(ctx, "note"), 0)))).then(ClientCommandManager.argument("note", StringArgumentType.greedyString()).executes(ctx -> partyOpen(ctx.getSource(), "Other", 4, StringArgumentType.getString(ctx, "note"), 0)));
+	}
+
 	/** Build the {@code /eden party ...} subcommand tree (list/create/join/leave). */
 	private LiteralArgumentBuilder<FabricClientCommandSource> buildPartyCommand() {
-		return ClientCommandManager.literal("party").executes(ctx -> partyList(ctx.getSource())).then(ClientCommandManager.literal("list").executes(ctx -> partyList(ctx.getSource()))).then(ClientCommandManager.literal("create").then(raidLiteral("notg", "Nest of the Grootslangs")).then(raidLiteral("nol", "Orphion's Nexus of Light")).then(raidLiteral("tcc", "The Canyon Colossus")).then(raidLiteral("tna", "The Nameless Anomaly")).then(raidLiteral("wtp", "The Wartorn Palace"))).then(ClientCommandManager.literal("join").then(ClientCommandManager.argument("id", IntegerArgumentType.integer()).executes(ctx -> partyJoin(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "id"))))).then(ClientCommandManager.literal("leave").executes(ctx -> partyLeave(ctx.getSource(), null)).then(ClientCommandManager.argument("id", IntegerArgumentType.integer()).executes(ctx -> partyLeave(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "id")))))
+		return ClientCommandManager.literal("party").executes(ctx -> partyList(ctx.getSource())).then(ClientCommandManager.literal("list").executes(ctx -> partyList(ctx.getSource()))).then(ClientCommandManager.literal("create").executes(ctx -> openCreationGui(ctx.getSource())).then(raidLiteral("notg", "Nest of the Grootslangs")).then(raidLiteral("nol", "Orphion's Nexus of Light")).then(raidLiteral("tcc", "The Canyon Colossus")).then(raidLiteral("tna", "The Nameless Anomaly")).then(raidLiteral("wtp", "The Wartorn Palace")).then(otherLiteral())).then(ClientCommandManager.literal("join").then(ClientCommandManager.argument("id", IntegerArgumentType.integer()).executes(ctx -> partyJoin(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "id"))))).then(ClientCommandManager.literal("leave").executes(ctx -> partyLeave(ctx.getSource(), null)).then(ClientCommandManager.argument("id", IntegerArgumentType.integer()).executes(ctx -> partyLeave(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "id")))))
 					// Driven by the "[Create party]" prompt shown when a party fills: runs
 					// /party create then invites each listed member in-game.
 					.then(ClientCommandManager.literal("makeingame").then(ClientCommandManager.argument("members", StringArgumentType.greedyString()).executes(ctx -> makeInGameParty(ctx.getSource(), StringArgumentType.getString(ctx, "members"))))).then(ClientCommandManager.literal("note").executes(ctx -> partyManage(ctx.getSource(), "note", "", 0, "")).then(ClientCommandManager.argument("text", StringArgumentType.greedyString()).executes(ctx -> partyManage(ctx.getSource(), "note", StringArgumentType.getString(ctx, "text"), 0, "")))).then(ClientCommandManager.literal("filled").then(ClientCommandManager.argument("slots", IntegerArgumentType.integer(0, 8)).executes(ctx -> partyManage(ctx.getSource(), "filled", "", IntegerArgumentType.getInteger(ctx, "slots"), "")))).then(ClientCommandManager.literal("add").then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> partyManage(ctx.getSource(), "add", "", 0, StringArgumentType.getString(ctx, "player"))))).then(ClientCommandManager.literal("remove").then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> partyManage(ctx.getSource(), "remove", "", 0, StringArgumentType.getString(ctx, "player")))));
