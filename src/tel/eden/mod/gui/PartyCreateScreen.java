@@ -14,14 +14,6 @@ import tel.eden.mod.EdenModClient;
 /** Screen GUI for creating a raid/Annihilation/Other party with auto-detected party size. */
 public final class PartyCreateScreen extends Screen {
 
-	private static final Identifier ICON_NOTG = Identifier.parse("edenmod:textures/gui/icons/notg.png");
-	private static final Identifier ICON_NOL = Identifier.parse("edenmod:textures/gui/icons/nol.png");
-	private static final Identifier ICON_TCC = Identifier.parse("edenmod:textures/gui/icons/tcc.png");
-	private static final Identifier ICON_TNA = Identifier.parse("edenmod:textures/gui/icons/tna.png");
-	private static final Identifier ICON_WTP = Identifier.parse("edenmod:textures/gui/icons/wtp.png");
-	private static final Identifier ICON_ANNIHILATION = Identifier.parse("edenmod:textures/gui/icons/annihilation.png");
-	private static final Identifier ICON_OTHER = Identifier.parse("edenmod:textures/gui/icons/other.png");
-
 	private final Screen parent;
 	private final EdenModClient mod;
 
@@ -45,11 +37,27 @@ public final class PartyCreateScreen extends Screen {
 
 	private EditBox noteField;
 
+	private Identifier iconNotg;
+	private Identifier iconNol;
+	private Identifier iconTcc;
+	private Identifier iconTna;
+	private Identifier iconWtp;
+	private Identifier iconAnnihilation;
+	private Identifier iconOther;
+
 	public PartyCreateScreen(Screen parent, EdenModClient mod) {
 		super(Component.literal("Create Guild Party"));
 		this.parent = parent;
 		this.mod = mod;
 		this.playersInParty = getScoreboardPartySize();
+
+		this.iconNotg = registerDynamicIcon("notg", "/assets/edenmod/textures/gui/icons/notg.png");
+		this.iconNol = registerDynamicIcon("nol", "/assets/edenmod/textures/gui/icons/nol.png");
+		this.iconTcc = registerDynamicIcon("tcc", "/assets/edenmod/textures/gui/icons/tcc.png");
+		this.iconTna = registerDynamicIcon("tna", "/assets/edenmod/textures/gui/icons/tna.png");
+		this.iconWtp = registerDynamicIcon("wtp", "/assets/edenmod/textures/gui/icons/wtp.png");
+		this.iconAnnihilation = registerDynamicIcon("annihilation", "/assets/edenmod/textures/gui/icons/annihilation.png");
+		this.iconOther = registerDynamicIcon("other", "/assets/edenmod/textures/gui/icons/other.png");
 	}
 
 	@Override
@@ -209,29 +217,29 @@ public final class PartyCreateScreen extends Screen {
 		super.render(g, mouseX, mouseY, delta);
 
 		// Draw icons next to checkmarks inside buttons
-		drawButtonIcon(g, btnNotg, ICON_NOTG);
-		drawButtonIcon(g, btnNol, ICON_NOL);
-		drawButtonIcon(g, btnTcc, ICON_TCC);
-		drawButtonIcon(g, btnTna, ICON_TNA);
-		drawButtonIcon(g, btnWtp, ICON_WTP);
-		drawButtonIcon(g, btnAnnihilation, ICON_ANNIHILATION);
-		drawButtonIcon(g, btnOther, ICON_OTHER);
+		drawButtonIcon(g, btnNotg, iconNotg);
+		drawButtonIcon(g, btnNol, iconNol);
+		drawButtonIcon(g, btnTcc, iconTcc);
+		drawButtonIcon(g, btnTna, iconTna);
+		drawButtonIcon(g, btnWtp, iconWtp);
+		drawButtonIcon(g, btnAnnihilation, iconAnnihilation);
+		drawButtonIcon(g, btnOther, iconOther);
 
-		// Draw Screen Title
-		g.drawCenteredString(this.font, this.title, centerX, startY + 12, 0xFFFFFF);
+		// Draw Screen Title (Opaque White)
+		g.drawCenteredString(this.font, this.title, centerX, startY + 12, 0xFFFFFFFF);
 
-		// Draw Labels & Values
-		g.drawString(this.font, "Max Party Size:", centerX - 150, startY + 134, 0xA0A0A0);
-		g.drawCenteredString(this.font, String.valueOf(this.maxPartySize), centerX + 70, startY + 134, 0xFFFFFF);
+		// Draw Labels & Values (Opaque Colors)
+		g.drawString(this.font, "Max Party Size:", centerX - 150, startY + 134, 0xFFA0A0A0);
+		g.drawCenteredString(this.font, String.valueOf(this.maxPartySize), centerX + 70, startY + 134, 0xFFFFFFFF);
 
-		g.drawString(this.font, "Players in Party:", centerX - 150, startY + 156, 0xA0A0A0);
-		g.drawCenteredString(this.font, String.valueOf(this.playersInParty), centerX + 70, startY + 156, 0xFFFFFF);
+		g.drawString(this.font, "Players in Party:", centerX - 150, startY + 156, 0xFFA0A0A0);
+		g.drawCenteredString(this.font, String.valueOf(this.playersInParty), centerX + 70, startY + 156, 0xFFFFFFFF);
 
-		g.drawString(this.font, "Party Note:", centerX - 150, startY + 175, 0xA0A0A0);
+		g.drawString(this.font, "Party Note:", centerX - 150, startY + 175, 0xFFA0A0A0);
 
-		// Draw Preview Message
+		// Draw Preview Message (Opaque Colors)
 		if (selectedTargets.isEmpty()) {
-			g.drawCenteredString(this.font, "Please select at least one target!", centerX, startY + 200, 0xFF5555);
+			g.drawCenteredString(this.font, "Please select at least one target!", centerX, startY + 200, 0xFFFF5555);
 		} else {
 			String preview;
 			if (selectedTargets.contains("Annihilation")) {
@@ -241,7 +249,7 @@ public final class PartyCreateScreen extends Screen {
 			} else {
 				preview = String.join(" / ", selectedTargets) + " (" + playersInParty + "/4)";
 			}
-			g.drawCenteredString(this.font, "Ready: " + preview, centerX, startY + 200, 0x55FF55);
+			g.drawCenteredString(this.font, "Ready: " + preview, centerX, startY + 200, 0xFF55FF55);
 		}
 	}
 
@@ -289,10 +297,38 @@ public final class PartyCreateScreen extends Screen {
 	}
 
 	private void drawButtonIcon(GuiGraphics g, Button btn, Identifier icon) {
-		if (btn != null) {
+		if (btn != null && icon != null) {
 			int iconX = btn.getX() + 6;
 			int iconY = btn.getY() + 2;
-			g.blit(icon, iconX, iconY, 16, 16, 0.0f, 0.0f, 256.0f, 256.0f);
+			g.blit(icon, iconX, iconY, 16, 16, 0.0f, 0.0f, 16.0f, 16.0f);
 		}
+	}
+
+	private Identifier registerDynamicIcon(String name, String iconPath) {
+		Identifier loc = Identifier.parse("edenmod:dynamic_icon/" + name);
+		var tm = Minecraft.getInstance().getTextureManager();
+		if (tm.getTexture(loc) != null) {
+			return loc;
+		}
+		try (var stream = PartyCreateScreen.class.getResourceAsStream(iconPath)) {
+			if (stream != null) {
+				var srcImage = com.mojang.blaze3d.platform.NativeImage.read(stream);
+				// Create a 256x256 transparent canvas to align size with division logic
+				var canvas = new com.mojang.blaze3d.platform.NativeImage(256, 256, true);
+				canvas.fillRect(0, 0, 256, 256, 0); // clear alpha
+				for (int x = 0; x < 16; x++) {
+					for (int y = 0; y < 16; y++) {
+						canvas.setPixel(x, y, srcImage.getPixel(x, y));
+					}
+				}
+				var texture = new net.minecraft.client.renderer.texture.DynamicTexture(() -> name, canvas);
+				tm.register(loc, texture);
+				srcImage.close();
+				return loc;
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return loc;
 	}
 }
