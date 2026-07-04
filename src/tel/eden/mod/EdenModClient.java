@@ -134,6 +134,7 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 	private String socketJwt;
 	private boolean onWynncraft;
+	private final java.util.List<PartyInfo> knownParties = new java.util.ArrayList<>();
 	// GitHub update check: run once per game session; the prompt offers a one-click
 	// download (applied on game close) and a link to the release page.
 	private final UpdateChecker updateChecker = new UpdateChecker();
@@ -242,7 +243,7 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 		while (createPartyKey.consumeClick()) {
 			if (onWynncraft) {
-				client.setScreen(new PartyCreateScreen(client.screen, this));
+				openPartyGui();
 			} else {
 				display(() -> Component.literal("You must be on Wynncraft to open the party creator screen.").withStyle(net.minecraft.ChatFormatting.RED));
 			}
@@ -337,6 +338,10 @@ public final class EdenModClient implements ClientModInitializer {
 
 				@Override
 				public void onPartyUpdate(String event, String actor, PartyInfo party) {
+					knownParties.removeIf(p -> p.id() == party.id());
+					if (!event.equals("closed")) {
+						knownParties.add(party);
+					}
 					// Auto-announce party activity only when the player has the
 					// (default-on) party feed enabled.
 					if (!config.partyAnnounce) {
@@ -354,6 +359,8 @@ public final class EdenModClient implements ClientModInitializer {
 
 				@Override
 				public void onPartyList(java.util.List<PartyInfo> parties) {
+					knownParties.clear();
+					knownParties.addAll(parties);
 					display(() -> PartyFormatter.listing(parties));
 				}
 
@@ -593,8 +600,25 @@ public final class EdenModClient implements ClientModInitializer {
 
 	private int openCreationGui(FabricClientCommandSource source) {
 		Minecraft mc = Minecraft.getInstance();
-		mc.execute(() -> mc.setScreen(new PartyCreateScreen(mc.screen, this)));
+		mc.execute(this::openPartyGui);
 		return 1;
+	}
+
+	private void openPartyGui() {
+		Minecraft mc = Minecraft.getInstance();
+		String ign = playerName();
+		PartyInfo myParty = null;
+		for (PartyInfo p : knownParties) {
+			if (ign != null && p.host().equalsIgnoreCase(ign)) {
+				myParty = p;
+				break;
+			}
+		}
+		if (myParty != null) {
+			mc.setScreen(new tel.eden.mod.gui.PartyManageScreen(mc.screen, this, myParty));
+		} else {
+			mc.setScreen(new PartyCreateScreen(mc.screen, this));
+		}
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> otherLiteral() {
