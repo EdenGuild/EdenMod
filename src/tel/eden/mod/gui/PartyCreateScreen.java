@@ -51,19 +51,19 @@ public final class PartyCreateScreen extends Screen {
 		this.mod = mod;
 		this.playersInParty = getScoreboardPartySize();
 
-		this.iconNotg = registerDynamicIcon("notg", "/assets/edenmod/textures/gui/icons/notg.png");
-		this.iconNol = registerDynamicIcon("nol", "/assets/edenmod/textures/gui/icons/nol.png");
-		this.iconTcc = registerDynamicIcon("tcc", "/assets/edenmod/textures/gui/icons/tcc.png");
-		this.iconTna = registerDynamicIcon("tna", "/assets/edenmod/textures/gui/icons/tna.png");
-		this.iconWtp = registerDynamicIcon("wtp", "/assets/edenmod/textures/gui/icons/wtp.png");
-		this.iconAnnihilation = registerDynamicIcon("annihilation", "/assets/edenmod/textures/gui/icons/annihilation.png");
-		this.iconOther = registerDynamicIcon("other", "/assets/edenmod/textures/gui/icons/other.png");
+		this.iconNotg = registerDynamicIcon("notg");
+		this.iconNol = registerDynamicIcon("nol");
+		this.iconTcc = registerDynamicIcon("tcc");
+		this.iconTna = registerDynamicIcon("tna");
+		this.iconWtp = registerDynamicIcon("wtp");
+		this.iconAnnihilation = registerDynamicIcon("annihilation");
+		this.iconOther = registerDynamicIcon("other");
 	}
 
 	@Override
 	protected void init() {
 		int centerX = this.width / 2;
-		int startY = (this.height - 250) / 2;
+		int startY = (this.height - 255) / 2;
 
 		// Targets Grid
 		// Row 1
@@ -104,13 +104,13 @@ public final class PartyCreateScreen extends Screen {
 		this.addRenderableWidget(btnPlayersPlus);
 
 		// Note Text Field
-		noteField = new EditBox(this.font, centerX - 150, startY + 187, 300, 20, Component.literal("Party Note"));
+		noteField = new EditBox(this.font, centerX - 150, startY + 180, 300, 20, Component.literal("Party Note"));
 		noteField.setMaxLength(100);
 		this.addRenderableWidget(noteField);
 
 		// Action Buttons
-		btnCreate = Button.builder(Component.literal("Create Party"), b -> onCreate()).bounds(centerX - 150, startY + 215, 145, 20).build();
-		Button btnCancel = Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(centerX + 5, startY + 215, 145, 20).build();
+		btnCreate = Button.builder(Component.literal("Create Party"), b -> onCreate()).bounds(centerX - 150, startY + 220, 145, 20).build();
+		Button btnCancel = Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(centerX + 5, startY + 220, 145, 20).build();
 
 		this.addRenderableWidget(btnCreate);
 		this.addRenderableWidget(btnCancel);
@@ -147,7 +147,7 @@ public final class PartyCreateScreen extends Screen {
 	}
 
 	private void adjustMaxPartySize(int amount) {
-		if (selectedTargets.contains("Other")) {
+		if (selectedTargets.contains("Other") || selectedTargets.contains("Annihilation")) {
 			maxPartySize = Math.max(2, Math.min(10, maxPartySize + amount));
 			if (playersInParty > maxPartySize) {
 				playersInParty = maxPartySize;
@@ -170,9 +170,9 @@ public final class PartyCreateScreen extends Screen {
 		btnAnnihilation.setMessage(Component.literal(getButtonText("Annihilation", "Annihilation")));
 		btnOther.setMessage(Component.literal(getButtonText("Other", "Other")));
 
-		boolean isOther = selectedTargets.contains("Other");
-		btnMaxMinus.active = isOther && maxPartySize > 2;
-		btnMaxPlus.active = isOther && maxPartySize < 10;
+		boolean canEditMax = selectedTargets.contains("Other") || selectedTargets.contains("Annihilation");
+		btnMaxMinus.active = canEditMax && maxPartySize > 2;
+		btnMaxPlus.active = canEditMax && maxPartySize < 10;
 
 		btnPlayersMinus.active = playersInParty > 1;
 		btnPlayersPlus.active = playersInParty < maxPartySize;
@@ -188,16 +188,30 @@ public final class PartyCreateScreen extends Screen {
 		}
 	}
 
+	private String getShortTargetName(String target) {
+		if (target.equals("Nest of the Grootslangs"))
+			return "Groots";
+		if (target.equals("Orphion's Nexus of Light"))
+			return "Nexus";
+		if (target.equals("The Canyon Colossus"))
+			return "Colossus";
+		if (target.equals("The Nameless Anomaly"))
+			return "Anomaly";
+		if (target.equals("The Wartorn Palace"))
+			return "Wartorn";
+		return target;
+	}
+
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
 		// Draw standard translucent background overlay
 		g.fill(0, 0, this.width, this.height, 0xC0000000);
 
 		int centerX = this.width / 2;
-		int startY = (this.height - 250) / 2;
+		int startY = (this.height - 255) / 2;
 		int startX = centerX - 165;
 		int panelWidth = 330;
-		int panelHeight = 250;
+		int panelHeight = 255;
 
 		// 1. Draw centered dialog panel (solid dark gray, slightly translucent)
 		g.fill(startX, startY, startX + panelWidth, startY + panelHeight, 0xE0282828);
@@ -235,11 +249,11 @@ public final class PartyCreateScreen extends Screen {
 		g.drawString(this.font, "Players in Party:", centerX - 150, startY + 156, 0xFFA0A0A0);
 		g.drawCenteredString(this.font, String.valueOf(this.playersInParty), centerX + 70, startY + 156, 0xFFFFFFFF);
 
-		g.drawString(this.font, "Party Note:", centerX - 150, startY + 175, 0xFFA0A0A0);
+		g.drawString(this.font, "Party Note:", centerX - 150, startY + 172, 0xFFA0A0A0);
 
 		// Draw Preview Message (Opaque Colors)
 		if (selectedTargets.isEmpty()) {
-			g.drawCenteredString(this.font, "Please select at least one target!", centerX, startY + 200, 0xFFFF5555);
+			g.drawCenteredString(this.font, "Please select at least one target!", centerX, startY + 201, 0xFFFF5555);
 		} else {
 			String preview;
 			if (selectedTargets.contains("Annihilation")) {
@@ -247,9 +261,13 @@ public final class PartyCreateScreen extends Screen {
 			} else if (selectedTargets.contains("Other")) {
 				preview = "Other (" + playersInParty + "/" + maxPartySize + ")";
 			} else {
-				preview = String.join(" / ", selectedTargets) + " (" + playersInParty + "/4)";
+				java.util.List<String> shortNames = new java.util.ArrayList<>();
+				for (String target : selectedTargets) {
+					shortNames.add(getShortTargetName(target));
+				}
+				preview = String.join(" / ", shortNames) + " (" + playersInParty + "/4)";
 			}
-			g.drawCenteredString(this.font, "Ready: " + preview, centerX, startY + 200, 0xFF55FF55);
+			g.drawCenteredString(this.font, "Ready: " + preview, centerX, startY + 201, 0xFF55FF55);
 		}
 	}
 
@@ -304,15 +322,36 @@ public final class PartyCreateScreen extends Screen {
 		}
 	}
 
-	private Identifier registerDynamicIcon(String name, String iconPath) {
+	private Identifier registerDynamicIcon(String name) {
 		Identifier loc = Identifier.parse("edenmod:dynamic_icon/" + name);
 		var tm = Minecraft.getInstance().getTextureManager();
 		if (tm.getTexture(loc) != null) {
 			return loc;
 		}
-		try (var stream = PartyCreateScreen.class.getResourceAsStream(iconPath)) {
-			if (stream != null) {
-				var srcImage = com.mojang.blaze3d.platform.NativeImage.read(stream);
+
+		java.io.InputStream stream = null;
+
+		// 1. Try classloader (immune to resource pack reload crashes)
+		try {
+			stream = PartyCreateScreen.class.getClassLoader().getResourceAsStream("assets/edenmod/textures/gui/icons/" + name + ".png");
+		} catch (Exception ignored) {
+		}
+
+		// 2. Try Minecraft resource manager fallback
+		if (stream == null) {
+			try {
+				var rm = Minecraft.getInstance().getResourceManager();
+				var res = rm.getResource(Identifier.parse("edenmod:textures/gui/icons/" + name + ".png"));
+				if (res.isPresent()) {
+					stream = res.get().open();
+				}
+			} catch (Exception ignored) {
+			}
+		}
+
+		if (stream != null) {
+			try (var s = stream) {
+				var srcImage = com.mojang.blaze3d.platform.NativeImage.read(s);
 				// Create a 256x256 transparent canvas to align size with division logic
 				var canvas = new com.mojang.blaze3d.platform.NativeImage(256, 256, true);
 				canvas.fillRect(0, 0, 256, 256, 0); // clear alpha
@@ -325,10 +364,11 @@ public final class PartyCreateScreen extends Screen {
 				tm.register(loc, texture);
 				srcImage.close();
 				return loc;
+			} catch (Exception e) {
+				e.printStackTrace();
 			}
-		} catch (Exception e) {
-			e.printStackTrace();
 		}
-		return loc;
+
+		return null; // Return null so we draw nothing rather than a missing texture box!
 	}
 }
