@@ -211,8 +211,7 @@ public final class DiscordChatFormatter {
 			String url = matcher.group("url");
 			if (url != null) {
 				boolean isImage = url.matches("(?i).*\\.(png|jpe?g|gif|webp)(\\?.*)?$") || url.startsWith("https://media.discordapp.net/attachments/") || url.startsWith("https://cdn.discordapp.com/attachments/");
-				String visibleText = isImage ? "[image]" : url;
-				out.append(Component.literal(visibleText).withStyle(linkStyle(url, isImage)));
+				out.append(Component.literal(url).withStyle(linkStyle(url, isImage)));
 			} else {
 				String shortcode = matcher.group("emote");
 				Component emote = emoteComponent(shortcode);

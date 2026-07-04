@@ -14,20 +14,11 @@ public class GuiGraphicsMixin {
 
 	@Inject(method = "renderComponentHoverEffect", at = @At("HEAD"), cancellable = true)
 	private void onRenderComponentHoverEffect(Font font, Style style, int mouseX, int mouseY, CallbackInfo ci) {
-		if (style != null && style.getHoverEvent() != null) {
-			String hoverStr = style.getHoverEvent().toString();
+		if (style != null && style.getHoverEvent() instanceof net.minecraft.network.chat.HoverEvent.ShowText st) {
+			String hoverStr = st.value().getString();
 			int idx = hoverStr.indexOf("[EDEN_IMG]");
 			if (idx != -1) {
-				String sub = hoverStr.substring(idx + 10);
-				int end = -1;
-				for (int i = 0; i < sub.length(); i++) {
-					char c = sub.charAt(i);
-					if (c == '"' || c == '\'' || c == '}' || c == ')' || c == ']') {
-						end = i;
-						break;
-					}
-				}
-				String url = end == -1 ? sub : sub.substring(0, end);
+				String url = hoverStr.substring(idx + 10);
 				ImagePreviewManager.renderPreview((GuiGraphics) (Object) this, url, mouseX, mouseY);
 				ci.cancel();
 			}

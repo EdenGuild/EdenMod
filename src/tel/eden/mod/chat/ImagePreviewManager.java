@@ -74,15 +74,24 @@ public class ImagePreviewManager {
 							y = mouseY - renderHeight - 8;
 						}
 
+						guiGraphics.pose().pushPose();
+						guiGraphics.pose().translate(0, 0, 400);
 						guiGraphics.fill(x - 2, y - 2, x + renderWidth + 2, y + renderHeight + 2, 0xAA000000);
 						guiGraphics.blit(loc, x, y, 0, 0, renderWidth, renderHeight, renderWidth, renderHeight);
+						guiGraphics.pose().popPose();
 					}
 				}
 			}
 		} else if (state == PreviewState.DOWNLOADING) {
+			guiGraphics.pose().pushPose();
+			guiGraphics.pose().translate(0, 0, 400);
 			guiGraphics.drawCenteredString(Minecraft.getInstance().font, "Loading preview...", mouseX + 12, mouseY - 12, 0xFFFFFF);
+			guiGraphics.pose().popPose();
 		} else if (state == PreviewState.ERROR) {
+			guiGraphics.pose().pushPose();
+			guiGraphics.pose().translate(0, 0, 400);
 			guiGraphics.drawCenteredString(Minecraft.getInstance().font, "Failed to load image", mouseX + 12, mouseY - 12, 0xFF5555);
+			guiGraphics.pose().popPose();
 		}
 	}
 
@@ -90,7 +99,9 @@ public class ImagePreviewManager {
 		CompletableFuture.runAsync(() -> {
 			try {
 				URL url = URI.create(urlString).toURL();
-				try (InputStream is = url.openStream()) {
+				java.net.URLConnection conn = url.openConnection();
+				conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+				try (InputStream is = conn.getInputStream()) {
 					NativeImage img = NativeImage.read(is);
 					pendingImages.put(urlString, img);
 				}
