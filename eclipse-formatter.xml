@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<profiles version="21">
+<profile kind="CodeFormatterProfile" name="Default" version="21">
+	<setting id="org.eclipse.jdt.core.formatter.tabulation.char" value="tab"/>
+	<setting id="org.eclipse.jdt.core.formatter.tabulation.size" value="3"/>
+	<setting id="org.eclipse.jdt.core.formatter.indentation.size" value="3"/>
+	<setting id="org.eclipse.jdt.core.formatter.use_tabs_only_for_leading_indentations" value="false"/>
+	<setting id="org.eclipse.jdt.core.formatter.continuation_indentation" value="3"/>
+	<setting id="org.eclipse.jdt.core.formatter.continuation_indentation_for_array_initializer" value="2"/>
+	<setting id="org.eclipse.jdt.core.formatter.indent_switchstatements_compare_to_cases" value="true"/>
+	<setting id="org.eclipse.jdt.core.formatter.indent_switchstatements_compare_to_switch" value="true"/>
+	<setting id="org.eclipse.jdt.core.formatter.lineSplit" value="9999"/>
+	<setting id="org.eclipse.jdt.core.formatter.insert_space_after_opening_brace_in_array_initializer" value="do not insert"/>
+	<setting id="org.eclipse.jdt.core.formatter.insert_space_before_closing_brace_in_array_initializer" value="do not insert"/>
+
+	<setting id="org.eclipse.jdt.core.formatter.comment.format_javadoc_comments" value="false"/>
+	<setting id="org.eclipse.jdt.core.formatter.comment.format_block_comments" value="false"/>
+	<setting id="org.eclipse.jdt.core.formatter.comment.format_line_comments" value="false"/>
+	<setting id="org.eclipse.jdt.core.formatter.comment.format_header_comment" value="false"/>
+	<setting id="org.eclipse.jdt.core.formatter.comment.line_length" value="9999"/>
+</profile>
+</profiles>

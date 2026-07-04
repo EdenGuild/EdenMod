@@ -1,0 +1,23 @@
+# Gradle / build output
+.gradle/
+build/
+run/
+*.class
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+bin/
+CLAUDE.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backups
+*.bak
+resources/assets/edenmod/font/emotes.json
+resources/assets/edenmod/emotes_manifest.json
