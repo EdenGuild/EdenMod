@@ -42,8 +42,8 @@ public final class DiscordChatFormatter {
 	private static final int ALPHABET = 26;
 
 	// chat/prefix font: the guild emblem shield, and the wrap-continuation bars.
-	private static final int[] SHIELD = {0xCFFFC, 0xE006, 0xCFFFF, 0xE002, 0xCFFFE};
-	private static final int[] CONTINUATION = {0xCFFFC, 0xE001, 0xD0006};
+	private static final int[] SHIELD = {0xCFFFC, 0xCFFFC, 0xE006, 0xCFFFF, 0xE002, 0xCFFFE};
+	private static final int[] CONTINUATION = {0xCFFFC, 0xCFFFC, 0xE001, 0xD0006};
 
 	// Bare http(s) links become clickable, and :shortcode: tokens matching a
 	// known emote (see EmoteRegistry) become an inline image, in a single pass
@@ -326,7 +326,7 @@ public final class DiscordChatFormatter {
 		for (int glyph : glyphs) {
 			out.appendCodePoint(glyph);
 		}
-		return Component.literal(out.toString()).append(" ").withStyle(PREFIX_STYLE);
+		return Component.literal("\u200B ").append(Component.literal(out.toString())).append(" ").withStyle(PREFIX_STYLE);
 	}
 
 	private static MutableComponent toComponent(FormattedText text) {
