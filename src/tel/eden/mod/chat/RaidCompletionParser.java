@@ -159,25 +159,33 @@ public final class RaidCompletionParser {
 	private static List<String> resolveParty(List<String> displayed, Component message) {
 		List<Segment> segments = collect(message);
 		Set<String> resolved = new LinkedHashSet<>();
+		Set<Integer> usedSegmentIndices = new java.util.HashSet<>();
 		for (String name : displayed) {
 			String cleanedName = cleanName(name);
 			if (cleanedName.isEmpty()) {
 				continue;
 			}
 			String real = null;
+			int matchedIndex = -1;
 
 			// Pass 1: try exact match on cleaned segment name
-			for (Segment seg : segments) {
+			for (int i = 0; i < segments.size(); i++) {
+				if (usedSegmentIndices.contains(i)) {
+					continue;
+				}
+				Segment seg = segments.get(i);
 				String cleanedSegText = cleanName(seg.text());
 				if (cleanedSegText.equalsIgnoreCase(cleanedName)) {
 					String hover = hoverUsername(seg.hover());
 					if (hover != null) {
 						real = hover;
+						matchedIndex = i;
 						break;
 					}
 					String insertion = seg.style().getInsertion();
 					if (insertion != null && isIgn(insertion)) {
 						real = insertion;
+						matchedIndex = i;
 						break;
 					}
 				}
@@ -185,7 +193,11 @@ public final class RaidCompletionParser {
 
 			// Pass 2: partial match fallback (avoid matching single letters to longer segments)
 			if (real == null) {
-				for (Segment seg : segments) {
+				for (int i = 0; i < segments.size(); i++) {
+					if (usedSegmentIndices.contains(i)) {
+						continue;
+					}
+					Segment seg = segments.get(i);
 					String cleanedSegText = cleanName(seg.text());
 					if (!cleanedSegText.isEmpty() && (cleanedSegText.contains(cleanedName) || cleanedName.contains(cleanedSegText))) {
 						if (cleanedName.length() == 1 && !cleanedSegText.equalsIgnoreCase(cleanedName)) {
@@ -194,11 +206,13 @@ public final class RaidCompletionParser {
 						String hover = hoverUsername(seg.hover());
 						if (hover != null) {
 							real = hover;
+							matchedIndex = i;
 							break;
 						}
 						String insertion = seg.style().getInsertion();
 						if (insertion != null && isIgn(insertion)) {
 							real = insertion;
+							matchedIndex = i;
 							break;
 						}
 					}
@@ -210,6 +224,9 @@ public final class RaidCompletionParser {
 			}
 			if (real != null && isIgn(real)) {
 				resolved.add(real);
+				if (matchedIndex != -1) {
+					usedSegmentIndices.add(matchedIndex);
+				}
 			}
 		}
 		return List.copyOf(new ArrayList<>(resolved));
