@@ -184,13 +184,13 @@ public final class PartyCreateScreen extends Screen {
 		g.fill(0, 0, this.width, this.height, 0xC0000000);
 		super.render(g, mouseX, mouseY, delta);
 
-		drawButtonIcon(g, btnNotg, ICON_NOTG);
-		drawButtonIcon(g, btnNol, ICON_NOL);
-		drawButtonIcon(g, btnTcc, ICON_TCC);
-		drawButtonIcon(g, btnTna, ICON_TNA);
-		drawButtonIcon(g, btnWtp, ICON_WTP);
-		drawButtonIcon(g, btnAnnihilation, ICON_ANNIHILATION);
-		drawButtonIcon(g, btnOther, ICON_OTHER);
+		// drawButtonIcon(g, btnNotg, ICON_NOTG);
+		// drawButtonIcon(g, btnNol, ICON_NOL);
+		// drawButtonIcon(g, btnTcc, ICON_TCC);
+		// drawButtonIcon(g, btnTna, ICON_TNA);
+		// drawButtonIcon(g, btnWtp, ICON_WTP);
+		// drawButtonIcon(g, btnAnnihilation, ICON_ANNIHILATION);
+		// drawButtonIcon(g, btnOther, ICON_OTHER);
 
 		g.drawCenteredString(this.font, this.title, this.width / 2, 10, 0xFFFFFF);
 
