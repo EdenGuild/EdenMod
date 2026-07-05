@@ -78,6 +78,12 @@ public final class BridgeConfig {
 
 	public GameDisplayMode gameDisplayMode = GameDisplayMode.ALL;
 
+	/**
+	 * How much of the screen (as a percentage) an image preview can occupy.
+	 * Range 20–80, default 40.
+	 */
+	public int imagePreviewSize = 40;
+
 	/** Load the config from disk, or return defaults (and write them) if absent. */
 	public static BridgeConfig load() {
 		if (Files.isRegularFile(PATH)) {

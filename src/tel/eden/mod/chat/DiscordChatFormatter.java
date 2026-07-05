@@ -210,8 +210,11 @@ public final class DiscordChatFormatter {
 			}
 			String url = matcher.group("url");
 			if (url != null) {
-				boolean isImage = url.matches("(?i).*\\.(png|jpe?g|gif|webp)(\\?.*)?$") || url.startsWith("https://media.discordapp.net/attachments/") || url.startsWith("https://cdn.discordapp.com/attachments/");
-				out.append(Component.literal(url).withStyle(linkStyle(url, isImage)));
+				// Only Discord-CDN-hosted images become an inline preview; any other
+				// image-looking link stays a plain link so hovering it can't make the
+				// client fetch an attacker-controlled URL. See ImagePreviewManager.
+				boolean isImage = ImagePreviewManager.isAllowedHost(url) && url.matches("(?i).*\\.(png|jpe?g|gif|webp|bmp)(\\?.*)?$");
+				out.append(Component.literal(isImage ? "[Image]" : url).withStyle(linkStyle(url, isImage)));
 			} else {
 				String shortcode = matcher.group("emote");
 				Component emote = emoteComponent(shortcode);
@@ -242,8 +245,8 @@ public final class DiscordChatFormatter {
 	private static Style linkStyle(String url, boolean isImage) {
 		Style base = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true);
 		try {
-			// We embed [EDEN_IMG] in the hover text so GuiGraphicsMixin can extract the URL for the preview.
-			Component hoverText = isImage ? Component.literal("[EDEN_IMG]" + url) : Component.literal("Open " + url);
+			// Embed the shared marker in the hover text so GuiGraphicsMixin can extract the URL for the preview.
+			Component hoverText = isImage ? Component.literal(ImagePreviewManager.HOVER_MARKER + url) : Component.literal("Open " + url);
 			return base.withClickEvent(new ClickEvent.OpenUrl(URI.create(url))).withHoverEvent(new HoverEvent.ShowText(hoverText));
 		} catch (IllegalArgumentException e) {
 			return Style.EMPTY.withColor(ChatFormatting.GREEN);

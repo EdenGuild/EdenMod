@@ -13,6 +13,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarratableEntry;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.config.BridgeConfig;
@@ -30,6 +31,7 @@ public final class BridgeConfigScreen {
 		ConfigEntryBuilder eb = builder.entryBuilder();
 		ConfigCategory cat = builder.getOrCreateCategory(Component.literal("Bridge Settings"));
 
+		cat.addEntry(new LogoEntry());
 		cat.addEntry(eb.startTextDescription(linkStatusText(config)).build());
 		cat.addEntry(new LinkButtonEntry(parent, mod));
 
@@ -40,6 +42,8 @@ public final class BridgeConfigScreen {
 		cat.addEntry(eb.startBooleanToggle(Component.literal("Party feed"), config.partyAnnounce).setDefaultValue(true).setSaveConsumer(v -> config.partyAnnounce = v).setYesNoTextSupplier(v -> Component.literal(v ? "On" : "Off")).build());
 
 		cat.addEntry(eb.startEnumSelector(Component.literal("Game Messages"), BridgeConfig.GameDisplayMode.class, config.gameDisplayMode).setDefaultValue(BridgeConfig.GameDisplayMode.ALL).setSaveConsumer(v -> config.gameDisplayMode = v).build());
+
+		cat.addEntry(eb.startIntSlider(Component.literal("Image Preview Size"), config.imagePreviewSize, 20, 80).setDefaultValue(40).setSaveConsumer(v -> config.imagePreviewSize = v).setTextGetter(v -> Component.literal(v + "%")).build());
 
 		return builder.build();
 	}
@@ -116,6 +120,71 @@ public final class BridgeConfigScreen {
 				linkBtn.active = false;
 			}
 			mod.startLinkFlow(() -> mc.setScreen(BridgeConfigScreen.create(parent, mod)));
+		}
+	}
+
+	private static final class LogoEntry extends AbstractConfigListEntry<Void> {
+		private static final net.minecraft.resources.Identifier LOGO_TEXTURE = net.minecraft.resources.Identifier.parse("edenmod:icon.png");
+		// Intrinsic dimensions of icon.png, needed to normalise the blit UVs
+		// so the whole image is sampled and scaled into the on-screen box.
+		private static final int LOGO_W = 722;
+		private static final int LOGO_H = 693;
+
+		LogoEntry() {
+			super(Component.empty(), false);
+		}
+
+		@Override
+		public Void getValue() {
+			return null;
+		}
+
+		@Override
+		public Optional<Void> getDefaultValue() {
+			return Optional.empty();
+		}
+
+		@Override
+		public void save() {
+		}
+
+		@Override
+		public int getItemHeight() {
+			return 70;
+		}
+
+		@Override
+		public void render(GuiGraphics g, int index, int y, int x, int entryWidth, int entryHeight, int mouseX, int mouseY, boolean hovered, float delta) {
+			int logoW = 64;
+			int logoH = logoW * LOGO_H / LOGO_W;
+			g.blit(RenderPipelines.GUI_TEXTURED, LOGO_TEXTURE, x + entryWidth / 2 - logoW / 2, y + 3, 0.0f, 0.0f, logoW, logoH, LOGO_W, LOGO_H, LOGO_W, LOGO_H);
+
+			Minecraft mc = Minecraft.getInstance();
+			String currentVer = tel.eden.mod.update.UpdateChecker.currentVersion();
+			if (currentVer == null)
+				currentVer = "Unknown";
+
+			tel.eden.mod.update.UpdateInfo pendingUpdate = tel.eden.mod.EdenModClient.instance().getPendingUpdate();
+			String updateText = (pendingUpdate != null) ? "Update Available: " + pendingUpdate.version() : "Up to date";
+
+			String text1 = "v" + currentVer;
+			String text2 = updateText;
+
+			int textX1 = x + entryWidth - mc.font.width(text1) - 5;
+			int textX2 = x + entryWidth - mc.font.width(text2) - 5;
+
+			g.drawString(mc.font, text1, textX1, y + 15, 0xAAAAAA);
+			g.drawString(mc.font, text2, textX2, y + 30, pendingUpdate != null ? 0x55FF55 : 0xAAAAAA);
+		}
+
+		@Override
+		public List<? extends GuiEventListener> children() {
+			return List.of();
+		}
+
+		@Override
+		public List<? extends NarratableEntry> narratables() {
+			return List.of();
 		}
 	}
 }

@@ -24,8 +24,12 @@ public class ClientPacketListenerMixin {
 		}
 		Component modified = DiscordChatFormatter.processEmotes(packet.content());
 		if (modified != packet.content()) {
-			Component finalModified = modified;
+			// This HEAD inject fires before vanilla's ensureRunningOnSameThread, i.e.
+			// on the netty network thread. Marshal the re-display onto the client
+			// thread — mutating the chat GUI off-thread races the render thread and
+			// the emote message would flicker, drop, or crash.
 			ci.cancel();
+			Component finalModified = modified;
 			Minecraft.getInstance().execute(() -> {
 				Minecraft mc = Minecraft.getInstance();
 				if (mc.player != null) {

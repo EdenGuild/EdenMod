@@ -134,7 +134,9 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 	private String socketJwt;
 	private boolean onWynncraft;
-	private final java.util.List<PartyInfo> knownParties = new java.util.ArrayList<>();
+	// Mutated on the inbound-message path and read from GUI screens on the render
+	// thread; copy-on-write keeps those cross-thread reads from racing the writes.
+	private final java.util.List<PartyInfo> knownParties = new java.util.concurrent.CopyOnWriteArrayList<>();
 	// GitHub update check: run once per game session; the prompt offers a one-click
 	// download (applied on game close) and a link to the release page.
 	private final UpdateChecker updateChecker = new UpdateChecker();
@@ -171,6 +173,15 @@ public final class EdenModClient implements ClientModInitializer {
 		return config;
 	}
 
+	public tel.eden.mod.update.UpdateInfo getPendingUpdate() {
+		return pendingUpdate;
+	}
+
+	/** An immutable snapshot of the currently known parties, safe to read off-thread. */
+	public java.util.List<PartyInfo> knownParties() {
+		return java.util.List.copyOf(knownParties);
+	}
+
 	@Override
 	public void onInitializeClient() {
 		instance = this;
@@ -187,7 +198,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 		KeyMapping.Category edenCategory = new KeyMapping.Category(net.minecraft.resources.Identifier.parse("edenmod"));
 		openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, edenCategory));
-		createPartyKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.create_party", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_L, edenCategory));
+		createPartyKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_menu", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_L, edenCategory));
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			loginPending = true;
@@ -243,9 +254,9 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 		while (createPartyKey.consumeClick()) {
 			if (onWynncraft) {
-				openPartyGui();
+				openMenuGui();
 			} else {
-				display(() -> Component.literal("You must be on Wynncraft to open the party creator screen.").withStyle(net.minecraft.ChatFormatting.RED));
+				display(() -> Component.literal("You must be on Wynncraft to open the Eden menu.").withStyle(net.minecraft.ChatFormatting.RED));
 			}
 		}
 		if (pendingUpdateNotification && client.player != null) {
@@ -594,31 +605,19 @@ public final class EdenModClient implements ClientModInitializer {
 		return true;
 	}
 
-	private static String playerName() {
+	public static String playerName() {
 		return Minecraft.getInstance().player != null ? Minecraft.getInstance().player.getGameProfile().name() : null;
 	}
 
 	private int openCreationGui(FabricClientCommandSource source) {
 		Minecraft mc = Minecraft.getInstance();
-		mc.execute(this::openPartyGui);
+		mc.execute(this::openMenuGui);
 		return 1;
 	}
 
-	private void openPartyGui() {
+	private void openMenuGui() {
 		Minecraft mc = Minecraft.getInstance();
-		String ign = playerName();
-		PartyInfo myParty = null;
-		for (PartyInfo p : knownParties) {
-			if (ign != null && p.host().equalsIgnoreCase(ign)) {
-				myParty = p;
-				break;
-			}
-		}
-		if (myParty != null) {
-			mc.setScreen(new tel.eden.mod.gui.PartyManageScreen(mc.screen, this, myParty));
-		} else {
-			mc.setScreen(new PartyCreateScreen(mc.screen, this));
-		}
+		mc.setScreen(new tel.eden.mod.gui.EdenMenuScreen());
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> otherLiteral() {

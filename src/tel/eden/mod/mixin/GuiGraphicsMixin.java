@@ -1,5 +1,6 @@
 package tel.eden.mod.mixin;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Style;
@@ -16,10 +17,38 @@ public class GuiGraphicsMixin {
 	private void onRenderComponentHoverEffect(Font font, Style style, int mouseX, int mouseY, CallbackInfo ci) {
 		if (style != null && style.getHoverEvent() instanceof net.minecraft.network.chat.HoverEvent.ShowText st) {
 			String hoverStr = st.value().getString();
-			int idx = hoverStr.indexOf("[EDEN_IMG]");
+			int idx = hoverStr.indexOf(ImagePreviewManager.HOVER_MARKER);
 			if (idx != -1) {
-				String url = hoverStr.substring(idx + 10);
-				ImagePreviewManager.renderPreview((GuiGraphics) (Object) this, url, mouseX, mouseY);
+				String url = hoverStr.substring(idx + ImagePreviewManager.HOVER_MARKER.length());
+				GuiGraphics guiGraphics = (GuiGraphics) (Object) this;
+				Minecraft mc = Minecraft.getInstance();
+				int screenWidth = mc.getWindow().getGuiScaledWidth();
+				int screenHeight = mc.getWindow().getGuiScaledHeight();
+
+				// Kick off the download and get cached dimensions; fall back to a
+				// placeholder box while the "Loading…" / "Failed…" text is showing.
+				int imgWidth = ImagePreviewManager.getWidth(url);
+				int imgHeight = ImagePreviewManager.getHeight(url);
+				int boxW = imgWidth > 0 ? imgWidth : 100;
+				int boxH = imgHeight > 0 ? imgHeight : 16;
+
+				// Position like a tooltip: offset from the cursor, flipped to the left
+				// or clamped up so the preview always stays fully on-screen.
+				int margin = 6;
+				int offset = 12;
+				int renderX = mouseX + offset;
+				int renderY = mouseY + offset;
+				if (renderX + boxW + margin > screenWidth) {
+					renderX = Math.max(margin, mouseX - offset - boxW);
+				}
+				if (renderY + boxH + margin > screenHeight) {
+					renderY = Math.max(margin, screenHeight - boxH - margin);
+				}
+
+				// Dark backing panel, then the image (or the loading/error text).
+				guiGraphics.fill(renderX - 2, renderY - 2, renderX + boxW + 2, renderY + boxH + 2, 0xCC000000);
+				ImagePreviewManager.renderPreview(guiGraphics, url, renderX, renderY);
+
 				ci.cancel();
 			}
 		}
