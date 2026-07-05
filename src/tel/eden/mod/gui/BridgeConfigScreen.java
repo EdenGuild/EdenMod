@@ -173,8 +173,8 @@ public final class BridgeConfigScreen {
 			int textX1 = x + entryWidth - mc.font.width(text1) - 5;
 			int textX2 = x + entryWidth - mc.font.width(text2) - 5;
 
-			g.drawString(mc.font, text1, textX1, y + 15, 0xAAAAAA);
-			g.drawString(mc.font, text2, textX2, y + 30, pendingUpdate != null ? 0x55FF55 : 0xAAAAAA);
+			g.drawString(mc.font, text1, textX1, y + 15, 0xFFAAAAAA);
+			g.drawString(mc.font, text2, textX2, y + 30, pendingUpdate != null ? 0xFF55FF55 : 0xFFAAAAAA);
 		}
 
 		@Override

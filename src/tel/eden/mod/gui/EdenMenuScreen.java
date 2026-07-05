@@ -81,7 +81,7 @@ public class EdenMenuScreen extends Screen {
 		int textX1 = this.width - this.minecraft.font.width(text1) - 5;
 		int textX2 = this.width - this.minecraft.font.width(text2) - 5;
 
-		guiGraphics.drawString(this.minecraft.font, text1, textX1, 5, 0xAAAAAA);
-		guiGraphics.drawString(this.minecraft.font, text2, textX2, 20, pendingUpdate != null ? 0x55FF55 : 0xAAAAAA);
+		guiGraphics.drawString(this.minecraft.font, text1, textX1, 5, 0xFFAAAAAA);
+		guiGraphics.drawString(this.minecraft.font, text2, textX2, 20, pendingUpdate != null ? 0xFF55FF55 : 0xFFAAAAAA);
 	}
 }

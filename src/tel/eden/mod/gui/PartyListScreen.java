@@ -53,9 +53,9 @@ public final class PartyListScreen extends Screen {
 					mod.socket().sendPartyJoin(party.id());
 					this.minecraft.setScreen(null);
 				}
-			}).bounds(this.width / 2 + 100, y - 5, 40, 20).build());
+			}).bounds(this.width / 2 + 120, y - 6, 50, 20).build());
 
-			y += 30;
+			y += 28;
 		}
 	}
 
@@ -77,18 +77,18 @@ public final class PartyListScreen extends Screen {
 	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
 		super.render(guiGraphics, mouseX, mouseY, partialTick);
 
-		guiGraphics.drawCenteredString(this.font, "Active Parties", this.width / 2, 20, 0xFFFFFF);
+		guiGraphics.drawCenteredString(this.font, "Active Parties", this.width / 2, 20, 0xFFFFFFFF);
 
 		if (lastKnownParties.isEmpty()) {
-			guiGraphics.drawCenteredString(this.font, "No active parties", this.width / 2, 60, 0xAAAAAA);
+			guiGraphics.drawCenteredString(this.font, "No active parties", this.width / 2, 60, 0xFFAAAAAA);
 			return;
 		}
 
 		int y = 50;
 		for (PartyInfo party : lastKnownParties) {
-			String text = String.format("#%d - %s (Host: %s) [%d/%d]", party.id(), party.raid(), party.host(), party.members().size(), party.max());
-			guiGraphics.drawString(this.font, text, this.width / 2 - 140, y, 0xFFFFFF);
-			y += 30;
+			String text = String.format("#%d  %s  ·  Host: %s  ·  [%d/%d]", party.id(), party.raid(), party.host(), party.members().size(), party.max());
+			guiGraphics.drawString(this.font, text, this.width / 2 - 165, y, 0xFFFFFFFF);
+			y += 28;
 		}
 	}
 }

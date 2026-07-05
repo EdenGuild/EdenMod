@@ -122,9 +122,9 @@ public class ImagePreviewManager {
 				guiGraphics.blit(RenderPipelines.GUI_TEXTURED, loc, x, y, 0.0f, 0.0f, renderWidth, renderHeight, srcWidth, srcHeight, srcWidth, srcHeight);
 			}
 		} else if (state == PreviewState.DOWNLOADING) {
-			guiGraphics.drawString(Minecraft.getInstance().font, "Loading preview...", x, y, 0xFFFFFF);
+			guiGraphics.drawString(Minecraft.getInstance().font, "Loading preview...", x, y, 0xFFFFFFFF);
 		} else if (state == PreviewState.ERROR) {
-			guiGraphics.drawString(Minecraft.getInstance().font, "Failed to load image", x, y, 0xFF5555);
+			guiGraphics.drawString(Minecraft.getInstance().font, "Failed to load image", x, y, 0xFFFF5555);
 		}
 	}
 
@@ -167,7 +167,7 @@ public class ImagePreviewManager {
 				conn.setReadTimeout(READ_TIMEOUT_MS);
 				conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
 				try (InputStream is = conn.getInputStream()) {
-					NativeImage img = NativeImage.read(is);
+					NativeImage img = readImage(urlString, is);
 					pendingImages.put(urlString, img);
 				}
 			} catch (Exception e) {
@@ -175,6 +175,33 @@ public class ImagePreviewManager {
 				states.put(urlString, PreviewState.ERROR);
 			}
 		});
+	}
+
+	/**
+	 * Decode the stream to a {@link NativeImage}. {@code NativeImage.read} (STB) can't
+	 * handle GIF, so for a {@code .gif} we take just the first frame via ImageIO and
+	 * re-encode it as PNG — which NativeImage does understand — for a static preview.
+	 */
+	private static NativeImage readImage(String urlString, InputStream is) throws java.io.IOException {
+		if (!isGif(urlString)) {
+			return NativeImage.read(is);
+		}
+		java.awt.image.BufferedImage frame = javax.imageio.ImageIO.read(is);
+		if (frame == null) {
+			throw new java.io.IOException("Could not decode GIF: " + urlString);
+		}
+		java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
+		javax.imageio.ImageIO.write(frame, "png", png);
+		return NativeImage.read(new java.io.ByteArrayInputStream(png.toByteArray()));
+	}
+
+	private static boolean isGif(String urlString) {
+		String path = urlString;
+		int query = path.indexOf('?');
+		if (query >= 0) {
+			path = path.substring(0, query);
+		}
+		return path.toLowerCase(Locale.ROOT).endsWith(".gif");
 	}
 
 	/** True only for Discord's CDN hosts; everything else is refused (see field comment). */

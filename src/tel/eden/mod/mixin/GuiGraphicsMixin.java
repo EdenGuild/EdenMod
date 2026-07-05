@@ -32,18 +32,9 @@ public class GuiGraphicsMixin {
 				int boxW = imgWidth > 0 ? imgWidth : 100;
 				int boxH = imgHeight > 0 ? imgHeight : 16;
 
-				// Position like a tooltip: offset from the cursor, flipped to the left
-				// or clamped up so the preview always stays fully on-screen.
-				int margin = 6;
-				int offset = 12;
-				int renderX = mouseX + offset;
-				int renderY = mouseY + offset;
-				if (renderX + boxW + margin > screenWidth) {
-					renderX = Math.max(margin, mouseX - offset - boxW);
-				}
-				if (renderY + boxH + margin > screenHeight) {
-					renderY = Math.max(margin, screenHeight - boxH - margin);
-				}
+				// Static, centred on screen — it does not follow the cursor.
+				int renderX = (screenWidth - boxW) / 2;
+				int renderY = (screenHeight - boxH) / 2;
 
 				// Dark backing panel, then the image (or the loading/error text).
 				guiGraphics.fill(renderX - 2, renderY - 2, renderX + boxW + 2, renderY + boxH + 2, 0xCC000000);

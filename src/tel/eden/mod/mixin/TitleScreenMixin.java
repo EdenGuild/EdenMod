@@ -47,7 +47,7 @@ public class TitleScreenMixin {
 		int textX1 = screenWidth - mc.font.width(text1) - 5;
 		int textX2 = screenWidth - mc.font.width(text2) - 5;
 
-		graphics.drawString(mc.font, text1, textX1, y + logoSize + 5, 0xAAAAAA);
-		graphics.drawString(mc.font, text2, textX2, y + logoSize + 15, pendingUpdate != null ? 0x55FF55 : 0xAAAAAA);
+		graphics.drawString(mc.font, text1, textX1, y + logoSize + 5, 0xFFAAAAAA);
+		graphics.drawString(mc.font, text2, textX2, y + logoSize + 15, pendingUpdate != null ? 0xFF55FF55 : 0xFFAAAAAA);
 	}
 }
