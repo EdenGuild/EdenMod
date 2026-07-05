@@ -51,6 +51,14 @@ public final class EmoteRegistry {
 		return font;
 	}
 
+	/** Every known emote shortcode (without colons), sorted — for listing and autocomplete. */
+	public static java.util.List<String> shortcodes() {
+		ensureLoaded();
+		java.util.List<String> list = new java.util.ArrayList<>(emotes.keySet());
+		java.util.Collections.sort(list);
+		return list;
+	}
+
 	private static void ensureLoaded() {
 		if (emotes != null) {
 			return;

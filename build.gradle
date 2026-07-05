@@ -66,8 +66,11 @@ processResources {
 ext.emoteFontId = 'edenmod:emotes'
 ext.emoteCodepointBase = 0xF000
 ext.emoteDirs = ['catplush']
-ext.emoteAscent = 7
-ext.emoteHeight = 8
+// Render emotes taller than the 8px text so detailed art (e.g. the meep faces)
+// reads as more than a coloured blob. ascent = height/2 + 3 keeps the glyph
+// vertically centred on the text line. Bump/drop these together to taste.
+ext.emoteAscent = 10
+ext.emoteHeight = 14
 
 tasks.register('generateEmoteAssets') {
     def assetsDir = file('resources/assets/edenmod')

@@ -24,10 +24,13 @@ public final class PartyManageScreen extends Screen {
 	private final PartyInfo party;
 
 	private int filledSlots;
+	private int maxSize;
 	private EditBox noteField;
 
 	private Button btnPlayersMinus;
 	private Button btnPlayersPlus;
+	private Button btnMaxMinus;
+	private Button btnMaxPlus;
 	private Button btnUpdate;
 
 	private Identifier iconTarget;
@@ -47,6 +50,7 @@ public final class PartyManageScreen extends Screen {
 			}
 		}
 		this.filledSlots = fSlots;
+		this.maxSize = party.max();
 	}
 
 	@Override
@@ -54,6 +58,12 @@ public final class PartyManageScreen extends Screen {
 		int centerX = this.width / 2;
 		int startY = (this.height - 310) / 2;
 		int rightColX = centerX + 10;
+
+		// Max Size Adjusters
+		btnMaxMinus = Button.builder(Component.literal("-"), b -> adjustMax(-1)).bounds(rightColX + 55, startY + 100, 20, 20).build();
+		btnMaxPlus = Button.builder(Component.literal("+"), b -> adjustMax(1)).bounds(rightColX + 105, startY + 100, 20, 20).build();
+		this.addRenderableWidget(btnMaxMinus);
+		this.addRenderableWidget(btnMaxPlus);
 
 		// Filled Slots Adjusters
 		btnPlayersMinus = Button.builder(Component.literal("-"), b -> adjustFilledSlots(-1)).bounds(rightColX + 55, startY + 124, 20, 20).build();
@@ -114,28 +124,37 @@ public final class PartyManageScreen extends Screen {
 		updateWidgetStates();
 	}
 
-	private void adjustFilledSlots(int amount) {
-		int currentFilledInParty = 0;
+	/** Members occupying a real slot (i.e. excluding the ``*filled*`` placeholders). */
+	private int realMembers() {
+		int filled = 0;
 		for (String member : party.members()) {
 			if (member.equals("*filled*"))
-				currentFilledInParty++;
+				filled++;
 		}
-		int realMembers = party.members().size() - currentFilledInParty;
-		int limit = party.max() - realMembers;
+		return party.members().size() - filled;
+	}
+
+	private void adjustFilledSlots(int amount) {
+		int limit = maxSize - realMembers();
 		filledSlots = Math.max(0, Math.min(limit, filledSlots + amount));
 		updateWidgetStates();
 	}
 
-	private void updateWidgetStates() {
-		btnPlayersMinus.active = filledSlots > 0;
+	private void adjustMax(int amount) {
+		int floor = Math.max(2, realMembers() + filledSlots);
+		maxSize = Math.max(floor, Math.min(10, maxSize + amount));
+		// Keep filled slots within the new capacity.
+		filledSlots = Math.min(filledSlots, Math.max(0, maxSize - realMembers()));
+		updateWidgetStates();
+	}
 
-		int currentFilledInParty = 0;
-		for (String member : party.members()) {
-			if (member.equals("*filled*"))
-				currentFilledInParty++;
-		}
-		int realMembers = party.members().size() - currentFilledInParty;
-		btnPlayersPlus.active = (realMembers + filledSlots) < party.max();
+	private void updateWidgetStates() {
+		int real = realMembers();
+		int occupancy = real + filledSlots;
+		btnPlayersMinus.active = filledSlots > 0;
+		btnPlayersPlus.active = occupancy < maxSize;
+		btnMaxMinus.active = maxSize > Math.max(2, occupancy);
+		btnMaxPlus.active = maxSize < 10;
 	}
 
 	@Override
@@ -174,7 +193,7 @@ public final class PartyManageScreen extends Screen {
 		g.drawCenteredString(this.font, this.title, centerX, startY + 12, 0xFFFFFFFF);
 
 		// LEFT SIDE: Roster
-		g.drawCenteredString(this.font, "Party Roster (" + party.size() + "/" + party.max() + ")", startX + (centerX - startX) / 2, startY + 20, 0xFF55FF55);
+		g.drawCenteredString(this.font, "Party Roster (" + (realMembers() + filledSlots) + "/" + maxSize + ")", startX + (centerX - startX) / 2, startY + 20, 0xFF55FF55);
 		int yPos = startY + 40;
 		for (String member : party.members()) {
 			if (member.equals("*filled*"))
@@ -200,8 +219,8 @@ public final class PartyManageScreen extends Screen {
 			yPos += 24;
 		}
 
-		int emptySlots = party.max() - party.size();
-		for (int i = 0; i < emptySlots + filledSlots; i++) {
+		int extraRows = Math.max(0, maxSize - realMembers());
+		for (int i = 0; i < extraRows; i++) {
 			g.fill(startX + 10, yPos - 1, startX + 22, yPos + 11, 0xFF222222); // placeholder box for empty/filled
 			g.drawString(this.font, i < filledSlots ? "§7*Filled Slot*" : "§8*Empty*", startX + 28, yPos + 1, 0xFFAAAAAA);
 			yPos += 24;
@@ -216,7 +235,9 @@ public final class PartyManageScreen extends Screen {
 			g.pose().popMatrix();
 		}
 		g.drawCenteredString(this.font, party.raid(), rightColX + 80, startY + 74, 0xFF55FF55);
-		g.drawCenteredString(this.font, "Max Size: " + party.max(), rightColX + 80, startY + 89, 0xFFAAAAAA);
+
+		g.drawString(this.font, "Max Size:", rightColX, startY + 106, 0xFFAAAAAA);
+		g.drawCenteredString(this.font, String.valueOf(this.maxSize), rightColX + 90, startY + 106, 0xFFFFFFFF);
 
 		g.drawString(this.font, "Filled Slots:", rightColX, startY + 130, 0xFFAAAAAA);
 		g.drawCenteredString(this.font, String.valueOf(this.filledSlots), rightColX + 90, startY + 130, 0xFFFFFFFF);
@@ -227,6 +248,10 @@ public final class PartyManageScreen extends Screen {
 	private void onUpdate() {
 		var ws = mod.socket();
 		if (ws != null) {
+			if (this.maxSize != party.max()) {
+				ws.sendPartyManage("max", null, this.maxSize, null);
+			}
+
 			if (!noteField.getValue().equals(party.note())) {
 				ws.sendPartyManage("note", noteField.getValue(), 0, null);
 			}

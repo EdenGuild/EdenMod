@@ -41,11 +41,8 @@ public class ImagePreviewManager {
 	private static final ConcurrentHashMap<String, Identifier> textures = new ConcurrentHashMap<>();
 	private static final ConcurrentHashMap<String, NativeImage> pendingImages = new ConcurrentHashMap<>();
 
-	private static final ConcurrentHashMap<String, Integer> renderWidths = new ConcurrentHashMap<>();
-	private static final ConcurrentHashMap<String, Integer> renderHeights = new ConcurrentHashMap<>();
-
-	// The source image's own pixel dimensions, kept to normalise the blit UVs so
-	// the full image is sampled and scaled into the (smaller) render rectangle.
+	// The source image's own pixel dimensions, kept to normalise the blit UVs and to
+	// derive the live on-screen size (see renderSize) as the image is scaled down.
 	private static final ConcurrentHashMap<String, Integer> sourceWidths = new ConcurrentHashMap<>();
 	private static final ConcurrentHashMap<String, Integer> sourceHeights = new ConcurrentHashMap<>();
 
@@ -59,7 +56,7 @@ public class ImagePreviewManager {
 	public static int getWidth(String url) {
 		PreviewState state = states.get(url);
 		if (state == PreviewState.LOADED) {
-			return renderWidths.getOrDefault(url, 100);
+			return renderSize(url)[0];
 		} else if (state == PreviewState.DOWNLOADING || state == PreviewState.ERROR) {
 			return 100; // placeholder width
 		}
@@ -69,11 +66,33 @@ public class ImagePreviewManager {
 	public static int getHeight(String url) {
 		PreviewState state = states.get(url);
 		if (state == PreviewState.LOADED) {
-			return renderHeights.getOrDefault(url, 16);
+			return renderSize(url)[1];
 		} else if (state == PreviewState.DOWNLOADING || state == PreviewState.ERROR) {
 			return 16;
 		}
 		return 0;
+	}
+
+	/**
+	 * The on-screen ``{width, height}`` for a loaded preview, computed live from the
+	 * source dimensions, the current window size, and the current Image Preview Size
+	 * config — so moving the slider resizes previews immediately, cached ones included.
+	 */
+	private static int[] renderSize(String url) {
+		int srcW = sourceWidths.getOrDefault(url, 0);
+		int srcH = sourceHeights.getOrDefault(url, 0);
+		if (srcW <= 0 || srcH <= 0) {
+			return new int[]{100, 16};
+		}
+		int pct = tel.eden.mod.EdenModClient.instance().config().imagePreviewSize;
+		com.mojang.blaze3d.platform.Window window = Minecraft.getInstance().getWindow();
+		int maxWidth = (int) (window.getGuiScaledWidth() * pct / 100.0);
+		int maxHeight = (int) (window.getGuiScaledHeight() * pct / 100.0);
+		float scale = 1.0f;
+		if (srcW > maxWidth || srcH > maxHeight) {
+			scale = Math.min((float) maxWidth / srcW, (float) maxHeight / srcH);
+		}
+		return new int[]{Math.max(1, (int) (srcW * scale)), Math.max(1, (int) (srcH * scale))};
 	}
 
 	public static void renderPreview(GuiGraphics guiGraphics, String url, int x, int y) {
@@ -85,22 +104,10 @@ public class ImagePreviewManager {
 		if (state == PreviewState.DOWNLOADING && pendingImages.containsKey(url)) {
 			NativeImage img = pendingImages.remove(url);
 			if (img != null) {
-				int imgWidth = img.getWidth();
-				int imgHeight = img.getHeight();
-
-				int pct = tel.eden.mod.EdenModClient.instance().config().imagePreviewSize;
-				com.mojang.blaze3d.platform.Window window = Minecraft.getInstance().getWindow();
-				int maxWidth = (int) (window.getGuiScaledWidth() * pct / 100.0);
-				int maxHeight = (int) (window.getGuiScaledHeight() * pct / 100.0);
-				float scale = 1.0f;
-				if (imgWidth > maxWidth || imgHeight > maxHeight) {
-					scale = Math.min((float) maxWidth / imgWidth, (float) maxHeight / imgHeight);
-				}
-
-				renderWidths.put(url, (int) (imgWidth * scale));
-				renderHeights.put(url, (int) (imgHeight * scale));
-				sourceWidths.put(url, imgWidth);
-				sourceHeights.put(url, imgHeight);
+				// Keep only the source dimensions; the on-screen size is computed live
+				// in renderSize() so the config slider takes effect immediately.
+				sourceWidths.put(url, img.getWidth());
+				sourceHeights.put(url, img.getHeight());
 
 				DynamicTexture texture = new DynamicTexture(() -> "edenmod", img);
 				Identifier loc = Identifier.parse("edenmod:preview_" + Math.abs(url.hashCode()));
@@ -115,11 +122,10 @@ public class ImagePreviewManager {
 		if (state == PreviewState.LOADED) {
 			Identifier loc = textures.get(url);
 			if (loc != null) {
-				int renderWidth = renderWidths.getOrDefault(url, 100);
-				int renderHeight = renderHeights.getOrDefault(url, 100);
-				int srcWidth = sourceWidths.getOrDefault(url, renderWidth);
-				int srcHeight = sourceHeights.getOrDefault(url, renderHeight);
-				guiGraphics.blit(RenderPipelines.GUI_TEXTURED, loc, x, y, 0.0f, 0.0f, renderWidth, renderHeight, srcWidth, srcHeight, srcWidth, srcHeight);
+				int[] size = renderSize(url);
+				int srcWidth = sourceWidths.getOrDefault(url, size[0]);
+				int srcHeight = sourceHeights.getOrDefault(url, size[1]);
+				guiGraphics.blit(RenderPipelines.GUI_TEXTURED, loc, x, y, 0.0f, 0.0f, size[0], size[1], srcWidth, srcHeight, srcWidth, srcHeight);
 			}
 		} else if (state == PreviewState.DOWNLOADING) {
 			guiGraphics.drawString(Minecraft.getInstance().font, "Loading preview...", x, y, 0xFFFFFFFF);
@@ -142,8 +148,6 @@ public class ImagePreviewManager {
 
 	private static void evict(String url) {
 		states.remove(url);
-		renderWidths.remove(url);
-		renderHeights.remove(url);
 		sourceWidths.remove(url);
 		sourceHeights.remove(url);
 		pendingImages.remove(url);

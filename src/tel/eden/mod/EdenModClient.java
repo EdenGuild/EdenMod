@@ -7,6 +7,7 @@ import tel.eden.mod.chat.BankEventParser;
 import tel.eden.mod.chat.CapturedMessage;
 import tel.eden.mod.chat.ChatRelay;
 import tel.eden.mod.chat.DiscordChatFormatter;
+import tel.eden.mod.chat.EmoteRegistry;
 import tel.eden.mod.chat.GuildAnnounceParser;
 import tel.eden.mod.chat.GuildChatParser;
 import tel.eden.mod.chat.GuildEvent;
@@ -232,6 +233,9 @@ public final class EdenModClient implements ClientModInitializer {
 				return 1;
 			})).then(ClientCommandManager.literal("diceroll").executes(ctx -> {
 				requestDiceroll(ctx.getSource());
+				return 1;
+			})).then(ClientCommandManager.literal("emojis").executes(ctx -> {
+				showEmojis(ctx.getSource());
 				return 1;
 			})).then(buildPartyCommand()).then(buildAnnihilationCommand()).then(ClientCommandManager.literal("update").executes(ctx -> {
 				updatePrompt(ctx.getSource());
@@ -736,10 +740,34 @@ public final class EdenModClient implements ClientModInitializer {
 		return Component.literal("Not connected to the Eden bridge.").withStyle(net.minecraft.ChatFormatting.RED);
 	}
 
+	/** List every loaded chat emote with its inline glyph and clickable ``:shortcode:``. */
+	private int showEmojis(FabricClientCommandSource source) {
+		java.util.List<String> codes = EmoteRegistry.shortcodes();
+		if (codes.isEmpty()) {
+			source.sendFeedback(DiscordChatFormatter.systemLine("No chat emojis are loaded.", ChatFormatting.YELLOW));
+			return 1;
+		}
+		MutableComponent out = Component.literal("Eden chat emojis (" + codes.size() + ") — click one to insert it, or type :name: in chat:").withStyle(ChatFormatting.GREEN);
+		for (String code : codes) {
+			MutableComponent line = Component.literal("\n  ");
+			Integer cp = EmoteRegistry.codepointFor(code);
+			if (cp != null) {
+				String glyph = new String(Character.toChars(cp));
+				line.append(Component.literal(glyph).withStyle(Style.EMPTY.withFont(EmoteRegistry.font()).withColor(ChatFormatting.WHITE)));
+				line.append(Component.literal("  "));
+			}
+			Style click = Style.EMPTY.withColor(ChatFormatting.AQUA).withClickEvent(new ClickEvent.SuggestCommand(":" + code + ":")).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to put :" + code + ": in your chat box")));
+			line.append(Component.literal(":" + code + ":").setStyle(click));
+			out.append(line);
+		}
+		source.sendFeedback(out);
+		return 1;
+	}
+
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden emojis", "list all chat emojis and their :syntax:"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
 
 	/** Print the in-game command list client-side. */
 	private void showHelp(FabricClientCommandSource source) {
