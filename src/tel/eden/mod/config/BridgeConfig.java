@@ -16,8 +16,7 @@ import org.slf4j.LoggerFactory;
  * <p>
  * Holds the backend base URL the mod talks to, the current backend-signed JWT
  * (and its expiry, so we can re-auth before it lapses), and whether the bridge
- * is
- * enabled.
+ * is enabled.
  */
 public final class BridgeConfig {
 	private static final Logger LOGGER = LoggerFactory.getLogger("edenmod");
@@ -52,9 +51,8 @@ public final class BridgeConfig {
 
 	/**
 	 * Whether open/full raid parties are auto-announced in chat with a clickable
-	 * {@code [JOIN #id]} feed. When false, parties are only
-	 * shown on demand via {@code /eden party list}. Toggle with
-	 * {@code /eden party announce on|off}.
+	 * {@code [JOIN #id]} feed. When false, parties are only shown on demand via
+	 * {@code /eden party list}. Toggle with {@code /eden party announce on|off}.
 	 */
 	public boolean partyAnnounce = true;
 
@@ -80,7 +78,7 @@ public final class BridgeConfig {
 
 	/**
 	 * How much of the screen (as a percentage) an image preview can occupy.
-	 * Range 20–80, default 40.
+	 * Range 1-100, default 40.
 	 */
 	public int imagePreviewSize = 40;
 
@@ -95,6 +93,7 @@ public final class BridgeConfig {
 						config.gameDisplayMode = config.showGameMessages ? GameDisplayMode.ALL : GameDisplayMode.NONE;
 						config.showGameMessages = null;
 					}
+					config.imagePreviewSize = Math.max(1, Math.min(100, config.imagePreviewSize));
 					return config;
 				}
 			} catch (IOException | RuntimeException e) {

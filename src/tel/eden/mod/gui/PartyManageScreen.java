@@ -1,23 +1,26 @@
 package tel.eden.mod.gui;
 
-import java.util.ArrayList;
-import java.util.List;
+import com.mojang.blaze3d.platform.NativeImage;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.net.PartyInfo;
-import com.mojang.blaze3d.platform.NativeImage;
-import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.world.entity.player.PlayerSkin;
 
-public final class PartyManageScreen extends Screen {
+public final class PartyManageScreen extends EdenReferenceScreen {
+	private static final int BASE_PANEL_WIDTH = 360;
+	private static final int BASE_PANEL_HEIGHT = 320;
 
 	private final Screen parent;
 	private final EdenModClient mod;
@@ -31,11 +34,11 @@ public final class PartyManageScreen extends Screen {
 	private Button btnPlayersPlus;
 	private Button btnMaxMinus;
 	private Button btnMaxPlus;
-	private Button btnUpdate;
 
 	private Identifier iconTarget;
-	private final java.util.Map<String, Identifier> headCache = new java.util.HashMap<>();
-	private final java.util.Set<String> headFetching = new java.util.HashSet<>();
+	private final Map<String, Identifier> headCache = new HashMap<>();
+	private final Set<String> headFetching = new HashSet<>();
+	private EdenPanelLayout layout;
 
 	public PartyManageScreen(Screen parent, EdenModClient mod, PartyInfo party) {
 		super(Component.literal("Manage Guild Party"));
@@ -55,43 +58,38 @@ public final class PartyManageScreen extends Screen {
 
 	@Override
 	protected void init() {
-		int centerX = this.width / 2;
-		int startY = (this.height - 310) / 2;
-		int rightColX = centerX + 10;
+		updateReferenceSpace();
+		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		int rightColX = layout.x(190);
 
-		// Max Size Adjusters
-		btnMaxMinus = Button.builder(Component.literal("-"), b -> adjustMax(-1)).bounds(rightColX + 55, startY + 100, 20, 20).build();
-		btnMaxPlus = Button.builder(Component.literal("+"), b -> adjustMax(1)).bounds(rightColX + 105, startY + 100, 20, 20).build();
+		btnMaxMinus = Button.builder(Component.literal("-"), b -> adjustMax(-1)).bounds(layout.x(245), layout.y(100), layout.w(20), layout.h(20)).build();
+		btnMaxPlus = Button.builder(Component.literal("+"), b -> adjustMax(1)).bounds(layout.x(295), layout.y(100), layout.w(20), layout.h(20)).build();
 		this.addRenderableWidget(btnMaxMinus);
 		this.addRenderableWidget(btnMaxPlus);
 
-		// Filled Slots Adjusters
-		btnPlayersMinus = Button.builder(Component.literal("-"), b -> adjustFilledSlots(-1)).bounds(rightColX + 55, startY + 124, 20, 20).build();
-		btnPlayersPlus = Button.builder(Component.literal("+"), b -> adjustFilledSlots(1)).bounds(rightColX + 105, startY + 124, 20, 20).build();
+		btnPlayersMinus = Button.builder(Component.literal("-"), b -> adjustFilledSlots(-1)).bounds(layout.x(245), layout.y(124), layout.w(20), layout.h(20)).build();
+		btnPlayersPlus = Button.builder(Component.literal("+"), b -> adjustFilledSlots(1)).bounds(layout.x(295), layout.y(124), layout.w(20), layout.h(20)).build();
 		this.addRenderableWidget(btnPlayersMinus);
 		this.addRenderableWidget(btnPlayersPlus);
 
-		// Note Text Field
-		noteField = new EditBox(this.font, rightColX, startY + 175, 160, 20, Component.literal("Party Note"));
+		noteField = new EditBox(this.font, rightColX, layout.y(175), layout.w(160), layout.h(20), Component.literal("Party Note"));
 		noteField.setMaxLength(100);
 		noteField.setValue(party.note());
 		this.addRenderableWidget(noteField);
 
-		// Action Buttons
 		Button btnCreateInGame = Button.builder(Component.literal("Create In-game"), b -> {
 			mod.createInGameParty(party.members());
 			onClose();
-		}).bounds(rightColX, startY + 220, 160, 20).build();
-		btnUpdate = Button.builder(Component.literal("Update Party"), b -> onUpdate()).bounds(rightColX, startY + 245, 160, 20).build();
-		Button btnDisband = Button.builder(Component.literal("§cDisband Party"), b -> onDisband()).bounds(rightColX, startY + 270, 160, 20).build();
-		Button btnCancel = Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(rightColX, startY + 295, 160, 20).build();
+		}).bounds(rightColX, layout.y(220), layout.w(160), layout.h(20)).build();
+		Button btnUpdate = Button.builder(Component.literal("Update Party"), b -> onUpdate()).bounds(rightColX, layout.y(245), layout.w(160), layout.h(20)).build();
+		Button btnDisband = Button.builder(Component.literal("Â§cDisband Party"), b -> onDisband()).bounds(rightColX, layout.y(270), layout.w(160), layout.h(20)).build();
+		Button btnCancel = Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(rightColX, layout.y(295), layout.w(160), layout.h(20)).build();
 
 		this.addRenderableWidget(btnCreateInGame);
 		this.addRenderableWidget(btnUpdate);
 		this.addRenderableWidget(btnDisband);
 		this.addRenderableWidget(btnCancel);
 
-		// Register target icon
 		String target = party.raid().toLowerCase();
 		if (target.contains("grootslangs"))
 			iconTarget = registerDynamicIcon("notg");
@@ -108,17 +106,16 @@ public final class PartyManageScreen extends Screen {
 		else
 			iconTarget = registerDynamicIcon("other");
 
-		// Add kick buttons for players
-		int yPos = startY + 40;
+		int yPos = layout.y(40);
 		for (String member : party.members()) {
 			if (member.equals("*filled*"))
 				continue;
 			if (!member.equalsIgnoreCase(party.host())) {
 				String finalMember = member;
-				Button btnKick = Button.builder(Component.literal("§c\u2716"), b -> onKick(finalMember)).bounds(centerX - 35, yPos - 3, 20, 20).build();
+				Button btnKick = Button.builder(Component.literal("Â§c\u2716"), b -> onKick(finalMember)).bounds(layout.x(145), yPos - Math.max(1, layout.h(3)), layout.w(20), layout.h(20)).build();
 				this.addRenderableWidget(btnKick);
 			}
-			yPos += 24;
+			yPos += layout.h(24);
 		}
 
 		updateWidgetStates();
@@ -143,7 +140,6 @@ public final class PartyManageScreen extends Screen {
 	private void adjustMax(int amount) {
 		int floor = Math.max(2, realMembers() + filledSlots);
 		maxSize = Math.max(floor, Math.min(10, maxSize + amount));
-		// Keep filled slots within the new capacity.
 		filledSlots = Math.min(filledSlots, Math.max(0, maxSize - realMembers()));
 		updateWidgetStates();
 	}
@@ -159,90 +155,69 @@ public final class PartyManageScreen extends Screen {
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
-		// Draw standard translucent background overlay
-		g.fill(0, 0, this.width, this.height, 0xC0000000);
+		int scaledMouseX = scaledMouseX(mouseX);
+		int scaledMouseY = scaledMouseY(mouseY);
 
-		int centerX = this.width / 2;
-		int startY = (this.height - 310) / 2;
-		int startX = centerX - 180;
-		int panelWidth = 360;
-		int panelHeight = 320;
-		int rightColX = centerX + 10;
+		pushReferencePose(g);
+		layout.drawBackground(g);
+		layout.drawPanel(g);
+		g.fill(layout.x(175), layout.y(30), layout.x(176), layout.y(300), 0xFF555555);
 
-		// 1. Draw centered dialog panel (solid dark gray, slightly translucent)
-		g.fill(startX, startY, startX + panelWidth, startY + panelHeight, 0xE0282828);
+		super.render(g, scaledMouseX, scaledMouseY, delta);
 
-		// 2. Draw 3D outer bevel borders
-		g.fill(startX, startY, startX + panelWidth, startY + 1, 0xFF8E8E8E); // Top outer
-		g.fill(startX, startY + panelHeight - 1, startX + panelWidth, startY + panelHeight, 0xFF5C5C5C); // Bottom outer
-		g.fill(startX, startY, startX + 1, startY + panelHeight, 0xFF8E8E8E); // Left outer
-		g.fill(startX + panelWidth - 1, startY, startX + panelWidth, startY + panelHeight, 0xFF5C5C5C); // Right outer
+		g.drawCenteredString(this.font, this.title, layout.centerX(), layout.y(12), 0xFFFFFFFF);
+		g.drawCenteredString(this.font, "Party Roster (" + (realMembers() + filledSlots) + "/" + maxSize + ")", layout.x(87), layout.y(20), 0xFF55FF55);
 
-		// 3. Draw 3D inner highlight borders
-		g.fill(startX + 1, startY + 1, startX + panelWidth - 1, startY + 2, 0xFFC6C6C6); // Top inner
-		g.fill(startX + 1, startY + panelHeight - 2, startX + panelWidth - 1, startY + panelHeight - 1, 0xFF3E3E3E); // Bottom inner
-		g.fill(startX + 1, startY + 1, startX + 2, startY + panelHeight - 1, 0xFFC6C6C6); // Left inner
-		g.fill(startX + panelWidth - 2, startY + 1, startX + panelWidth - 1, startY + panelHeight - 1, 0xFF3E3E3E); // Right inner
-
-		// Vertical divider
-		g.fill(centerX - 5, startY + 30, centerX - 4, startY + panelHeight - 20, 0xFF555555);
-
-		super.render(g, mouseX, mouseY, delta);
-
-		// Title
-		g.drawCenteredString(this.font, this.title, centerX, startY + 12, 0xFFFFFFFF);
-
-		// LEFT SIDE: Roster
-		g.drawCenteredString(this.font, "Party Roster (" + (realMembers() + filledSlots) + "/" + maxSize + ")", startX + (centerX - startX) / 2, startY + 20, 0xFF55FF55);
-		int yPos = startY + 40;
+		int yPos = layout.y(40);
+		int headSize = Math.max(8, layout.h(12));
 		for (String member : party.members()) {
 			if (member.equals("*filled*"))
 				continue;
 
-			// Draw player head
 			Identifier headId = headCache.get(member);
 			if (headId == null) {
-				g.fill(startX + 10, yPos - 1, startX + 22, yPos + 11, 0xFF444444); // placeholder box
+				g.fill(layout.x(10), yPos - 1, layout.x(10) + headSize, yPos - 1 + headSize, 0xFF444444);
 				if (!headFetching.contains(member)) {
 					headFetching.add(member);
 					java.util.concurrent.CompletableFuture.runAsync(() -> fetchHead(member));
 				}
 			} else {
 				g.pose().pushMatrix();
-				g.pose().translate(startX + 10, yPos - 1);
-				g.pose().scale(12.0f / 12.0f, 12.0f / 12.0f);
+				g.pose().translate(layout.x(10), yPos - 1);
+				g.pose().scale(headSize / 12.0f, headSize / 12.0f);
 				g.blit(RenderPipelines.GUI_TEXTURED, headId, 0, 0, 0.0f, 0.0f, 12, 12, 12, 12);
 				g.pose().popMatrix();
 			}
 
-			g.drawString(this.font, member, startX + 28, yPos + 1, member.equalsIgnoreCase(party.host()) ? 0xFFFFD700 : 0xFFFFFFFF);
-			yPos += 24;
+			g.drawString(this.font, member, layout.x(28), yPos + 1, member.equalsIgnoreCase(party.host()) ? 0xFFFFD700 : 0xFFFFFFFF);
+			yPos += layout.h(24);
 		}
 
 		int extraRows = Math.max(0, maxSize - realMembers());
 		for (int i = 0; i < extraRows; i++) {
-			g.fill(startX + 10, yPos - 1, startX + 22, yPos + 11, 0xFF222222); // placeholder box for empty/filled
-			g.drawString(this.font, i < filledSlots ? "§7*Filled Slot*" : "§8*Empty*", startX + 28, yPos + 1, 0xFFAAAAAA);
-			yPos += 24;
+			g.fill(layout.x(10), yPos - 1, layout.x(10) + headSize, yPos - 1 + headSize, 0xFF222222);
+			g.drawString(this.font, i < filledSlots ? "Â§7*Filled Slot*" : "Â§8*Empty*", layout.x(28), yPos + 1, 0xFFAAAAAA);
+			yPos += layout.h(24);
 		}
 
-		// RIGHT SIDE: Manage Controls
 		if (iconTarget != null) {
+			int iconSize = Math.max(16, layout.h(28));
 			g.pose().pushMatrix();
-			g.pose().translate(rightColX + 66, startY + 40);
-			g.pose().scale(28.0f / 64.0f, 28.0f / 64.0f);
+			g.pose().translate(layout.x(256), layout.y(40));
+			g.pose().scale(iconSize / 64.0f, iconSize / 64.0f);
 			g.blit(RenderPipelines.GUI_TEXTURED, iconTarget, 0, 0, 0.0f, 0.0f, 64, 64, 64, 64);
 			g.pose().popMatrix();
 		}
-		g.drawCenteredString(this.font, party.raid(), rightColX + 80, startY + 74, 0xFF55FF55);
+		g.drawCenteredString(this.font, party.raid(), layout.x(270), layout.y(74), 0xFF55FF55);
 
-		g.drawString(this.font, "Max Size:", rightColX, startY + 106, 0xFFAAAAAA);
-		g.drawCenteredString(this.font, String.valueOf(this.maxSize), rightColX + 90, startY + 106, 0xFFFFFFFF);
+		g.drawString(this.font, "Max Size:", layout.x(190), layout.y(106), 0xFFAAAAAA);
+		g.drawCenteredString(this.font, String.valueOf(this.maxSize), layout.x(280), layout.y(106), 0xFFFFFFFF);
 
-		g.drawString(this.font, "Filled Slots:", rightColX, startY + 130, 0xFFAAAAAA);
-		g.drawCenteredString(this.font, String.valueOf(this.filledSlots), rightColX + 90, startY + 130, 0xFFFFFFFF);
+		g.drawString(this.font, "Filled Slots:", layout.x(190), layout.y(130), 0xFFAAAAAA);
+		g.drawCenteredString(this.font, String.valueOf(this.filledSlots), layout.x(280), layout.y(130), 0xFFFFFFFF);
 
-		g.drawString(this.font, "Party Note:", rightColX, startY + 162, 0xFFAAAAAA);
+		g.drawString(this.font, "Party Note:", layout.x(190), layout.y(162), 0xFFAAAAAA);
+		popReferencePose(g);
 	}
 
 	private void onUpdate() {
@@ -289,6 +264,25 @@ public final class PartyManageScreen extends Screen {
 		this.minecraft.setScreen(this.parent);
 	}
 
+	@Override
+	public boolean mouseClicked(MouseButtonEvent event, boolean bl) {
+		return super.mouseClicked(rescale(event), bl);
+	}
+
+	@Override
+	public boolean mouseReleased(MouseButtonEvent event) {
+		return super.mouseReleased(rescale(event));
+	}
+
+	@Override
+	public boolean mouseDragged(MouseButtonEvent event, double d, double e) {
+		return super.mouseDragged(rescale(event), d / uiScale, e / uiScale);
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double d, double e) {
+		return super.mouseScrolled(mouseX / uiScale, mouseY / uiScale, d, e);
+	}
 	private Identifier registerDynamicIcon(String name) {
 		Identifier loc = Identifier.parse("edenmod:dynamic_icon/" + name);
 		var tm = Minecraft.getInstance().getTextureManager();

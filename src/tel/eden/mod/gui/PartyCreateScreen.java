@@ -7,13 +7,16 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import tel.eden.mod.EdenModClient;
 
 /** Screen GUI for creating a raid/Annihilation/Other party with auto-detected party size. */
-public final class PartyCreateScreen extends Screen {
+public final class PartyCreateScreen extends EdenReferenceScreen {
+	private static final int BASE_PANEL_WIDTH = 350;
+	private static final int BASE_PANEL_HEIGHT = 310;
 
 	private final Screen parent;
 	private final EdenModClient mod;
@@ -45,6 +48,7 @@ public final class PartyCreateScreen extends Screen {
 	private Identifier iconWtp;
 	private Identifier iconAnnihilation;
 	private Identifier iconOther;
+	private EdenPanelLayout layout;
 
 	public PartyCreateScreen(Screen parent, EdenModClient mod) {
 		super(Component.literal("Create Guild Party"));
@@ -55,24 +59,24 @@ public final class PartyCreateScreen extends Screen {
 
 	@Override
 	protected void init() {
-		int centerX = this.width / 2;
-		int startY = (this.height - 310) / 2;
+		updateReferenceSpace();
+		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
 		// Targets Grid (24px tall buttons with icons)
 		// Row 1
-		btnNotg = Button.builder(Component.literal("    NOTG"), b -> onTargetClick("Nest of the Grootslangs")).bounds(centerX - 160, startY + 30, 155, 24).build();
-		btnNol = Button.builder(Component.literal("    NOL"), b -> onTargetClick("Orphion's Nexus of Light")).bounds(centerX + 5, startY + 30, 155, 24).build();
+		btnNotg = Button.builder(Component.literal("    NOTG"), b -> onTargetClick("Nest of the Grootslangs")).bounds(layout.x(15), layout.y(30), layout.w(155), layout.h(24)).build();
+		btnNol = Button.builder(Component.literal("    NOL"), b -> onTargetClick("Orphion's Nexus of Light")).bounds(layout.x(180), layout.y(30), layout.w(155), layout.h(24)).build();
 
 		// Row 2
-		btnTcc = Button.builder(Component.literal("    TCC"), b -> onTargetClick("The Canyon Colossus")).bounds(centerX - 160, startY + 56, 155, 24).build();
-		btnTna = Button.builder(Component.literal("    TNA"), b -> onTargetClick("The Nameless Anomaly")).bounds(centerX + 5, startY + 56, 155, 24).build();
+		btnTcc = Button.builder(Component.literal("    TCC"), b -> onTargetClick("The Canyon Colossus")).bounds(layout.x(15), layout.y(56), layout.w(155), layout.h(24)).build();
+		btnTna = Button.builder(Component.literal("    TNA"), b -> onTargetClick("The Nameless Anomaly")).bounds(layout.x(180), layout.y(56), layout.w(155), layout.h(24)).build();
 
 		// Row 3
-		btnWtp = Button.builder(Component.literal("    WTP"), b -> onTargetClick("The Wartorn Palace")).bounds(centerX - 160, startY + 82, 155, 24).build();
-		btnAnnihilation = Button.builder(Component.literal("    Annihilation"), b -> onTargetClick("Annihilation")).bounds(centerX + 5, startY + 82, 155, 24).build();
+		btnWtp = Button.builder(Component.literal("    WTP"), b -> onTargetClick("The Wartorn Palace")).bounds(layout.x(15), layout.y(82), layout.w(155), layout.h(24)).build();
+		btnAnnihilation = Button.builder(Component.literal("    Annihilation"), b -> onTargetClick("Annihilation")).bounds(layout.x(180), layout.y(82), layout.w(155), layout.h(24)).build();
 
 		// Row 4
-		btnOther = Button.builder(Component.literal("    Other"), b -> onTargetClick("Other")).bounds(centerX - 160, startY + 108, 155, 24).build();
+		btnOther = Button.builder(Component.literal("    Other"), b -> onTargetClick("Other")).bounds(layout.x(15), layout.y(108), layout.w(155), layout.h(24)).build();
 
 		this.addRenderableWidget(btnNotg);
 		this.addRenderableWidget(btnNol);
@@ -83,27 +87,27 @@ public final class PartyCreateScreen extends Screen {
 		this.addRenderableWidget(btnOther);
 
 		// Max Party Size Adjusters
-		btnMaxMinus = Button.builder(Component.literal("-"), b -> adjustMaxPartySize(-1)).bounds(centerX + 45, startY + 142, 20, 20).build();
-		btnMaxPlus = Button.builder(Component.literal("+"), b -> adjustMaxPartySize(1)).bounds(centerX + 95, startY + 142, 20, 20).build();
+		btnMaxMinus = Button.builder(Component.literal("-"), b -> adjustMaxPartySize(-1)).bounds(layout.x(220), layout.y(142), layout.w(20), layout.h(20)).build();
+		btnMaxPlus = Button.builder(Component.literal("+"), b -> adjustMaxPartySize(1)).bounds(layout.x(270), layout.y(142), layout.w(20), layout.h(20)).build();
 
 		this.addRenderableWidget(btnMaxMinus);
 		this.addRenderableWidget(btnMaxPlus);
 
 		// Players in Party Adjusters
-		btnPlayersMinus = Button.builder(Component.literal("-"), b -> adjustPlayersInParty(-1)).bounds(centerX + 45, startY + 164, 20, 20).build();
-		btnPlayersPlus = Button.builder(Component.literal("+"), b -> adjustPlayersInParty(1)).bounds(centerX + 95, startY + 164, 20, 20).build();
+		btnPlayersMinus = Button.builder(Component.literal("-"), b -> adjustPlayersInParty(-1)).bounds(layout.x(220), layout.y(164), layout.w(20), layout.h(20)).build();
+		btnPlayersPlus = Button.builder(Component.literal("+"), b -> adjustPlayersInParty(1)).bounds(layout.x(270), layout.y(164), layout.w(20), layout.h(20)).build();
 
 		this.addRenderableWidget(btnPlayersMinus);
 		this.addRenderableWidget(btnPlayersPlus);
 
 		// Note Text Field
-		noteField = new EditBox(this.font, centerX - 160, startY + 206, 320, 20, Component.literal("Party Note"));
+		noteField = new EditBox(this.font, layout.x(15), layout.y(206), layout.w(320), layout.h(20), Component.literal("Party Note"));
 		noteField.setMaxLength(100);
 		this.addRenderableWidget(noteField);
 
 		// Action Buttons
-		btnCreate = Button.builder(Component.literal("Create Party"), b -> onCreate()).bounds(centerX - 160, startY + 276, 155, 20).build();
-		Button btnCancel = Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(centerX + 5, startY + 276, 155, 20).build();
+		btnCreate = Button.builder(Component.literal("Create Party"), b -> onCreate()).bounds(layout.x(15), layout.y(276), layout.w(155), layout.h(20)).build();
+		Button btnCancel = Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(layout.x(180), layout.y(276), layout.w(155), layout.h(20)).build();
 
 		this.addRenderableWidget(btnCreate);
 		this.addRenderableWidget(btnCancel);
@@ -216,31 +220,14 @@ public final class PartyCreateScreen extends Screen {
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
-		// Draw standard translucent background overlay
-		g.fill(0, 0, this.width, this.height, 0xC0000000);
+		int scaledMouseX = scaledMouseX(mouseX);
+		int scaledMouseY = scaledMouseY(mouseY);
 
-		int centerX = this.width / 2;
-		int startY = (this.height - 310) / 2;
-		int startX = centerX - 175;
-		int panelWidth = 350;
-		int panelHeight = 310;
+		pushReferencePose(g);
+		layout.drawBackground(g);
+		layout.drawPanel(g);
 
-		// 1. Draw centered dialog panel (solid dark gray, slightly translucent)
-		g.fill(startX, startY, startX + panelWidth, startY + panelHeight, 0xE0282828);
-
-		// 2. Draw 3D outer bevel borders
-		g.fill(startX, startY, startX + panelWidth, startY + 1, 0xFF8E8E8E); // Top outer
-		g.fill(startX, startY + panelHeight - 1, startX + panelWidth, startY + panelHeight, 0xFF5C5C5C); // Bottom outer
-		g.fill(startX, startY, startX + 1, startY + panelHeight, 0xFF8E8E8E); // Left outer
-		g.fill(startX + panelWidth - 1, startY, startX + panelWidth, startY + panelHeight, 0xFF5C5C5C); // Right outer
-
-		// 3. Draw 3D inner highlight borders
-		g.fill(startX + 1, startY + 1, startX + panelWidth - 1, startY + 2, 0xFFC6C6C6); // Top inner
-		g.fill(startX + 1, startY + panelHeight - 2, startX + panelWidth - 1, startY + panelHeight - 1, 0xFF3E3E3E); // Bottom inner
-		g.fill(startX + 1, startY + 1, startX + 2, startY + panelHeight - 1, 0xFFC6C6C6); // Left inner
-		g.fill(startX + panelWidth - 2, startY + 1, startX + panelWidth - 1, startY + panelHeight - 1, 0xFF3E3E3E); // Right inner
-
-		super.render(g, mouseX, mouseY, delta);
+		super.render(g, scaledMouseX, scaledMouseY, delta);
 
 		// Draw custom icons on buttons
 		drawButtonIcon(g, btnNotg, iconNotg);
@@ -252,20 +239,20 @@ public final class PartyCreateScreen extends Screen {
 		drawButtonIcon(g, btnOther, iconOther);
 
 		// Draw Screen Title (Opaque White)
-		g.drawCenteredString(this.font, this.title, centerX, startY + 12, 0xFFFFFFFF);
+		g.drawCenteredString(this.font, this.title, layout.centerX(), layout.y(12), 0xFFFFFFFF);
 
 		// Draw Labels & Values (Opaque Colors)
-		g.drawString(this.font, "Max Party Size:", centerX - 160, startY + 148, 0xFFA0A0A0);
-		g.drawCenteredString(this.font, String.valueOf(this.maxPartySize), centerX + 80, startY + 148, 0xFFFFFFFF);
+		g.drawString(this.font, "Max Party Size:", layout.x(15), layout.y(148), 0xFFA0A0A0);
+		g.drawCenteredString(this.font, String.valueOf(this.maxPartySize), layout.x(255), layout.y(148), 0xFFFFFFFF);
 
-		g.drawString(this.font, "Players in Party:", centerX - 160, startY + 170, 0xFFA0A0A0);
-		g.drawCenteredString(this.font, String.valueOf(this.playersInParty), centerX + 80, startY + 170, 0xFFFFFFFF);
+		g.drawString(this.font, "Players in Party:", layout.x(15), layout.y(170), 0xFFA0A0A0);
+		g.drawCenteredString(this.font, String.valueOf(this.playersInParty), layout.x(255), layout.y(170), 0xFFFFFFFF);
 
-		g.drawString(this.font, "Party Note:", centerX - 160, startY + 194, 0xFFA0A0A0);
+		g.drawString(this.font, "Party Note:", layout.x(15), layout.y(194), 0xFFA0A0A0);
 
 		// Draw Preview Message (Opaque Colors)
 		if (selectedTargets.isEmpty()) {
-			g.drawCenteredString(this.font, "Please select at least one target!", centerX, startY + 240, 0xFFFF5555);
+			g.drawCenteredString(this.font, "Please select at least one target!", layout.centerX(), layout.y(240), 0xFFFF5555);
 		} else {
 			String preview;
 			if (selectedTargets.contains("Annihilation")) {
@@ -279,16 +266,17 @@ public final class PartyCreateScreen extends Screen {
 				}
 				preview = String.join(" / ", shortNames) + " (" + playersInParty + "/4)";
 			}
-			g.drawCenteredString(this.font, "Ready: " + preview, centerX, startY + 240, 0xFF55FF55);
+			g.drawCenteredString(this.font, "Ready: " + preview, layout.centerX(), layout.y(240), 0xFF55FF55);
 		}
+		popReferencePose(g);
 	}
 
 	private void drawButtonIcon(GuiGraphics g, Button btn, Identifier icon) {
 		if (btn != null && icon != null) {
-			// Render full 64x64 texture, scaled down to 20x20 using matrix
+			int size = Math.max(8, btn.getHeight() - 4);
 			g.pose().pushMatrix();
 			g.pose().translate(btn.getX() + 2, btn.getY() + 2);
-			g.pose().scale(20.0f / 64.0f, 20.0f / 64.0f);
+			g.pose().scale(size / 64.0f, size / 64.0f);
 			g.blit(RenderPipelines.GUI_TEXTURED, icon, 0, 0, 0.0f, 0.0f, 64, 64, 64, 64);
 			g.pose().popMatrix();
 		}
@@ -337,6 +325,25 @@ public final class PartyCreateScreen extends Screen {
 		this.minecraft.setScreen(this.parent);
 	}
 
+	@Override
+	public boolean mouseClicked(MouseButtonEvent event, boolean bl) {
+		return super.mouseClicked(rescale(event), bl);
+	}
+
+	@Override
+	public boolean mouseReleased(MouseButtonEvent event) {
+		return super.mouseReleased(rescale(event));
+	}
+
+	@Override
+	public boolean mouseDragged(MouseButtonEvent event, double d, double e) {
+		return super.mouseDragged(rescale(event), d / uiScale, e / uiScale);
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double d, double e) {
+		return super.mouseScrolled(mouseX / uiScale, mouseY / uiScale, d, e);
+	}
 	private Identifier registerDynamicIcon(String name) {
 		Identifier loc = Identifier.parse("edenmod:dynamic_icon/" + name);
 		var tm = Minecraft.getInstance().getTextureManager();
