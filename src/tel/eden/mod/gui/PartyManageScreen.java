@@ -82,7 +82,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 			onClose();
 		}).bounds(rightColX, layout.y(220), layout.w(160), layout.h(20)).build();
 		Button btnUpdate = Button.builder(Component.literal("Update Party"), b -> onUpdate()).bounds(rightColX, layout.y(245), layout.w(160), layout.h(20)).build();
-		Button btnDisband = Button.builder(Component.literal("Â§cDisband Party"), b -> onDisband()).bounds(rightColX, layout.y(270), layout.w(160), layout.h(20)).build();
+		Button btnDisband = Button.builder(Component.literal("§cDisband Party"), b -> onDisband()).bounds(rightColX, layout.y(270), layout.w(160), layout.h(20)).build();
 		Button btnCancel = Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(rightColX, layout.y(295), layout.w(160), layout.h(20)).build();
 
 		this.addRenderableWidget(btnCreateInGame);
@@ -112,7 +112,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 				continue;
 			if (!member.equalsIgnoreCase(party.host())) {
 				String finalMember = member;
-				Button btnKick = Button.builder(Component.literal("Â§c\u2716"), b -> onKick(finalMember)).bounds(layout.x(145), yPos - Math.max(1, layout.h(3)), layout.w(20), layout.h(20)).build();
+				Button btnKick = Button.builder(Component.literal("§c\u2716"), b -> onKick(finalMember)).bounds(layout.x(145), yPos - Math.max(1, layout.h(3)), layout.w(20), layout.h(20)).build();
 				this.addRenderableWidget(btnKick);
 			}
 			yPos += layout.h(24);
@@ -196,7 +196,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		int extraRows = Math.max(0, maxSize - realMembers());
 		for (int i = 0; i < extraRows; i++) {
 			g.fill(layout.x(10), yPos - 1, layout.x(10) + headSize, yPos - 1 + headSize, 0xFF222222);
-			g.drawString(this.font, i < filledSlots ? "Â§7*Filled Slot*" : "Â§8*Empty*", layout.x(28), yPos + 1, 0xFFAAAAAA);
+			g.drawString(this.font, i < filledSlots ? "§7*Filled Slot*" : "§8*Empty*", layout.x(28), yPos + 1, 0xFFAAAAAA);
 			yPos += layout.h(24);
 		}
 
