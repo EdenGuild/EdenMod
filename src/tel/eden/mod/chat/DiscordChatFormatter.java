@@ -219,9 +219,10 @@ public final class DiscordChatFormatter {
 			}
 			String url = matcher.group("url");
 			if (url != null) {
-				// Only Discord-CDN-hosted images become an inline preview; any other
-				// image-looking link stays a plain link so hovering it can't make the
-				// client fetch an attacker-controlled URL. See ImagePreviewManager.
+				// Only images from trusted CDNs (Discord, Imgur, Tenor, Giphy, etc.)
+				// become an inline preview; any other image-looking link stays a plain
+				// link so hovering it can't make the client fetch an attacker-controlled
+				// URL. See ImagePreviewManager.TRUSTED_HOSTS.
 				boolean isImage = ImagePreviewManager.isAllowedHost(url) && url.matches("(?i).*\\.(png|jpe?g|gif|webp|bmp)(\\?.*)?$");
 				out.append(Component.literal(isImage ? "[Image]" : url).withStyle(linkStyle(url, isImage)));
 			} else {

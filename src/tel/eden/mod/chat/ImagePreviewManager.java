@@ -159,7 +159,7 @@ public class ImagePreviewManager {
 
 	private static void downloadImage(String urlString) {
 		if (!isAllowedHost(urlString)) {
-			LOGGER.warn("Refusing image preview from non-Discord host: {}", urlString);
+			LOGGER.warn("Refusing image preview from untrusted host: {}", urlString);
 			states.put(urlString, PreviewState.ERROR);
 			return;
 		}
@@ -182,33 +182,52 @@ public class ImagePreviewManager {
 	}
 
 	/**
-	 * Decode the stream to a {@link NativeImage}. {@code NativeImage.read} (STB) can't
-	 * handle GIF, so for a {@code .gif} we take just the first frame via ImageIO and
-	 * re-encode it as PNG — which NativeImage does understand — for a static preview.
+	 * Decode the stream to a {@link NativeImage}. STB (used by NativeImage) handles
+	 * PNG, JPEG, BMP, and static GIF. For formats it can't decode (animated GIF,
+	 * WebP, etc.) we buffer the bytes and fall back to Java's ImageIO, re-encoding
+	 * as PNG for NativeImage to consume.
 	 */
 	private static NativeImage readImage(String urlString, InputStream is) throws java.io.IOException {
-		if (!isGif(urlString)) {
-			return NativeImage.read(is);
+		// Buffer the entire stream so we can retry with a second decoder if the
+		// first one fails — InputStream is not resettable in general.
+		byte[] data = is.readAllBytes();
+
+		// Fast path: NativeImage (STB) handles PNG, JPEG, BMP natively.
+		try {
+			return NativeImage.read(new java.io.ByteArrayInputStream(data));
+		} catch (Exception ignored) {
+			// STB couldn't decode it (GIF, WebP, etc.) — try ImageIO next.
 		}
-		java.awt.image.BufferedImage frame = javax.imageio.ImageIO.read(is);
+
+		// Fallback: ImageIO supports GIF (first frame) and any format a JRE
+		// plugin provides. Re-encode the decoded frame as PNG for NativeImage.
+		java.awt.image.BufferedImage frame = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(data));
 		if (frame == null) {
-			throw new java.io.IOException("Could not decode GIF: " + urlString);
+			throw new java.io.IOException("No decoder could read image: " + urlString);
 		}
 		java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
 		javax.imageio.ImageIO.write(frame, "png", png);
 		return NativeImage.read(new java.io.ByteArrayInputStream(png.toByteArray()));
 	}
 
-	private static boolean isGif(String urlString) {
-		String path = urlString;
-		int query = path.indexOf('?');
-		if (query >= 0) {
-			path = path.substring(0, query);
-		}
-		return path.toLowerCase(Locale.ROOT).endsWith(".gif");
-	}
+	/**
+	 * Trusted image hosts whose URLs are safe to download in the background.
+	 * Anything not in this list stays a plain clickable link so a crafted URL in
+	 * chat can't make every hovering player fetch an attacker-controlled address.
+	 */
+	private static final java.util.Set<String> TRUSTED_HOSTS = java.util.Set.of(
+				// Discord
+				"cdn.discordapp.com", "media.discordapp.net",
+				// Imgur
+				"i.imgur.com", "imgur.com",
+				// Tenor (Discord GIF picker)
+				"media.tenor.com", "media1.tenor.com", "c.tenor.com",
+				// Giphy
+				"media.giphy.com", "i.giphy.com", "media0.giphy.com", "media1.giphy.com", "media2.giphy.com", "media3.giphy.com", "media4.giphy.com",
+				// Wynncraft
+				"cdn.wynncraft.com");
 
-	/** True only for Discord's CDN hosts; everything else is refused (see field comment). */
+	/** True for trusted image CDNs; everything else is refused to prevent IP leaks. */
 	public static boolean isAllowedHost(String urlString) {
 		try {
 			String host = URI.create(urlString).getHost();
@@ -216,7 +235,11 @@ public class ImagePreviewManager {
 				return false;
 			}
 			host = host.toLowerCase(Locale.ROOT);
-			return host.equals("cdn.discordapp.com") || host.equals("media.discordapp.net") || host.endsWith(".discordapp.com") || host.endsWith(".discordapp.net");
+			if (TRUSTED_HOSTS.contains(host)) {
+				return true;
+			}
+			// Allow any subdomain of Discord's CDN (e.g. images-ext-1.discordapp.net).
+			return host.endsWith(".discordapp.com") || host.endsWith(".discordapp.net");
 		} catch (IllegalArgumentException e) {
 			return false;
 		}
