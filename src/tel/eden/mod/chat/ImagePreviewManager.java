@@ -19,6 +19,26 @@ import org.slf4j.LoggerFactory;
 public class ImagePreviewManager {
 	private static final Logger LOGGER = LoggerFactory.getLogger("edenmod");
 
+	static {
+		// ImageIO finds plugins via ServiceLoader on the *system* classloader, but
+		// Fabric loads our bundled jars on its own classloader, so the plugins are
+		// invisible to the default scan. Register their SPIs by hand. Reflection keeps
+		// this a graceful no-op (logged) if the optional dependency is ever absent.
+		registerImageIoPlugin("com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi");
+		registerImageIoPlugin("com.twelvemonkeys.imageio.plugins.jpeg.JPEGImageReaderSpi");
+	}
+
+	private static void registerImageIoPlugin(String spiClassName) {
+		try {
+			Class<?> spiClass = Class.forName(spiClassName);
+			Object spi = spiClass.getDeclaredConstructor().newInstance();
+			javax.imageio.spi.IIORegistry.getDefaultInstance().registerServiceProvider(spi);
+			LOGGER.info("Registered ImageIO plugin {}", spiClassName);
+		} catch (Throwable t) {
+			LOGGER.warn("Could not register ImageIO plugin {}: {}", spiClassName, t.toString());
+		}
+	}
+
 	/**
 	 * Sentinel prefixed onto an image link's hover text so the hover-render mixin can
 	 * recognise it and swap the tooltip for an inline preview. Shared here so the
@@ -27,11 +47,16 @@ public class ImagePreviewManager {
 	 */
 	public static final String HOVER_MARKER = "[EDEN_IMG]";
 
-	// Only download previews from Discord's own CDN. Anything else is left as a
-	// plain link so a crafted "…​.png" in chat can't make every hovering player
-	// fetch an attacker-controlled URL (which would leak their IP).
+	// Only download previews from the trusted CDNs in TRUSTED_HOSTS. Anything else is
+	// left as a plain link so a crafted "…​.png" in chat can't make every hovering
+	// player fetch an attacker-controlled URL (which would leak their IP).
 	private static final int CONNECT_TIMEOUT_MS = 10_000;
 	private static final int READ_TIMEOUT_MS = 10_000;
+
+	// Cap a single preview's download: we buffer the whole image in memory to decode
+	// it, and even trusted CDNs occasionally serve very large files. Rejected past
+	// this whether the server advertises the size or not (see readBounded).
+	private static final long MAX_IMAGE_BYTES = 12L * 1024 * 1024; // 12 MiB
 
 	// Cap the number of decoded previews kept in GPU memory for a session; the
 	// oldest is evicted (and its texture released) once the cap is exceeded.
@@ -170,6 +195,12 @@ public class ImagePreviewManager {
 				conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
 				conn.setReadTimeout(READ_TIMEOUT_MS);
 				conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+				long declared = conn.getContentLengthLong();
+				if (declared > MAX_IMAGE_BYTES) {
+					LOGGER.warn("Refusing oversized image preview ({} bytes): {}", declared, urlString);
+					states.put(urlString, PreviewState.ERROR);
+					return;
+				}
 				try (InputStream is = conn.getInputStream()) {
 					NativeImage img = readImage(urlString, is);
 					pendingImages.put(urlString, img);
@@ -183,31 +214,73 @@ public class ImagePreviewManager {
 
 	/**
 	 * Decode the stream to a {@link NativeImage}. STB (used by NativeImage) handles
-	 * PNG, JPEG, BMP, and static GIF. For formats it can't decode (animated GIF,
-	 * WebP, etc.) we buffer the bytes and fall back to Java's ImageIO, re-encoding
-	 * as PNG for NativeImage to consume.
+	 * PNG, JPEG, BMP, and static GIF. For formats it can't decode (animated GIF, WebP,
+	 * CMYK/progressive JPEG, …) we buffer the bytes and fall back to ImageIO — trying
+	 * every registered reader, including the bundled TwelveMonkeys WebP/JPEG plugins —
+	 * then re-encode the decoded frame as PNG for NativeImage to consume.
 	 */
 	private static NativeImage readImage(String urlString, InputStream is) throws java.io.IOException {
-		// Buffer the entire stream so we can retry with a second decoder if the
+		// Buffer the stream (bounded) so we can retry with a second decoder if the
 		// first one fails — InputStream is not resettable in general.
-		byte[] data = is.readAllBytes();
+		byte[] data = readBounded(is, MAX_IMAGE_BYTES);
 
 		// Fast path: NativeImage (STB) handles PNG, JPEG, BMP natively.
 		try {
 			return NativeImage.read(new java.io.ByteArrayInputStream(data));
 		} catch (Exception ignored) {
-			// STB couldn't decode it (GIF, WebP, etc.) — try ImageIO next.
+			// STB couldn't decode it (GIF, WebP, CMYK JPEG, …) — try ImageIO next.
 		}
 
-		// Fallback: ImageIO supports GIF (first frame) and any format a JRE
-		// plugin provides. Re-encode the decoded frame as PNG for NativeImage.
-		java.awt.image.BufferedImage frame = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(data));
+		// Fallback: try every ImageIO reader that claims the bytes until one decodes
+		// a frame. This tolerates readers that recognise the format but choke on a
+		// specific variant (e.g. the stock JPEG reader vs. a CMYK JPEG), and picks up
+		// the bundled WebP/JPEG plugins registered in the static initializer.
+		java.awt.image.BufferedImage frame = decodeWithImageIo(data);
 		if (frame == null) {
 			throw new java.io.IOException("No decoder could read image: " + urlString);
 		}
 		java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
 		javax.imageio.ImageIO.write(frame, "png", png);
 		return NativeImage.read(new java.io.ByteArrayInputStream(png.toByteArray()));
+	}
+
+	/** Read up to {@code max} bytes, throwing if the stream exceeds it (size guard). */
+	private static byte[] readBounded(InputStream is, long max) throws java.io.IOException {
+		java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+		byte[] chunk = new byte[16 * 1024];
+		long total = 0;
+		int n;
+		while ((n = is.read(chunk)) != -1) {
+			total += n;
+			if (total > max) {
+				throw new java.io.IOException("Image exceeds " + max + "-byte preview limit");
+			}
+			buf.write(chunk, 0, n);
+		}
+		return buf.toByteArray();
+	}
+
+	/** Decode with the first ImageIO reader that succeeds, or {@code null} if none can. */
+	private static java.awt.image.BufferedImage decodeWithImageIo(byte[] data) throws java.io.IOException {
+		try (javax.imageio.stream.ImageInputStream iis = javax.imageio.ImageIO.createImageInputStream(new java.io.ByteArrayInputStream(data))) {
+			if (iis == null) {
+				return null;
+			}
+			java.util.Iterator<javax.imageio.ImageReader> readers = javax.imageio.ImageIO.getImageReaders(iis);
+			while (readers.hasNext()) {
+				javax.imageio.ImageReader reader = readers.next();
+				try {
+					iis.seek(0);
+					reader.setInput(iis, true, true);
+					return reader.read(0);
+				} catch (Exception e) {
+					LOGGER.debug("ImageIO reader {} failed: {}", reader.getClass().getSimpleName(), e.toString());
+				} finally {
+					reader.dispose();
+				}
+			}
+		}
+		return null;
 	}
 
 	/**

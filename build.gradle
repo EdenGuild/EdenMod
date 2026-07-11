@@ -28,6 +28,8 @@ loom {
 repositories {
     // Fabric/Mojang/Minecraft repos are added by Loom automatically.
     maven { url "https://maven.terraformersmc.com/releases/" }
+    // TwelveMonkeys ImageIO plugins (image-preview decoding) live on Maven Central.
+    mavenCentral()
 }
 
 dependencies {
@@ -40,6 +42,20 @@ dependencies {
     // Mod Menu API (compile-only): adds a config-screen button in Mod Menu when
     // it's installed; not bundled, and the entrypoint is inert without Mod Menu.
     modCompileOnly "com.terraformersmc:modmenu:${modmenu_version}"
+
+    // ImageIO plugins for in-game image previews. STB (NativeImage) only decodes
+    // PNG/JPEG/BMP/GIF, so WebP (Discord/Tenor/Giphy) and awkward JPEGs fail. These
+    // add WebP read support and a more tolerant JPEG reader, registered by hand at
+    // runtime (Fabric's classloader hides them from ImageIO's default plugin scan).
+    // Bundled jar-in-jar via include(); the whole TwelveMonkeys transitive set is
+    // listed explicitly (Loom's include is non-transitive). See ImagePreviewManager.
+    implementation include("com.twelvemonkeys.imageio:imageio-webp:${twelvemonkeys_version}")
+    implementation include("com.twelvemonkeys.imageio:imageio-jpeg:${twelvemonkeys_version}")
+    implementation include("com.twelvemonkeys.imageio:imageio-core:${twelvemonkeys_version}")
+    implementation include("com.twelvemonkeys.imageio:imageio-metadata:${twelvemonkeys_version}")
+    implementation include("com.twelvemonkeys.common:common-lang:${twelvemonkeys_version}")
+    implementation include("com.twelvemonkeys.common:common-io:${twelvemonkeys_version}")
+    implementation include("com.twelvemonkeys.common:common-image:${twelvemonkeys_version}")
 }
 
 java {
