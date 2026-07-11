@@ -94,11 +94,63 @@ public final class GuildRewards {
 		void report(String receiver, RewardType type, int count);
 	}
 
+	/** Notified with the guild's current reward storage (aspects/tomes/emeralds). */
+	public interface StorageReporter {
+		void report(int aspects, int tomes, long emeralds);
+	}
+
 	private volatile RewardReporter reporter;
+	private volatile StorageReporter storageReporter;
+	// True while a gift run is driving the menu, so the passive tick-time reader in
+	// EdenModClient doesn't relay a mid-gift (pre-swap) count; the run relays the exact
+	// post-gift value itself.
+	private volatile boolean giftInProgress;
 
 	/** Attach the reporter used to send authoritative reward counts to the backend. */
 	public void setReporter(RewardReporter reporter) {
 		this.reporter = reporter;
+	}
+
+	/** Attach the reporter used to relay the guild's live reward storage counts. */
+	public void setStorageReporter(StorageReporter storageReporter) {
+		this.storageReporter = storageReporter;
+	}
+
+	/** Whether a gift run is currently driving the guild-manage menu. */
+	public boolean isGiftInProgress() {
+		return giftInProgress;
+	}
+
+	/**
+	 * Whether the rewards summary is on screen right now (slot 27 carries the reward
+	 * lore). Cheap enough to poll each client tick. Must run on the client thread.
+	 */
+	public boolean isRewardsMenuOpen() {
+		AbstractContainerMenu menu = menu();
+		if (menu == null || REWARDS_SLOT >= menu.slots.size()) {
+			return false;
+		}
+		ItemLore lore = menu.getSlot(REWARDS_SLOT).getItem().get(DataComponents.LORE);
+		if (lore == null) {
+			return false;
+		}
+		for (Component line : lore.lines()) {
+			if (line.getString().contains(RewardType.EMERALD.loreKey)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Read the current aspect/tome/emerald storage from the open rewards summary, or
+	 * {@code null} if it isn't open. Must run on the client thread.
+	 */
+	public long[] readAllCounts() {
+		if (!isRewardsMenuOpen()) {
+			return null;
+		}
+		return new long[]{readRewardCount(RewardType.ASPECT.loreKey), readRewardCount(RewardType.TOME.loreKey), readRewardCount(RewardType.EMERALD.loreKey)};
 	}
 
 	private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
@@ -212,6 +264,7 @@ public final class GuildRewards {
 	}
 
 	private void run(String name, RewardType type, int requested, boolean dump) {
+		giftInProgress = true;
 		try {
 			if (!isChief()) {
 				chat("Only guild Chiefs can gift rewards.", ChatFormatting.RED);
@@ -239,7 +292,13 @@ public final class GuildRewards {
 				chat("Couldn't open the guild manage menu — try again.", ChatFormatting.RED);
 				return;
 			}
-			int available = onClient(() -> readRewardCount(type.loreKey));
+			// Read all three counts up front (index == RewardType.hotbar): the gifted
+			// type gives us `available`, and the trio becomes the post-gift snapshot.
+			long[] counts = onClient(this::readAllCounts);
+			if (counts == null) {
+				counts = new long[]{0, 0, 0};
+			}
+			int available = (int) counts[type.hotbar];
 			int availableItems = type == RewardType.EMERALD ? available / EMERALDS_PER_ITEM : available;
 			// Never attempt to gift more than the guild actually has; this both avoids
 			// wasted clicks and keeps the reported handout count exact.
@@ -269,6 +328,14 @@ public final class GuildRewards {
 			if (currentReporter != null) {
 				currentReporter.report(name, type, amount);
 			}
+			// Relay the exact storage left after this run (authoritative final value):
+			// decrement the gifted type by what we just handed out.
+			long[] finalCounts = counts.clone();
+			finalCounts[type.hotbar] -= type == RewardType.EMERALD ? (long) amount * EMERALDS_PER_ITEM : amount;
+			StorageReporter currentStorageReporter = storageReporter;
+			if (currentStorageReporter != null) {
+				currentStorageReporter.report((int) finalCounts[0], (int) finalCounts[1], finalCounts[2]);
+			}
 			if (type.resetKind != null) {
 				// Show the matching /manage reset command, clickable to copy, so the
 				// pending balance can be zeroed on Discord after the in-game payout.
@@ -280,6 +347,8 @@ public final class GuildRewards {
 		} catch (Exception e) {
 			LOGGER.warn("Gift run failed", e);
 			chat("Gift failed: " + e.getMessage(), ChatFormatting.RED);
+		} finally {
+			giftInProgress = false;
 		}
 	}
 

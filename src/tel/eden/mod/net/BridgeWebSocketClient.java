@@ -27,38 +27,42 @@ public final class BridgeWebSocketClient {
 
 	/** Callbacks for inbound bridge events (delivered off the game thread). */
 	public interface MessageSink {
+		// Every display method takes an optional {@code color} ("RRGGBB", "" for none):
+		// when set, the backend wants the whole rendered line painted in that colour, so
+		// message colours can be retuned server-side without shipping a new mod.
+
 		/**
 		 * A relayed Discord message. {@code replyTo}/{@code replyExcerpt} are non-empty
 		 * when the Discord message was a reply (the replied-to author and a short quote).
 		 */
-		void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt);
+		void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt, String color);
 
 		/** A bridge user just logged in (presence notice). */
-		void onLoginNotice(String username);
+		void onLoginNotice(String username, String color);
 
 		/** A bridge user fully disconnected (presence notice). */
-		void onLogoutNotice(String username);
+		void onLogoutNotice(String username, String color);
 
 		/** Response to a {@code /eden online} request: the connected bridge users. */
-		void onOnlineList(java.util.List<String> users);
+		void onOnlineList(java.util.List<String> users, String color);
 
 		/**
 		 * Response to {@code /eden aspects pending}: each member's pending aspects, or
 		 * an {@code error} (e.g. not a Chief) when the request was refused.
 		 */
-		void onAspectsPending(java.util.List<PendingEntry> entries, String error);
+		void onAspectsPending(java.util.List<PendingEntry> entries, String error, String color);
 
 		/** A raid party changed state ({@code open}/{@code join}/{@code full}/etc.). */
-		void onPartyUpdate(String event, String actor, PartyInfo party);
+		void onPartyUpdate(String event, String actor, PartyInfo party, String color);
 
 		/** Response to a {@code /eden party list} request: the open raid parties. */
-		void onPartyList(java.util.List<PartyInfo> parties);
+		void onPartyList(java.util.List<PartyInfo> parties, String color);
 
 		/** A short result line for a party action the player just took in-game. */
-		void onPartyFeedback(String message);
+		void onPartyFeedback(String message, String color);
 
 		/** Feedback on game commands (e.g. cooldown). */
-		void onGameFeedback(String message);
+		void onGameFeedback(String message, String color);
 
 		/**
 		 * The bridge server rejected the connection. {@code code} is either the
@@ -420,6 +424,20 @@ public final class BridgeWebSocketClient {
 		current.sendText(obj.toString(), true);
 	}
 
+	/** Relay the guild's current reward storage (aspects/tomes/emeralds) for the live counter. */
+	public void sendGuildStorage(int aspects, int tomes, long emeralds) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "guildStorage");
+		obj.addProperty("aspects", aspects);
+		obj.addProperty("tomes", tomes);
+		obj.addProperty("emeralds", emeralds);
+		current.sendText(obj.toString(), true);
+	}
+
 	private void connect() {
 		if (!running) {
 			return;
@@ -516,15 +534,15 @@ public final class BridgeWebSocketClient {
 		try {
 			JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
 			switch (get(obj, "type")) {
-				case "discordMessage" -> sink.onDiscordMessage(get(obj, "author"), get(obj, "content"), get(obj, "replyTo"), get(obj, "replyExcerpt"));
-				case "loginNotice" -> sink.onLoginNotice(get(obj, "username"));
-				case "logoutNotice" -> sink.onLogoutNotice(get(obj, "username"));
-				case "onlineList" -> sink.onOnlineList(getStringArray(obj, "users"));
-				case "aspectsPendingReply" -> sink.onAspectsPending(parsePendingEntries(obj), get(obj, "error"));
-				case "partyUpdate" -> sink.onPartyUpdate(get(obj, "event"), get(obj, "actor"), parseParty(obj));
-				case "partyListReply" -> sink.onPartyList(parsePartyList(obj));
-				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"));
-				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"));
+				case "discordMessage" -> sink.onDiscordMessage(get(obj, "author"), get(obj, "content"), get(obj, "replyTo"), get(obj, "replyExcerpt"), get(obj, "color"));
+				case "loginNotice" -> sink.onLoginNotice(get(obj, "username"), get(obj, "color"));
+				case "logoutNotice" -> sink.onLogoutNotice(get(obj, "username"), get(obj, "color"));
+				case "onlineList" -> sink.onOnlineList(getStringArray(obj, "users"), get(obj, "color"));
+				case "aspectsPendingReply" -> sink.onAspectsPending(parsePendingEntries(obj), get(obj, "error"), get(obj, "color"));
+				case "partyUpdate" -> sink.onPartyUpdate(get(obj, "event"), get(obj, "actor"), parseParty(obj), get(obj, "color"));
+				case "partyListReply" -> sink.onPartyList(parsePartyList(obj), get(obj, "color"));
+				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"), get(obj, "color"));
+				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
 				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"));
 				case "error" -> {
 					String code = get(obj, "code");

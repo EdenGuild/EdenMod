@@ -167,8 +167,12 @@ public final class EdenModClient implements ClientModInitializer {
 	// Tick counters for the periodic tab check and presence heartbeat.
 	private int tabCheckTick = 0;
 	private int presenceTick = 0;
+	private int storageCheckTick = 0;
 	private static final int TAB_CHECK_INTERVAL_TICKS = 60; // 3 s at 20 tps
 	private static final int PRESENCE_INTERVAL_TICKS = 600; // 30 s at 20 tps
+	private static final int STORAGE_CHECK_INTERVAL_TICKS = 10; // 0.5 s at 20 tps
+	// Last {aspects, tomes, emeralds} relayed, so an unchanged read isn't re-sent.
+	private volatile long[] lastStorageSent = null;
 	// Silent JWT renewal: trigger this many seconds before expiry.
 	private static final long RENEWAL_THRESHOLD_SECS = 30L * 24 * 60 * 60; // 30 days
 
@@ -204,6 +208,9 @@ public final class EdenModClient implements ClientModInitializer {
 				current.sendGuildRewardSummary(playerName(), receiver, type.unitReward(), count);
 			}
 		});
+		// Relay the guild's live reward storage to the backend counter: the exact value
+		// after a gift run, and (in onClientTick) whenever a Chief opens the menu.
+		guildRewards.setStorageReporter(this::relayStorage);
 
 		KeyMapping.Category edenCategory = new KeyMapping.Category(net.minecraft.resources.Identifier.parse("edenmod"));
 		openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, edenCategory));
@@ -308,6 +315,32 @@ public final class EdenModClient implements ClientModInitializer {
 				current.sendPresence(inGameWorld);
 			}
 		}
+		// Passive guild-storage read: while a Chief has the rewards menu open (and no
+		// gift run is driving it), snapshot aspects/tomes/emeralds and relay on change,
+		// so the Discord counter stays live without the mod ever auto-opening a menu.
+		if (onWynncraft && ++storageCheckTick >= STORAGE_CHECK_INTERVAL_TICKS) {
+			storageCheckTick = 0;
+			if (socket != null && !guildRewards.isGiftInProgress()) {
+				long[] counts = guildRewards.readAllCounts();
+				if (counts != null) {
+					relayStorage((int) counts[0], (int) counts[1], counts[2]);
+				}
+			}
+		}
+	}
+
+	/** Relay a guild reward-storage snapshot over the bridge, skipping unchanged values. */
+	private void relayStorage(int aspects, int tomes, long emeralds) {
+		long[] snapshot = {aspects, tomes, emeralds};
+		if (java.util.Arrays.equals(snapshot, lastStorageSent)) {
+			return;
+		}
+		BridgeWebSocketClient current = socket;
+		if (current == null) {
+			return;
+		}
+		lastStorageSent = snapshot;
+		current.sendGuildStorage(aspects, tomes, emeralds);
 	}
 
 	/** Re-evaluate server gating + connection state after a (re)connect. */
@@ -336,32 +369,32 @@ public final class EdenModClient implements ClientModInitializer {
 		try {
 			socket = BridgeWebSocketClient.create(BridgeConfig.DEFAULT_BACKEND_URL, config.jwt, MOD_VERSION, new BridgeWebSocketClient.MessageSink() {
 				@Override
-				public void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt) {
-					display(() -> DiscordChatFormatter.format(author, content, replyTo, replyExcerpt));
+				public void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt, String color) {
+					displayColored(color, () -> DiscordChatFormatter.format(author, content, replyTo, replyExcerpt));
 				}
 
 				@Override
-				public void onLoginNotice(String username) {
-					display(() -> DiscordChatFormatter.loginNotice(username));
+				public void onLoginNotice(String username, String color) {
+					displayColored(color, () -> DiscordChatFormatter.loginNotice(username));
 				}
 
 				@Override
-				public void onLogoutNotice(String username) {
-					display(() -> DiscordChatFormatter.logoutNotice(username));
+				public void onLogoutNotice(String username, String color) {
+					displayColored(color, () -> DiscordChatFormatter.logoutNotice(username));
 				}
 
 				@Override
-				public void onOnlineList(java.util.List<String> users) {
-					display(() -> DiscordChatFormatter.onlineList(users));
+				public void onOnlineList(java.util.List<String> users, String color) {
+					displayColored(color, () -> DiscordChatFormatter.onlineList(users));
 				}
 
 				@Override
-				public void onAspectsPending(java.util.List<PendingEntry> entries, String error) {
-					display(() -> DiscordChatFormatter.aspectsPending(entries, error));
+				public void onAspectsPending(java.util.List<PendingEntry> entries, String error, String color) {
+					displayColored(color, () -> DiscordChatFormatter.aspectsPending(entries, error));
 				}
 
 				@Override
-				public void onPartyUpdate(String event, String actor, PartyInfo party) {
+				public void onPartyUpdate(String event, String actor, PartyInfo party, String color) {
 					knownParties.removeIf(p -> p.id() == party.id());
 					if (!event.equals("closed")) {
 						knownParties.add(party);
@@ -372,25 +405,25 @@ public final class EdenModClient implements ClientModInitializer {
 						return;
 					}
 					switch (event) {
-						case "open" -> display(() -> PartyFormatter.partyOpen(party));
-						case "full" -> display(() -> PartyFormatter.partyFull(party));
-						case "join" -> display(() -> PartyFormatter.partyJoin(actor, party));
-						case "leave" -> display(() -> PartyFormatter.partyLeave(actor, party));
+						case "open" -> displayColored(color, () -> PartyFormatter.partyOpen(party));
+						case "full" -> displayColored(color, () -> PartyFormatter.partyFull(party));
+						case "join" -> displayColored(color, () -> PartyFormatter.partyJoin(actor, party));
+						case "leave" -> displayColored(color, () -> PartyFormatter.partyLeave(actor, party));
 						default -> {
 							/* closed/other: nothing to announce */ }
 					}
 				}
 
 				@Override
-				public void onPartyList(java.util.List<PartyInfo> parties) {
+				public void onPartyList(java.util.List<PartyInfo> parties, String color) {
 					knownParties.clear();
 					knownParties.addAll(parties);
-					display(() -> PartyFormatter.listing(parties));
+					displayColored(color, () -> PartyFormatter.listing(parties));
 				}
 
 				@Override
-				public void onPartyFeedback(String message) {
-					display(() -> PartyFormatter.feedback(message));
+				public void onPartyFeedback(String message, String color) {
+					displayColored(color, () -> PartyFormatter.feedback(message));
 				}
 
 				@Override
@@ -420,8 +453,8 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onGameFeedback(String message) {
-					display(() -> DiscordChatFormatter.systemLine(message, net.minecraft.ChatFormatting.GOLD));
+				public void onGameFeedback(String message, String color) {
+					displayColored(color, () -> DiscordChatFormatter.systemLine(message, net.minecraft.ChatFormatting.GOLD));
 				}
 			}, this::onBridgeConnected);
 			socketJwt = config.jwt;
@@ -1595,6 +1628,44 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 			}
 		});
+	}
+
+	/**
+	 * Display a bridge line, honouring an optional backend colour override: when the
+	 * backend attaches a {@code "RRGGBB"} colour to the message, the whole rendered line
+	 * is painted in it; otherwise the line keeps its built-in colours. This lets the
+	 * backend retune any message's colour without a mod update.
+	 */
+	private void displayColored(String colorHex, java.util.function.Supplier<Component> builder) {
+		Integer rgb = parseHexColor(colorHex);
+		if (rgb == null) {
+			display(builder);
+			return;
+		}
+		int color = rgb;
+		display(() -> recolor(builder.get(), color));
+	}
+
+	/** Parse a {@code "RRGGBB"} hex colour, or {@code null} if empty/malformed. */
+	private static Integer parseHexColor(String hex) {
+		if (hex == null || hex.isEmpty()) {
+			return null;
+		}
+		try {
+			return Integer.parseInt(hex, 16);
+		} catch (NumberFormatException ignored) {
+			return null;
+		}
+	}
+
+	/** Deep-copy a component, forcing every span to {@code rgb} (fonts/events preserved). */
+	private static Component recolor(Component c, int rgb) {
+		net.minecraft.network.chat.MutableComponent out = net.minecraft.network.chat.MutableComponent.create(c.getContents());
+		out.setStyle(c.getStyle().withColor(rgb));
+		for (Component sibling : c.getSiblings()) {
+			out.append(recolor(sibling, rgb));
+		}
+		return out;
 	}
 
 	/** Start the browser link flow; persists the JWT on success and (re)connects. */
