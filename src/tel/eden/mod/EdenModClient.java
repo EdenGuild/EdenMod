@@ -481,7 +481,13 @@ public final class EdenModClient implements ClientModInitializer {
 				@Override
 				public void onPillMessage(String label, String content, String colorHex) {
 					if (GAMES_PILL_LABEL.equals(label) && config.gameDisplayMode != BridgeConfig.GameDisplayMode.ALL) {
-						return;
+						// React Only still shows your own coinflip/diceroll result; every
+						// other "eden"-labelled message (streaks, gambit resets, reward
+						// summaries, other players' rolls, ...) stays hidden.
+						boolean ownRoll = config.gameDisplayMode == BridgeConfig.GameDisplayMode.REACTIONS && isOwnGameResult(content);
+						if (!ownRoll) {
+							return;
+						}
 					}
 					if ("reactions".equals(label) && config.gameDisplayMode == BridgeConfig.GameDisplayMode.NONE) {
 						return;
@@ -708,6 +714,23 @@ public final class EdenModClient implements ClientModInitializer {
 
 	public static String playerName() {
 		return Minecraft.getInstance().player != null ? Minecraft.getInstance().player.getGameProfile().name() : null;
+	}
+
+	/**
+	 * Whether an "eden"-pill message looks like a coinflip/diceroll result mentioning
+	 * the local player, so React Only mode can carve out "your own rolls" from the
+	 * rest of that label (streaks, gambit resets, reward summaries, other players'
+	 * rolls). Matches the stable wording {@code games.py}'s ordinary (non-secret)
+	 * results always use; a handful of rare jackpot outcomes with fully custom
+	 * wording won't match, same as any other message this mode still hides.
+	 */
+	private static boolean isOwnGameResult(String content) {
+		boolean looksLikeRoll = content.contains("flipped a coin") || content.contains("rolled a");
+		if (!looksLikeRoll) {
+			return false;
+		}
+		String name = playerName();
+		return name != null && content.contains(name);
 	}
 
 	private int openOverviewGui(FabricClientCommandSource source) {

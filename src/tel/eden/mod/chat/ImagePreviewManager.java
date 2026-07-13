@@ -58,9 +58,9 @@ public class ImagePreviewManager {
 	// this whether the server advertises the size or not (see readBounded).
 	private static final long MAX_IMAGE_BYTES = 12L * 1024 * 1024; // 12 MiB
 
-	// Cap the HTML fetched to resolve a Tenor/Klipy share page down to its actual
-	// media URL — the og:image tag is always near the top of <head>, so this is
-	// generous while still bounding a malicious/huge page.
+	// Cap the HTML fetched to resolve a Tenor share page down to its actual media
+	// URL — the og:image tag is always near the top of <head>, so this is generous
+	// while still bounding a malicious/huge page.
 	private static final long MAX_SHARE_PAGE_BYTES = 1L * 1024 * 1024; // 1 MiB
 
 	// Animated GIFs decode every frame up front; cap the frame count so a
@@ -288,8 +288,8 @@ public class ImagePreviewManager {
 	}
 
 	/**
-	 * Fetch a Tenor/Klipy share page and pull the underlying media URL out of its
-	 * Open Graph {@code og:image} meta tag — those links point at an HTML page, not
+	 * Fetch a Tenor share page and pull the underlying media URL out of its Open
+	 * Graph {@code og:image} meta tag — those links point at an HTML page, not
 	 * image bytes, so they can't be downloaded directly like a CDN link. Returns
 	 * {@code null} if the page couldn't be fetched or had no recognisable tag.
 	 */
@@ -495,8 +495,12 @@ public class ImagePreviewManager {
 	 * (e.g. {@code tenor.com/view/...}) — {@link #resolveShareImageUrl} fetches the
 	 * page and pulls the real media URL out of its {@code og:image} tag before the
 	 * normal download path runs.
+	 *
+	 * <p>Klipy is deliberately not included here: its share pages sit behind a
+	 * Cloudflare bot-management challenge that always 403s a plain HTTP fetch, so
+	 * there's nothing to resolve — those links stay plain clickable text instead.
 	 */
-	private static final java.util.Set<String> SHARE_HOSTS = java.util.Set.of("tenor.com", "www.tenor.com", "klipy.com", "www.klipy.com");
+	private static final java.util.Set<String> SHARE_HOSTS = java.util.Set.of("tenor.com", "www.tenor.com");
 
 	/** True for trusted image CDNs; everything else is refused to prevent IP leaks. */
 	public static boolean isAllowedHost(String urlString) {
@@ -528,7 +532,7 @@ public class ImagePreviewManager {
 	/**
 	 * Whether a resolved (post-share-page) media URL is safe to actually download:
 	 * either one of the already-trusted CDNs, or a same-site subdomain of the share
-	 * page it came from (e.g. a Klipy CDN host under klipy.com). Keeps the same
+	 * page it came from (e.g. a Tenor CDN host under tenor.com). Keeps the same
 	 * anti-SSRF discipline as {@link #isAllowedHost} instead of trusting whatever an
 	 * og:image tag happens to contain.
 	 */
@@ -556,8 +560,8 @@ public class ImagePreviewManager {
 
 	/**
 	 * Whether {@code urlString} can become an inline preview at all: either a direct
-	 * image/gif link from a trusted CDN, or a Tenor/Klipy share-page link (resolved
-	 * to its real media URL at download time, see {@link #resolveShareImageUrl}).
+	 * image/gif link from a trusted CDN, or a Tenor share-page link (resolved to its
+	 * real media URL at download time, see {@link #resolveShareImageUrl}).
 	 */
 	public static boolean isPreviewable(String urlString) {
 		if (isShareHost(urlString)) {
@@ -568,9 +572,9 @@ public class ImagePreviewManager {
 
 	/**
 	 * Whether {@code urlString} is a gif rather than a still image — either a direct
-	 * {@code .gif} link, or a Tenor/Klipy share link (those sites are gif-only).
-	 * Decided from the URL alone (no download needed) so the chat label can be picked
-	 * immediately, before the async fetch even starts.
+	 * {@code .gif} link, or a Tenor share link (Tenor is gif-only). Decided from the
+	 * URL alone (no download needed) so the chat label can be picked immediately,
+	 * before the async fetch even starts.
 	 */
 	public static boolean isGifUrl(String urlString) {
 		if (isShareHost(urlString)) {

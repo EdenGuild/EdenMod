@@ -220,7 +220,7 @@ public final class DiscordChatFormatter {
 			String url = matcher.group("url");
 			if (url != null) {
 				// Only images from trusted CDNs (Discord, Imgur, Tenor, Giphy, etc.) or
-				// a Tenor/Klipy share-page link become an inline preview; any other
+				// a Tenor share-page link become an inline preview; any other
 				// image-looking link stays a plain link so hovering it can't make the
 				// client fetch an attacker-controlled URL. See
 				// ImagePreviewManager.isPreviewable.
