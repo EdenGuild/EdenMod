@@ -73,6 +73,7 @@ import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -135,6 +136,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private final List<TrackedCommandKeybind> trackedCommandKeybinds = new ArrayList<>();
 	private KeyMapping openConfigKey;
 	private KeyMapping createPartyKey;
+	private KeyMapping openEmotePickerKey;
 	private BridgeWebSocketClient socket;
 
 	public BridgeWebSocketClient socket() {
@@ -153,6 +155,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private volatile boolean updateChecked;
 	private volatile boolean updateStaged;
 	private volatile boolean pendingUpdateNotification;
+	private volatile boolean pendingCenteredEmotePicker;
 	// Non-null when the bridge rejected our connection; holds the error code
 	// ("version_rejected", "not_member", "http_401", etc.) so onClientTick can
 	// show the right message once the player is loaded.
@@ -189,6 +192,42 @@ public final class EdenModClient implements ClientModInitializer {
 		return pendingUpdate;
 	}
 
+	public void requestCenteredEmotePicker() {
+		pendingCenteredEmotePicker = true;
+	}
+
+	public boolean consumeCenteredEmotePickerRequest() {
+		boolean pending = pendingCenteredEmotePicker;
+		pendingCenteredEmotePicker = false;
+		return pending;
+	}
+
+	public boolean matchesOpenEmotePickerMouse(net.minecraft.client.input.MouseButtonEvent event) {
+		return openEmotePickerKey.matchesMouse(event);
+	}
+
+	public boolean isOpenEmotePickerMouseBound() {
+		return openEmotePickerKey.saveString().startsWith("key.mouse.");
+	}
+
+	public boolean shouldOpenEmotePickerOnChatOpen() {
+		Minecraft mc = Minecraft.getInstance();
+		if (isOpenEmotePickerMouseBound() || mc.options == null) {
+			return false;
+		}
+		return openEmotePickerKey.saveString().equals(mc.options.keyChat.saveString()) && openEmotePickerKey.isDown();
+	}
+
+	public void openCenteredEmotePicker() {
+		Minecraft mc = Minecraft.getInstance();
+		requestCenteredEmotePicker();
+		mc.execute(() -> {
+			if (!(mc.screen instanceof ChatScreen)) {
+				mc.setScreen(new ChatScreen("", false));
+			}
+		});
+	}
+
 	/** An immutable snapshot of the currently known parties, safe to read off-thread. */
 	public java.util.List<PartyInfo> knownParties() {
 		return java.util.List.copyOf(knownParties);
@@ -215,6 +254,7 @@ public final class EdenModClient implements ClientModInitializer {
 		KeyMapping.Category edenCategory = new KeyMapping.Category(net.minecraft.resources.Identifier.parse("edenmod"));
 		openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, edenCategory));
 		createPartyKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_menu", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_L, edenCategory));
+		openEmotePickerKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_emote_picker", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_MIDDLE, edenCategory));
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			loginPending = true;
@@ -277,6 +317,12 @@ public final class EdenModClient implements ClientModInitializer {
 			} else {
 				display(() -> Component.literal("You must be on Wynncraft to open the Eden menu.").withStyle(net.minecraft.ChatFormatting.RED));
 			}
+		}
+		while (openEmotePickerKey.consumeClick()) {
+			if (client.screen instanceof ChatScreen && isOpenEmotePickerMouseBound()) {
+				continue;
+			}
+			openCenteredEmotePicker();
 		}
 		pollCommandKeybinds(client);
 		if (pendingUpdateNotification && client.player != null) {
@@ -1300,34 +1346,21 @@ public final class EdenModClient implements ClientModInitializer {
 		return normalized == null ? "/" : normalized;
 	}
 
-	/** List every loaded chat emote with its inline glyph and clickable ``:shortcode:``. */
+	/** Open the chat emote picker, centered in the chat screen. */
 	private int showEmojis(FabricClientCommandSource source) {
 		java.util.List<String> codes = EmoteRegistry.shortcodes();
 		if (codes.isEmpty()) {
 			source.sendFeedback(DiscordChatFormatter.systemLine("No chat emojis are loaded.", ChatFormatting.YELLOW));
 			return 1;
 		}
-		MutableComponent out = Component.literal("Eden chat emojis (" + codes.size() + ") — click one to insert it, or type :name: in chat:").withStyle(ChatFormatting.GREEN);
-		for (String code : codes) {
-			MutableComponent line = Component.literal("\n  ");
-			Integer cp = EmoteRegistry.codepointFor(code);
-			if (cp != null) {
-				String glyph = new String(Character.toChars(cp));
-				line.append(Component.literal(glyph).withStyle(Style.EMPTY.withFont(EmoteRegistry.font()).withColor(ChatFormatting.WHITE)));
-				line.append(Component.literal("  "));
-			}
-			Style click = Style.EMPTY.withColor(ChatFormatting.AQUA).withClickEvent(new ClickEvent.SuggestCommand(":" + code + ":")).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to put :" + code + ": in your chat box")));
-			line.append(Component.literal(":" + code + ":").setStyle(click));
-			out.append(line);
-		}
-		source.sendFeedback(out);
+		openCenteredEmotePicker();
 		return 1;
 	}
 
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden emojis", "list all chat emojis and their :syntax:"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -1696,3 +1729,4 @@ public final class EdenModClient implements ClientModInitializer {
 		});
 	}
 }
+

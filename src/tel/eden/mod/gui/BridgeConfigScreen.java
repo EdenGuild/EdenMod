@@ -82,6 +82,7 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow("Bridge", () -> config.enabled, v -> config.enabled = v, "Enabled", "Disabled", true);
 		addToggleRow("My login/logout messages", () -> config.announceSelfPresence, v -> config.announceSelfPresence = v, "On", "Off", true);
 		addToggleRow("Party feed", () -> config.partyAnnounce, v -> config.partyAnnounce = v, "On", "Off", true);
+		addCycleRow("Chat emote tools", () -> config.chatEmoteToolsMode.label(), () -> config.chatEmoteToolsMode = nextChatEmoteToolsMode(config.chatEmoteToolsMode), () -> config.chatEmoteToolsMode = BridgeConfig.ChatEmoteToolsMode.UI_AND_AUTO);
 		addCycleRow("Game messages", () -> shortGameModeLabel(config.gameDisplayMode), () -> config.gameDisplayMode = nextGameMode(config.gameDisplayMode), () -> config.gameDisplayMode = BridgeConfig.GameDisplayMode.ALL);
 		PreviewSizeSlider slider = new PreviewSizeSlider(CONTROL_W, 20);
 		addSliderRow("Image preview size", slider, slider::syncFromConfig, () -> config.imagePreviewSize = 40);
@@ -145,6 +146,11 @@ public final class BridgeConfigScreen extends Screen {
 
 	private BridgeConfig.GameDisplayMode nextGameMode(BridgeConfig.GameDisplayMode current) {
 		BridgeConfig.GameDisplayMode[] values = BridgeConfig.GameDisplayMode.values();
+		return values[(current.ordinal() + 1) % values.length];
+	}
+
+	private BridgeConfig.ChatEmoteToolsMode nextChatEmoteToolsMode(BridgeConfig.ChatEmoteToolsMode current) {
+		BridgeConfig.ChatEmoteToolsMode[] values = BridgeConfig.ChatEmoteToolsMode.values();
 		return values[(current.ordinal() + 1) % values.length];
 	}
 

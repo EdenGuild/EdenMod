@@ -4,6 +4,7 @@
   "package": "tel.eden.mod.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "ChatScreenMixin",
     "ClientPacketListenerCommandAliasMixin",
     "ClientPacketListenerMixin",
     "GuiGraphicsMixin",

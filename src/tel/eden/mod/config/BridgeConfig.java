@@ -90,6 +90,62 @@ public final class BridgeConfig {
 	/** Client-side bindings that run commands from keyboard or mouse input. */
 	public List<CommandKeybind> commandKeybinds = new ArrayList<>();
 
+	/** Favorited chat emotes shown by the right-click picker when the star filter is enabled. */
+	public List<String> favoriteEmotes = new ArrayList<>();
+
+	public enum ChatEmoteToolsMode {
+		UI("UI"), AUTO("Auto"), UI_AND_AUTO("UI & Auto"), NONE("None");
+
+		private final String label;
+
+		ChatEmoteToolsMode(String label) {
+			this.label = label;
+		}
+
+		public String label() {
+			return label;
+		}
+	}
+
+	/** Legacy toggle kept only to migrate older configs into {@link #chatEmoteToolsMode}. */
+	@Deprecated
+	public Boolean chatEmoteUiEnabled = null;
+
+	/** Which chat emote tools are enabled: inline/picker UI, autocomplete, both, or none. */
+	public ChatEmoteToolsMode chatEmoteToolsMode = ChatEmoteToolsMode.UI_AND_AUTO;
+
+	/** Visible emote-picker columns in the chat overlay. */
+	public int emotePickerColumns = 5;
+
+	/** Visible emote-picker rows in the chat overlay before scrolling. */
+	public int emotePickerRows = 4;
+
+	/** Whether chat emote autocomplete should only suggest favorited emotes. */
+	public boolean autocompleteFavoriteEmotes = false;
+
+	public enum EmotePickerOpenMode {
+		CURSOR("Cursor"), CENTER("Center"), CUSTOM("Custom");
+
+		private final String label;
+
+		EmotePickerOpenMode(String label) {
+			this.label = label;
+		}
+
+		public String label() {
+			return label;
+		}
+	}
+
+	/** Where the chat emote picker should open when triggered. */
+	public EmotePickerOpenMode emotePickerOpenMode = EmotePickerOpenMode.CURSOR;
+
+	/** Saved custom top-left X position for the chat emote picker. */
+	public int emotePickerCustomX = -1;
+
+	/** Saved custom top-left Y position for the chat emote picker. */
+	public int emotePickerCustomY = -1;
+
 	public static final class CommandAlias {
 		public String alias = "";
 		public String command = "";
@@ -133,6 +189,21 @@ public final class BridgeConfig {
 					if (config.commandKeybinds == null) {
 						config.commandKeybinds = new ArrayList<>();
 					}
+					if (config.favoriteEmotes == null) {
+						config.favoriteEmotes = new ArrayList<>();
+					}
+					if (config.chatEmoteUiEnabled != null) {
+						config.chatEmoteToolsMode = config.chatEmoteUiEnabled ? ChatEmoteToolsMode.UI_AND_AUTO : ChatEmoteToolsMode.NONE;
+						config.chatEmoteUiEnabled = null;
+					}
+					if (config.chatEmoteToolsMode == null) {
+						config.chatEmoteToolsMode = ChatEmoteToolsMode.UI_AND_AUTO;
+					}
+					if (config.emotePickerOpenMode == null) {
+						config.emotePickerOpenMode = EmotePickerOpenMode.CURSOR;
+					}
+					config.emotePickerColumns = Math.max(1, Math.min(10, config.emotePickerColumns));
+					config.emotePickerRows = Math.max(1, Math.min(10, config.emotePickerRows));
 					config.imagePreviewSize = Math.max(1, Math.min(100, config.imagePreviewSize));
 					return config;
 				}
