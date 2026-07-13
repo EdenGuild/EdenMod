@@ -707,7 +707,7 @@ public abstract class ChatScreenMixin {
 		GLFW.glfwGetCursorPos(window.handle(), rawX, rawY);
 		double scaledX = rawX[0] * window.getGuiScaledWidth() / window.getWidth();
 		double scaledY = rawY[0] * window.getGuiScaledHeight() / window.getHeight();
-		return new double[] { scaledX, scaledY };
+		return new double[]{scaledX, scaledY};
 	}
 
 	@Unique

@@ -1729,4 +1729,3 @@ public final class EdenModClient implements ClientModInitializer {
 		});
 	}
 }
-
