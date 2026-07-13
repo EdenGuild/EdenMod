@@ -295,8 +295,15 @@ public abstract class ChatScreenMixin {
 		edenmod$showSuggestionOverlay = false;
 		String value = input.getValue();
 		if (value.startsWith("/")) {
-			edenmod$resetSuggestionSession();
-			return;
+			// Only suppress emote autocomplete while the cursor is still inside the
+			// command word itself (so vanilla command completion handles "/gamemode").
+			// Past the first space we're in the arguments/message — e.g. guild "/g ..."
+			// or party "/p ..." chat — where emotes in the text should still autocomplete.
+			int firstSpace = value.indexOf(' ');
+			if (firstSpace < 0 || input.getCursorPosition() <= firstSpace) {
+				edenmod$resetSuggestionSession();
+				return;
+			}
 		}
 		EmoteToken token = edenmod$findActiveEmoteToken(value, input.getCursorPosition());
 		if (token == null && edenmod$preserveSuggestionSeed) {
