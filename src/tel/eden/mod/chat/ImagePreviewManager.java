@@ -372,6 +372,14 @@ public class ImagePreviewManager {
 	 * per-frame delay, via the JDK's built-in GIF reader. Returns {@code null} (rather
 	 * than throwing) if the GIF only has one frame or a frame fails to decode, so the
 	 * caller can fall back to the ordinary single-frame path.
+	 *
+	 * <p>The GIF reader hands back each frame as just its own sub-rectangle — most
+	 * web-shared GIFs (Tenor/Discord/Giphy) are frame-optimised, so only the first
+	 * frame is usually full-canvas and every later frame is a small "changed region"
+	 * patch. Rendering those patches directly (at full canvas size) is what produced
+	 * the "few stray pixels" bug: a tiny patch stretched across the full preview. Each
+	 * frame is composited onto a running full-size canvas, per the GIF89a disposal
+	 * method, before being captured — exactly what a browser does.
 	 */
 	private static Frames decodeAnimatedGif(byte[] data) {
 		try (javax.imageio.stream.ImageInputStream iis = javax.imageio.ImageIO.createImageInputStream(new java.io.ByteArrayInputStream(data))) {
@@ -389,11 +397,42 @@ public class ImagePreviewManager {
 				if (frameCount <= 1) {
 					return null; // not actually animated — let the single-frame path handle it
 				}
+
+				int[] canvasSize = logicalScreenSize(reader);
+				java.awt.image.BufferedImage canvas = null;
+				java.awt.image.BufferedImage disposeSnapshot = null;
+				int[] prevRect = null; // {left, top, width, height} of the previous frame
+				String prevDisposal = "none";
+
 				NativeImage[] images = new NativeImage[frameCount];
 				int[] delays = new int[frameCount];
 				for (int i = 0; i < frameCount; i++) {
-					images[i] = toNativeImage(reader.read(i));
-					delays[i] = frameDelayMs(reader, i);
+					java.awt.image.BufferedImage patch = reader.read(i);
+					javax.imageio.metadata.IIOMetadata meta = reader.getImageMetadata(i);
+					int[] rect = frameRect(meta, patch);
+					String disposal = disposalMethod(meta);
+
+					if (canvas == null) {
+						int w = canvasSize[0] > 0 ? canvasSize[0] : patch.getWidth();
+						int h = canvasSize[1] > 0 ? canvasSize[1] : patch.getHeight();
+						canvas = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+					} else {
+						// Apply the PREVIOUS frame's disposal now — it takes effect after
+						// that frame was shown and before this one is drawn.
+						applyDisposal(canvas, disposeSnapshot, prevRect, prevDisposal);
+					}
+
+					// Snapshot before drawing, in case THIS frame disposes to "previous".
+					disposeSnapshot = "restoreToPrevious".equals(disposal) ? copyImage(canvas) : disposeSnapshot;
+
+					java.awt.Graphics2D g = canvas.createGraphics();
+					g.drawImage(patch, rect[0], rect[1], null);
+					g.dispose();
+
+					images[i] = toNativeImage(canvas);
+					delays[i] = frameDelayMs(meta);
+					prevRect = rect;
+					prevDisposal = disposal;
 				}
 				return new Frames(images, delays);
 			} finally {
@@ -405,26 +444,115 @@ public class ImagePreviewManager {
 		}
 	}
 
-	/** The declared delay (ms) for GIF frame {@code index}, or a sane default if unset/zero. */
-	private static int frameDelayMs(javax.imageio.ImageReader reader, int index) {
+	/** Undo the previous frame's disposal on {@code canvas} before the next frame is drawn. */
+	private static void applyDisposal(java.awt.image.BufferedImage canvas, java.awt.image.BufferedImage snapshot, int[] prevRect, String prevDisposal) {
+		if ("restoreToBackgroundColor".equals(prevDisposal)) {
+			java.awt.Graphics2D g = canvas.createGraphics();
+			g.setComposite(java.awt.AlphaComposite.Clear);
+			g.fillRect(prevRect[0], prevRect[1], prevRect[2], prevRect[3]);
+			g.dispose();
+		} else if ("restoreToPrevious".equals(prevDisposal) && snapshot != null) {
+			java.awt.Graphics2D g = canvas.createGraphics();
+			g.setComposite(java.awt.AlphaComposite.Src);
+			g.drawImage(snapshot, 0, 0, null);
+			g.dispose();
+		}
+		// "none" / "doNotDispose" / undefined: leave the canvas as-is.
+	}
+
+	private static java.awt.image.BufferedImage copyImage(java.awt.image.BufferedImage src) {
+		java.awt.image.BufferedImage copy = new java.awt.image.BufferedImage(src.getWidth(), src.getHeight(), java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		java.awt.Graphics2D g = copy.createGraphics();
+		g.setComposite(java.awt.AlphaComposite.Src);
+		g.drawImage(src, 0, 0, null);
+		g.dispose();
+		return copy;
+	}
+
+	/** The GIF's logical screen (canvas) size from the stream metadata, or {0,0} if unavailable. */
+	private static int[] logicalScreenSize(javax.imageio.ImageReader reader) {
 		try {
-			javax.imageio.metadata.IIOMetadata metadata = reader.getImageMetadata(index);
+			javax.imageio.metadata.IIOMetadata streamMeta = reader.getStreamMetadata();
+			if (streamMeta == null) {
+				return new int[]{0, 0};
+			}
+			org.w3c.dom.Node root = streamMeta.getAsTree(streamMeta.getNativeMetadataFormatName());
+			org.w3c.dom.NodeList children = root.getChildNodes();
+			for (int i = 0; i < children.getLength(); i++) {
+				org.w3c.dom.Node node = children.item(i);
+				if ("LogicalScreenDescriptor".equals(node.getNodeName())) {
+					org.w3c.dom.NamedNodeMap attrs = node.getAttributes();
+					int w = Integer.parseInt(attrs.getNamedItem("logicalScreenWidth").getNodeValue());
+					int h = Integer.parseInt(attrs.getNamedItem("logicalScreenHeight").getNodeValue());
+					return new int[]{w, h};
+				}
+			}
+		} catch (Exception ignored) {
+			// No usable stream metadata — the caller falls back to the first frame's size.
+		}
+		return new int[]{0, 0};
+	}
+
+	/** Frame {@code i}'s placement on the canvas: {left, top, width, height}. */
+	private static int[] frameRect(javax.imageio.metadata.IIOMetadata metadata, java.awt.image.BufferedImage patch) {
+		org.w3c.dom.Node node = graphicControlSiblingNode(metadata, "ImageDescriptor");
+		if (node != null) {
+			org.w3c.dom.NamedNodeMap attrs = node.getAttributes();
+			try {
+				int left = Integer.parseInt(attrs.getNamedItem("imageLeftPosition").getNodeValue());
+				int top = Integer.parseInt(attrs.getNamedItem("imageTopPosition").getNodeValue());
+				return new int[]{left, top, patch.getWidth(), patch.getHeight()};
+			} catch (Exception ignored) {
+				// Fall through to the (0,0) default below.
+			}
+		}
+		return new int[]{0, 0, patch.getWidth(), patch.getHeight()};
+	}
+
+	/** Frame {@code i}'s disposal method (e.g. {@code "restoreToBackgroundColor"}), or {@code "none"}. */
+	private static String disposalMethod(javax.imageio.metadata.IIOMetadata metadata) {
+		org.w3c.dom.Node node = graphicControlSiblingNode(metadata, "GraphicControlExtension");
+		if (node != null) {
+			org.w3c.dom.Node attr = node.getAttributes().getNamedItem("disposalMethod");
+			if (attr != null) {
+				return attr.getNodeValue();
+			}
+		}
+		return "none";
+	}
+
+	/** The declared delay (ms) for a GIF frame, or a sane default if unset/zero. */
+	private static int frameDelayMs(javax.imageio.metadata.IIOMetadata metadata) {
+		org.w3c.dom.Node node = graphicControlSiblingNode(metadata, "GraphicControlExtension");
+		if (node != null) {
+			org.w3c.dom.Node attr = node.getAttributes().getNamedItem("delayTime");
+			if (attr != null) {
+				try {
+					int centiseconds = Integer.parseInt(attr.getNodeValue());
+					return centiseconds <= 0 ? DEFAULT_FRAME_DELAY_MS : centiseconds * 10;
+				} catch (NumberFormatException ignored) {
+					// Fall through to the default below.
+				}
+			}
+		}
+		return DEFAULT_FRAME_DELAY_MS;
+	}
+
+	/** The direct child of a GIF frame's metadata tree named {@code nodeName}, or {@code null}. */
+	private static org.w3c.dom.Node graphicControlSiblingNode(javax.imageio.metadata.IIOMetadata metadata, String nodeName) {
+		try {
 			org.w3c.dom.Node root = metadata.getAsTree(metadata.getNativeMetadataFormatName());
 			org.w3c.dom.NodeList children = root.getChildNodes();
 			for (int i = 0; i < children.getLength(); i++) {
 				org.w3c.dom.Node node = children.item(i);
-				if ("GraphicControlExtension".equals(node.getNodeName())) {
-					org.w3c.dom.Node delayAttr = node.getAttributes().getNamedItem("delayTime");
-					if (delayAttr != null) {
-						int centiseconds = Integer.parseInt(delayAttr.getNodeValue());
-						return centiseconds <= 0 ? DEFAULT_FRAME_DELAY_MS : centiseconds * 10;
-					}
+				if (nodeName.equals(node.getNodeName())) {
+					return node;
 				}
 			}
 		} catch (Exception ignored) {
-			// No usable metadata for this frame — use the default below.
+			// No usable metadata for this frame.
 		}
-		return DEFAULT_FRAME_DELAY_MS;
+		return null;
 	}
 
 	/** Re-encode a decoded frame as PNG so {@link NativeImage} can consume it uniformly. */
