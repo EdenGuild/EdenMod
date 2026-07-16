@@ -43,6 +43,10 @@ import tel.eden.mod.update.UpdateChecker;
 import tel.eden.mod.update.UpdateInfo;
 import tel.eden.mod.update.UpdateInstaller;
 import tel.eden.mod.util.Wynncraft;
+import tel.eden.mod.war.AttackTimerMenu;
+import tel.eden.mod.war.TerritoryData;
+import tel.eden.mod.war.TerritoryMenuKeybind;
+import tel.eden.mod.war.WarHud;
 import tel.eden.mod.util.WynntilsChatBridge;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -71,6 +75,7 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -255,6 +260,14 @@ public final class EdenModClient implements ClientModInitializer {
 		openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, edenCategory));
 		createPartyKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_menu", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_L, edenCategory));
 		openEmotePickerKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_emote_picker", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_MIDDLE, edenCategory));
+		TerritoryMenuKeybind.register(edenCategory);
+
+		// War-suite 2D HUD overlays, drawn only while on Wynncraft.
+		HudRenderCallback.EVENT.register((graphics, tickCounter) -> {
+			if (onWynncraft) {
+				WarHud.render(config, graphics);
+			}
+		});
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			loginPending = true;
@@ -308,6 +321,10 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private void onClientTick(Minecraft client) {
+		if (onWynncraft) {
+			TerritoryData.onTick();
+			TerritoryMenuKeybind.onTick(client);
+		}
 		while (openConfigKey.consumeClick()) {
 			client.setScreen(BridgeConfigScreen.create(client.screen, this));
 		}
@@ -1613,6 +1630,11 @@ public final class EdenModClient implements ClientModInitializer {
 		// instead of normal guild-chat text; handle it before the text relay.
 		maybeRelayItemCard(current, message);
 		Optional<CapturedMessage> captured = GuildChatParser.parse(message);
+		if (captured.isPresent() && config.warAttackTimers) {
+			// Fold any "<territory> defense is <rating>" report (e.g. Wynntils') into the
+			// attack-timer HUD as fresher intel than the scraped advancement value.
+			AttackTimerMenu.intakeChat(captured.get().username(), captured.get().message());
+		}
 		if (captured.isPresent() && chatRelay.shouldSend(captured.get())) {
 			CapturedMessage line = captured.get();
 			// 0-based: a first occurrence is seq 0, which matches what an old mod (no

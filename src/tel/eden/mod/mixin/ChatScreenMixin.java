@@ -25,6 +25,7 @@ import tel.eden.mod.EdenModClient;
 import tel.eden.mod.chat.ChatEmoteFormatter;
 import tel.eden.mod.chat.EmoteRegistry;
 import tel.eden.mod.config.BridgeConfig;
+import tel.eden.mod.war.AttackTimerMenu;
 
 @Mixin(ChatScreen.class)
 public abstract class ChatScreenMixin {
@@ -207,6 +208,15 @@ public abstract class ChatScreenMixin {
 			if (edenmod$suggestionApplied) {
 				edenmod$applySuggestion(edenmod$selectedSuggestion);
 			}
+			cir.setReturnValue(true);
+		}
+	}
+
+	@Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
+	private void edenmod$handleAttackTimerClick(MouseButtonEvent event, boolean bl, CallbackInfoReturnable<Boolean> cir) {
+		// Runs regardless of the emote-tool settings: clicking an attack-timer row
+		// points Wynncraft's compass at that territory.
+		if (event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT && AttackTimerMenu.mouseClicked(EdenModClient.instance().config(), event.x(), event.y())) {
 			cir.setReturnValue(true);
 		}
 	}
