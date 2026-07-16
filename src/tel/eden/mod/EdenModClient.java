@@ -44,8 +44,10 @@ import tel.eden.mod.update.UpdateInfo;
 import tel.eden.mod.update.UpdateInstaller;
 import tel.eden.mod.util.Wynncraft;
 import tel.eden.mod.war.AttackTimerMenu;
+import tel.eden.mod.war.BeaconManager;
 import tel.eden.mod.war.TerritoryData;
 import tel.eden.mod.war.TerritoryMenuKeybind;
+import tel.eden.mod.war.TerritoryOutlineRenderer;
 import tel.eden.mod.war.WarHud;
 import tel.eden.mod.util.WynntilsChatBridge;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -76,6 +78,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -261,11 +264,20 @@ public final class EdenModClient implements ClientModInitializer {
 		createPartyKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_menu", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_L, edenCategory));
 		openEmotePickerKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_emote_picker", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_MIDDLE, edenCategory));
 		TerritoryMenuKeybind.register(edenCategory);
+		TerritoryOutlineRenderer.register(edenCategory);
 
 		// War-suite 2D HUD overlays, drawn only while on Wynncraft.
 		HudRenderCallback.EVENT.register((graphics, tickCounter) -> {
 			if (onWynncraft) {
 				WarHud.render(config, graphics);
+			}
+		});
+		// War-suite in-world markers (soonest-attack beacon + territory outlines),
+		// added to the per-frame gizmo collector during entity rendering.
+		WorldRenderEvents.AFTER_ENTITIES.register(context -> {
+			if (onWynncraft) {
+				BeaconManager.render(config);
+				TerritoryOutlineRenderer.render(config);
 			}
 		});
 
@@ -324,6 +336,7 @@ public final class EdenModClient implements ClientModInitializer {
 		if (onWynncraft) {
 			TerritoryData.onTick();
 			TerritoryMenuKeybind.onTick(client);
+			TerritoryOutlineRenderer.onTick(client);
 		}
 		while (openConfigKey.consumeClick()) {
 			client.setScreen(BridgeConfigScreen.create(client.screen, this));
