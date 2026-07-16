@@ -207,22 +207,26 @@ public final class AttackTimerMenu {
 		return entry.ownerName().getString();
 	}
 
-	/** Diagnostic: every current sidebar line's visible text (for format debugging). */
+	/** Diagnostic: dump every scoreboard slot/objective and its scores, to locate the
+	 * timer lines when they aren't in the standard sidebar. */
 	public static List<String> debugSidebarLines() {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.level == null) {
 			return List.of("(no world)");
 		}
 		Scoreboard scoreboard = mc.level.getScoreboard();
-		Objective sidebar = scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR);
-		if (sidebar == null) {
-			return List.of("(no sidebar objective)");
+		List<String> out = new ArrayList<>();
+		for (DisplaySlot slot : DisplaySlot.values()) {
+			Objective shown = scoreboard.getDisplayObjective(slot);
+			out.add("slot " + slot + " -> " + (shown == null ? "none" : shown.getName()));
 		}
-		List<String> lines = new ArrayList<>();
-		for (PlayerScoreEntry entry : scoreboard.listPlayerScores(sidebar)) {
-			lines.add(stripCodes(sidebarLineText(scoreboard, entry)));
+		for (Objective objective : scoreboard.getObjectives()) {
+			out.add("obj '" + objective.getName() + "' title='" + stripCodes(objective.getDisplayName().getString()) + "'");
+			for (PlayerScoreEntry entry : scoreboard.listPlayerScores(objective)) {
+				out.add("  " + entry.value() + " | " + stripCodes(sidebarLineText(scoreboard, entry)));
+			}
 		}
-		return lines.isEmpty() ? List.of("(sidebar empty)") : lines;
+		return out.isEmpty() ? List.of("(no scoreboard data)") : out;
 	}
 
 	private static String currentTerritory() {
