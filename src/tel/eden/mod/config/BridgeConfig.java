@@ -91,15 +91,6 @@ public final class BridgeConfig {
 	/** HUD list of upcoming territory attacks (scoreboard timers + defense ratings). */
 	public boolean warAttackTimers = true;
 
-	/** Green in-world beacon marking the soonest upcoming territory attack. */
-	public boolean warGreenBeacon = true;
-
-	/** Outline the soonest-attack territory in the world even when full outlines are off. */
-	public boolean warOutlineSoonest = true;
-
-	/** Fill territory outlines with a translucent floor overlay (can reduce FPS). */
-	public boolean warHighlightFloor = false;
-
 	/** War info overlay: tower EHP, team DPS, and estimated time remaining. */
 	public boolean warDpsHud = true;
 

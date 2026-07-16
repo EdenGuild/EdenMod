@@ -44,7 +44,6 @@ import tel.eden.mod.update.UpdateInfo;
 import tel.eden.mod.update.UpdateInstaller;
 import tel.eden.mod.util.Wynncraft;
 import tel.eden.mod.war.AttackTimerMenu;
-import tel.eden.mod.war.BeaconManager;
 import tel.eden.mod.war.TerritoryData;
 import tel.eden.mod.war.TerritoryMenuKeybind;
 import tel.eden.mod.war.TerritoryOutlineRenderer;
@@ -272,12 +271,11 @@ public final class EdenModClient implements ClientModInitializer {
 				WarHud.render(config, graphics);
 			}
 		});
-		// War-suite in-world markers (soonest-attack beacon + territory outlines),
-		// added to the per-frame gizmo collector during entity rendering.
+		// War-suite territory outlines, added to the per-frame gizmo collector during
+		// entity rendering.
 		WorldRenderEvents.AFTER_ENTITIES.register(context -> {
 			if (onWynncraft) {
-				BeaconManager.render(config);
-				TerritoryOutlineRenderer.render(config);
+				TerritoryOutlineRenderer.render();
 			}
 		});
 
@@ -323,7 +321,12 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("help").executes(ctx -> {
+			}))).then(buildGiftCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wartest").executes(ctx -> {
+				for (String line : AttackTimerMenu.debugSidebarLines()) {
+					ctx.getSource().sendFeedback(Component.literal("[wartest] " + line).withStyle(ChatFormatting.AQUA));
+				}
+				return 1;
+			})).then(ClientCommandManager.literal("help").executes(ctx -> {
 				showHelp(ctx.getSource());
 				return 1;
 			})));

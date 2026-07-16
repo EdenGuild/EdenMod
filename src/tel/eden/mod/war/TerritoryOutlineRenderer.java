@@ -5,20 +5,24 @@ import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gizmos.Gizmos;
-import net.minecraft.gizmos.GizmoStyle;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
-import tel.eden.mod.config.BridgeConfig;
 
 /**
- * Renders territory boundary boxes in the world with debug gizmos. A keybind (comma
- * by default) toggles outlining <em>all</em> nearby territories — green for the one
- * you're standing in, red otherwise; when that's off, the soonest upcoming attack is
- * still outlined if {@code warOutlineSoonest} is on. Drawn during
- * {@code WorldRenderEvents.AFTER_ENTITIES} so gizmos land in the per-frame collector.
+ * Draws the boundary of a single territory as a terrain-following wall, using the
+ * per-frame debug gizmos (added during {@code WorldRenderEvents.AFTER_ENTITIES}).
+ *
+ * <p>A keybind (comma by default) toggles it on. Only the territory the player is in —
+ * or the last one they were in — is drawn: its border is a run of short vertical bars
+ * that sit on the ground surface and rise/fall with the terrain, forming a wall.
+ * Green while the player is inside that territory, red once they step outside it. Other
+ * territories are never shown.
  */
 public final class TerritoryOutlineRenderer {
 	private TerritoryOutlineRenderer() {
@@ -26,14 +30,16 @@ public final class TerritoryOutlineRenderer {
 
 	private static final int GREEN = 0xFF33CC33;
 	private static final int RED = 0xFFFF4040;
-	private static final float LINE_WIDTH = 2.0f;
-	// Vertical half-extent of the drawn box around the player's Y.
-	private static final int Y_SPAN = 45;
-	// Skip territories whose nearest edge is beyond this (blocks) when showing all.
-	private static final int MAX_DISTANCE = 500;
+	private static final float LINE_WIDTH = 3.0f;
+	// Wall height above the ground surface, in blocks.
+	private static final int WALL_HEIGHT = 4;
+	// Only draw border columns within this many blocks of the player (the rest are out
+	// of sight and their chunks may be unloaded, so the heightmap would be wrong).
+	private static final int DRAW_RADIUS = 48;
 
 	private static KeyMapping key;
-	private static boolean showAll;
+	private static boolean enabled;
+	private static String lockedTerritory;
 
 	public static void register(KeyMapping.Category category) {
 		key = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.toggle_territory_outlines", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_COMMA, category));
@@ -44,55 +50,62 @@ public final class TerritoryOutlineRenderer {
 			return;
 		}
 		while (key.consumeClick()) {
-			showAll = !showAll;
+			enabled = !enabled;
 			if (mc.player != null) {
-				mc.player.displayClientMessage(Component.literal("Territory outlines " + (showAll ? "enabled" : "disabled")).withStyle(showAll ? ChatFormatting.GREEN : ChatFormatting.RED), true);
+				mc.player.displayClientMessage(Component.literal("Territory wall " + (enabled ? "enabled" : "disabled")).withStyle(enabled ? ChatFormatting.GREEN : ChatFormatting.RED), true);
 			}
 		}
 	}
 
-	public static void render(BridgeConfig config) {
+	public static void render() {
+		if (!enabled) {
+			return;
+		}
 		Minecraft mc = Minecraft.getInstance();
-		if (mc.player == null) {
+		LocalPlayer player = mc.player;
+		Level level = mc.level;
+		if (player == null || level == null) {
 			return;
 		}
-		BlockPos pos = mc.player.blockPosition();
-		int y0 = pos.getY() - Y_SPAN;
-		int y1 = pos.getY() + Y_SPAN;
-		String current = TerritoryData.territoryAt(pos.getX(), pos.getZ());
+		BlockPos pos = player.blockPosition();
+		String inside = TerritoryData.territoryAt(pos.getX(), pos.getZ());
+		// Lock onto whichever territory the player is currently standing in; if they've
+		// stepped out, keep the last one but draw it red.
+		if (inside != null) {
+			lockedTerritory = inside;
+		}
+		if (lockedTerritory == null) {
+			return;
+		}
+		int[] rect = TerritoryData.rect(lockedTerritory);
+		if (rect == null) {
+			return;
+		}
+		int color = lockedTerritory.equals(inside) ? GREEN : RED;
+		drawWall(level, rect, pos.getX(), pos.getZ(), color);
+	}
 
-		if (showAll) {
-			for (String name : TerritoryData.territoryNames()) {
-				int[] rect = TerritoryData.rect(name);
-				if (rect == null) {
-					continue;
-				}
-				boolean inside = name.equals(current);
-				if (!inside && distance(rect, pos.getX(), pos.getZ()) > MAX_DISTANCE) {
-					continue;
-				}
-				drawBox(rect, y0, y1, inside ? GREEN : RED);
-			}
-			return;
+	private static void drawWall(Level level, int[] rect, int px, int pz, int color) {
+		int minX = rect[0];
+		int minZ = rect[1];
+		int maxX = rect[2] + 1;
+		int maxZ = rect[3] + 1;
+		// Two Z-aligned edges (west/east) and two X-aligned edges (north/south).
+		for (int z = minZ; z <= maxZ; z++) {
+			bar(level, minX, z, px, pz, color);
+			bar(level, maxX, z, px, pz, color);
 		}
-		if (config.warOutlineSoonest) {
-			String soonest = AttackTimerMenu.soonestTerritory();
-			if (soonest != null) {
-				int[] rect = TerritoryData.rect(soonest);
-				if (rect != null) {
-					drawBox(rect, y0, y1, GREEN);
-				}
-			}
+		for (int x = minX; x <= maxX; x++) {
+			bar(level, x, minZ, px, pz, color);
+			bar(level, x, maxZ, px, pz, color);
 		}
 	}
 
-	private static void drawBox(int[] rect, int y0, int y1, int argb) {
-		Gizmos.cuboid(new AABB(rect[0], y0, rect[1], rect[2] + 1.0, y1, rect[3] + 1.0), GizmoStyle.stroke(argb, LINE_WIDTH)).setAlwaysOnTop();
-	}
-
-	private static int distance(int[] rect, int x, int z) {
-		int dx = Math.max(0, Math.max(rect[0] - x, x - rect[2]));
-		int dz = Math.max(0, Math.max(rect[1] - z, z - rect[3]));
-		return dx + dz;
+	private static void bar(Level level, int x, int z, int px, int pz, int color) {
+		if (Math.abs(x - px) > DRAW_RADIUS || Math.abs(z - pz) > DRAW_RADIUS) {
+			return;
+		}
+		double ground = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+		Gizmos.line(new Vec3(x, ground, z), new Vec3(x, ground + WALL_HEIGHT, z), color, LINE_WIDTH).setAlwaysOnTop();
 	}
 }

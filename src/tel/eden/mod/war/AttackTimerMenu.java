@@ -13,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
+import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.hud.HudLayout;
@@ -180,8 +181,7 @@ public final class AttackTimerMenu {
 		List<Upcoming> attacks = new ArrayList<>();
 		List<String> seen = new ArrayList<>();
 		for (PlayerScoreEntry entry : scoreboard.listPlayerScores(sidebar)) {
-			String line = stripCodes(entry.ownerName().getString());
-			Matcher matcher = TIMER.matcher(line);
+			Matcher matcher = TIMER.matcher(stripCodes(sidebarLineText(scoreboard, entry)));
 			if (matcher.find()) {
 				String territory = matcher.group(2).trim();
 				if (!seen.contains(territory)) {
@@ -192,6 +192,37 @@ public final class AttackTimerMenu {
 		}
 		attacks.sort((a, b) -> a.time().compareTo(b.time()));
 		return attacks;
+	}
+
+	/**
+	 * The visible text of a sidebar line. Servers (Wynncraft included) render sidebar
+	 * text through the score holder's team prefix/suffix, so the bare owner name is not
+	 * enough — the team formatting must be applied to see the real line.
+	 */
+	private static String sidebarLineText(Scoreboard scoreboard, PlayerScoreEntry entry) {
+		PlayerTeam team = scoreboard.getPlayersTeam(entry.owner());
+		if (team != null) {
+			return PlayerTeam.formatNameForTeam(team, entry.ownerName()).getString();
+		}
+		return entry.ownerName().getString();
+	}
+
+	/** Diagnostic: every current sidebar line's visible text (for format debugging). */
+	public static List<String> debugSidebarLines() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null) {
+			return List.of("(no world)");
+		}
+		Scoreboard scoreboard = mc.level.getScoreboard();
+		Objective sidebar = scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR);
+		if (sidebar == null) {
+			return List.of("(no sidebar objective)");
+		}
+		List<String> lines = new ArrayList<>();
+		for (PlayerScoreEntry entry : scoreboard.listPlayerScores(sidebar)) {
+			lines.add(stripCodes(sidebarLineText(scoreboard, entry)));
+		}
+		return lines.isEmpty() ? List.of("(sidebar empty)") : lines;
 	}
 
 	private static String currentTerritory() {
