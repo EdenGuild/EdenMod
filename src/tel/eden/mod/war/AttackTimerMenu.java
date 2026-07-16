@@ -150,11 +150,10 @@ public final class AttackTimerMenu {
 	}
 
 	private static String coloredDefense(String territory) {
-		String defense = TerritoryData.defense(territory);
+		// Prefer a recent guild-chat report (fresher intel) over the scraped value;
+		// show a single rating rather than both.
 		ChatDefenseInfo chat = chatDefenses.get(territory);
-		if (chat != null && chat.isRecent()) {
-			return colorFor(defense) + "§f/" + colorFor(chat.defense());
-		}
+		String defense = (chat != null && chat.isRecent()) ? chat.defense() : TerritoryData.defense(territory);
 		return colorFor(defense);
 	}
 
