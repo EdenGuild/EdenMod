@@ -7,7 +7,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,6 +85,44 @@ public final class BridgeConfig {
 	 * Range 1-100, default 40.
 	 */
 	public int imagePreviewSize = 40;
+
+	// ---- Territory / war suite (all client-side; no effect off Wynncraft) --------
+
+	/** HUD list of upcoming territory attacks (scoreboard timers + defense ratings). */
+	public boolean warAttackTimers = true;
+
+	/** Green in-world beacon marking the soonest upcoming territory attack. */
+	public boolean warGreenBeacon = true;
+
+	/** Outline the soonest-attack territory in the world even when full outlines are off. */
+	public boolean warOutlineSoonest = true;
+
+	/** Fill territory outlines with a translucent floor overlay (can reduce FPS). */
+	public boolean warHighlightFloor = false;
+
+	/** War info overlay: tower EHP, team DPS, and estimated time remaining. */
+	public boolean warDpsHud = true;
+
+	/** HUD chip showing your rolling 7-day war count (from the backend). */
+	public boolean warWeeklyCountHud = false;
+
+	/** Make guild shouts clickable to pre-fill {@code /msg <shouter>}. */
+	public boolean shoutsClickable = true;
+
+	/**
+	 * Add a "Click to say Congratulations!" button to milestone broadcasts. Off by
+	 * default; when on, clicking DMs the player {@link #congratsMessage}.
+	 */
+	public boolean clickToCongratulate = false;
+
+	/** Message sent by the click-to-congratulate button. */
+	public String congratsMessage = "Congrats!";
+
+	/**
+	 * Saved HUD element positions as {@code name -> [xFraction, yFraction]} (0-1 of
+	 * the screen). Absent elements fall back to their built-in default anchor.
+	 */
+	public Map<String, float[]> hudPositions = new HashMap<>();
 
 	/** Client-side aliases that rewrite typed server commands before they are sent. */
 	public List<CommandAlias> commandAliases = new ArrayList<>();
@@ -191,6 +231,12 @@ public final class BridgeConfig {
 					}
 					if (config.favoriteEmotes == null) {
 						config.favoriteEmotes = new ArrayList<>();
+					}
+					if (config.congratsMessage == null) {
+						config.congratsMessage = "Congrats!";
+					}
+					if (config.hudPositions == null) {
+						config.hudPositions = new HashMap<>();
 					}
 					if (config.chatEmoteUiEnabled != null) {
 						config.chatEmoteToolsMode = config.chatEmoteUiEnabled ? ChatEmoteToolsMode.UI_AND_AUTO : ChatEmoteToolsMode.NONE;
