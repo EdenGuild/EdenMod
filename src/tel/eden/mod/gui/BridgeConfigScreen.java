@@ -86,6 +86,16 @@ public final class BridgeConfigScreen extends Screen {
 		addCycleRow("Game messages", () -> shortGameModeLabel(config.gameDisplayMode), () -> config.gameDisplayMode = nextGameMode(config.gameDisplayMode), () -> config.gameDisplayMode = BridgeConfig.GameDisplayMode.ALL);
 		PreviewSizeSlider slider = new PreviewSizeSlider(CONTROL_W, 20);
 		addSliderRow("Image preview size", slider, slider::syncFromConfig, () -> config.imagePreviewSize = 40);
+
+		// --- Territory / war suite ---
+		addToggleRow("Attack timers HUD", () -> config.warAttackTimers, v -> config.warAttackTimers = v, "On", "Off", true);
+		addToggleRow("Green beacon at soonest war", () -> config.warGreenBeacon, v -> config.warGreenBeacon = v, "On", "Off", true);
+		addToggleRow("Outline soonest war territory", () -> config.warOutlineSoonest, v -> config.warOutlineSoonest = v, "On", "Off", true);
+		addToggleRow("Territory floor highlight (FPS)", () -> config.warHighlightFloor, v -> config.warHighlightFloor = v, "On", "Off", false);
+		addToggleRow("War info overlay (DPS/EHP)", () -> config.warDpsHud, v -> config.warDpsHud = v, "On", "Off", true);
+		addToggleRow("Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
+		addToggleRow("Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);
+		addToggleRow("Click-to-congratulate", () -> config.clickToCongratulate, v -> config.clickToCongratulate = v, "On", "Off", false);
 		// ------------------------------------------------------------------------
 
 		this.addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose()).bounds(cx, this.height - 30, cw, 20).build());
