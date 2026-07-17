@@ -44,6 +44,7 @@ import tel.eden.mod.update.UpdateInfo;
 import tel.eden.mod.update.UpdateInstaller;
 import tel.eden.mod.util.Wynncraft;
 import tel.eden.mod.war.AttackTimerMenu;
+import tel.eden.mod.war.BeaconManager;
 import tel.eden.mod.war.TerritoryData;
 import tel.eden.mod.war.TerritoryMenuKeybind;
 import tel.eden.mod.war.TerritoryOutlineRenderer;
@@ -275,6 +276,7 @@ public final class EdenModClient implements ClientModInitializer {
 		// entity rendering.
 		WorldRenderEvents.AFTER_ENTITIES.register(context -> {
 			if (onWynncraft) {
+				BeaconManager.render(config);
 				TerritoryOutlineRenderer.render();
 			}
 		});

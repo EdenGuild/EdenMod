@@ -89,6 +89,7 @@ public final class BridgeConfigScreen extends Screen {
 
 		// --- Territory / war suite ---
 		addToggleRow("Attack timers HUD", () -> config.warAttackTimers, v -> config.warAttackTimers = v, "On", "Off", true);
+		addToggleRow("Green beacon at soonest war", () -> config.warGreenBeacon, v -> config.warGreenBeacon = v, "On", "Off", true);
 		addToggleRow("War info overlay (DPS/EHP)", () -> config.warDpsHud, v -> config.warDpsHud = v, "On", "Off", true);
 		addToggleRow("Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
 		addToggleRow("Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);

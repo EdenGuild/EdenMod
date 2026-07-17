@@ -116,7 +116,10 @@ public final class TerritoryOutlineRenderer {
 				Vec3 bottomB = new Vec3(b[0], b[1], b[2]);
 				Vec3 topB = new Vec3(b[0], b[1] + WALL_HEIGHT, b[2]);
 				// Translucent wall face between the two columns, plus a crisp top rail.
+				// Filled quads are backface-culled, so draw both windings to make the
+				// wall visible from either side of the border.
 				Gizmos.rect(topA, topB, bottomB, bottomA, GizmoStyle.fill(fill)).setAlwaysOnTop();
+				Gizmos.rect(topB, topA, bottomA, bottomB, GizmoStyle.fill(fill)).setAlwaysOnTop();
 				Gizmos.line(topA, topB, rail, RAIL_WIDTH).setAlwaysOnTop();
 			}
 		}
