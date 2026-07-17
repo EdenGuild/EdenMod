@@ -111,18 +111,25 @@ public final class AttackTimerMenu {
 		}
 		int width = maxWidth + 6;
 		int height = attacks.size() * ROW_HEIGHT + 4;
-		int x = clamp(HudLayout.x(config, PANEL, DEFAULT_X, DEFAULT_Y), width, mc.getWindow().getGuiScaledWidth());
-		int y = clamp(HudLayout.y(config, PANEL, DEFAULT_X, DEFAULT_Y), height, mc.getWindow().getGuiScaledHeight());
+		float scale = HudLayout.scale(config, PANEL);
+		int x = clamp(HudLayout.x(config, PANEL, DEFAULT_X, DEFAULT_Y), Math.round(width * scale), mc.getWindow().getGuiScaledWidth());
+		int y = clamp(HudLayout.y(config, PANEL, DEFAULT_X, DEFAULT_Y), Math.round(height * scale), mc.getWindow().getGuiScaledHeight());
 
+		// Panel is built at the origin and placed/scaled by the pose transform, so the
+		// click boxes must be recorded in final screen coords (origin + relative*scale).
 		HudPanel panel = new HudPanel();
-		panel.add(new RectangleElement(x, y, width, height, PANEL_BG));
-		int rowY = y + 3;
+		panel.add(new RectangleElement(0, 0, width, height, PANEL_BG));
+		int relY = 3;
 		for (int i = 0; i < attacks.size(); i++) {
-			panel.add(new TextElement(lines.get(i), x + 3, rowY, 0xFFFFFFFF));
-			clickBoxes.put(attacks.get(i).territory(), new int[]{x, rowY - 1, x + width, rowY + ROW_HEIGHT - 1});
-			rowY += ROW_HEIGHT;
+			panel.add(new TextElement(lines.get(i), 3, relY, 0xFFFFFFFF));
+			clickBoxes.put(attacks.get(i).territory(), new int[]{x, Math.round(y + (relY - 1) * scale), Math.round(x + width * scale), Math.round(y + (relY + ROW_HEIGHT - 1) * scale)});
+			relY += ROW_HEIGHT;
 		}
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(x, y);
+		graphics.pose().scale(scale, scale);
 		panel.draw(graphics);
+		graphics.pose().popMatrix();
 	}
 
 	/** Handle a click while the chat screen is open; true if a row was hit. */

@@ -33,6 +33,20 @@ public final class HudLayout {
 		return Math.round(fractions(config, name, defaultX, defaultY)[1] * screen);
 	}
 
+	/** Scale factor for the named panel (1.0 when unset), clamped to a sane range. */
+	public static float scale(BridgeConfig config, String name) {
+		Float saved = config.hudScales.get(name);
+		if (saved == null) {
+			return 1.0f;
+		}
+		return Math.max(0.5f, Math.min(3.0f, saved));
+	}
+
+	/** Store a panel's scale factor. */
+	public static void setScale(BridgeConfig config, String name, float value) {
+		config.hudScales.put(name, Math.max(0.5f, Math.min(3.0f, value)));
+	}
+
 	/** Store a panel's new position as fractions of the current screen size. */
 	public static void save(BridgeConfig config, String name, int pixelX, int pixelY) {
 		int width = Minecraft.getInstance().getWindow().getGuiScaledWidth();

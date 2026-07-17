@@ -118,6 +118,12 @@ public final class BridgeConfig {
 	 */
 	public Map<String, float[]> hudPositions = new HashMap<>();
 
+	/**
+	 * Saved HUD element scales as {@code name -> factor} (1.0 = default size). Absent
+	 * elements render at 1.0.
+	 */
+	public Map<String, Float> hudScales = new HashMap<>();
+
 	/** Client-side aliases that rewrite typed server commands before they are sent. */
 	public List<CommandAlias> commandAliases = new ArrayList<>();
 
@@ -231,6 +237,9 @@ public final class BridgeConfig {
 					}
 					if (config.hudPositions == null) {
 						config.hudPositions = new HashMap<>();
+					}
+					if (config.hudScales == null) {
+						config.hudScales = new HashMap<>();
 					}
 					if (config.chatEmoteUiEnabled != null) {
 						config.chatEmoteToolsMode = config.chatEmoteUiEnabled ? ChatEmoteToolsMode.UI_AND_AUTO : ChatEmoteToolsMode.NONE;

@@ -10,8 +10,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.LerpingBossEvent;
 import net.minecraft.network.chat.Component;
 import tel.eden.mod.config.BridgeConfig;
-import tel.eden.mod.hud.HudLayout;
 import tel.eden.mod.hud.HudPanel;
+import tel.eden.mod.hud.HudRender;
 import tel.eden.mod.hud.RectangleElement;
 import tel.eden.mod.hud.TextElement;
 import tel.eden.mod.mixin.BossHealthOverlayAccessor;
@@ -35,8 +35,9 @@ public final class WarDPS {
 	private static final int PANEL_BG = 0x64000000;
 	// A tower bar seen within this window means "currently in a war".
 	private static final long IN_WAR_WINDOW_MS = 2000L;
-	// A war-end chat line only counts within this window of the last tower bar.
-	private static final long END_CHAT_WINDOW_MS = 5000L;
+	// A war-end chat line only counts within this window of the last tower bar (kept
+	// generous: the result line can lag the tower's last update by several seconds).
+	private static final long END_CHAT_WINDOW_MS = 15_000L;
 
 	private static long warStartTime = -1;
 	private static long firstDamageTime = -1;
@@ -79,16 +80,15 @@ public final class WarDPS {
 
 	/** War-end detection from chat; may be called off-thread (display is marshalled). */
 	public static void onChat(String rawLine) {
-		if (System.currentTimeMillis() - lastTimeInWar > END_CHAT_WINDOW_MS) {
+		if (warStartTime < 0 || System.currentTimeMillis() - lastTimeInWar > END_CHAT_WINDOW_MS) {
 			return;
 		}
+		// Match on key phrases (not the exact territory) so a slightly different result
+		// wording still fires. "contains" tolerates any guild/war prefix on the line.
 		String line = clean(rawLine);
-		if (!territoryName.isEmpty() && !line.contains(territoryName.trim())) {
-			return;
-		}
-		if (line.startsWith("You have taken control of ")) {
+		if (line.contains("taken control of")) {
 			warEnded(true);
-		} else if (line.startsWith("Your guild has lost the war for ") || line.startsWith("Your active attack was canceled and refunded to your headquarter")) {
+		} else if (line.contains("lost the war") || line.contains("canceled and refunded") || line.contains("failed to take control")) {
 			warEnded(false);
 		}
 	}
@@ -115,17 +115,14 @@ public final class WarDPS {
 		}
 		int width = maxWidth + 6;
 		int height = rows.size() * ROW_HEIGHT + 4;
-		int x = Math.max(0, Math.min(HudLayout.x(config, PANEL, DEFAULT_X, DEFAULT_Y), mc.getWindow().getGuiScaledWidth() - width));
-		int y = Math.max(0, Math.min(HudLayout.y(config, PANEL, DEFAULT_X, DEFAULT_Y), mc.getWindow().getGuiScaledHeight() - height));
-
 		HudPanel panel = new HudPanel();
-		panel.add(new RectangleElement(x, y, width, height, PANEL_BG));
-		int rowY = y + 3;
+		panel.add(new RectangleElement(0, 0, width, height, PANEL_BG));
+		int rowY = 3;
 		for (String row : rows) {
-			panel.add(new TextElement(row, x + 3, rowY, 0xFFFFFFFF));
+			panel.add(new TextElement(row, 3, rowY, 0xFFFFFFFF));
 			rowY += ROW_HEIGHT;
 		}
-		panel.draw(graphics);
+		HudRender.draw(config, PANEL, DEFAULT_X, DEFAULT_Y, width, height, panel, graphics);
 	}
 
 	private static void parseTowerBar(String[] words, String fullText) {
@@ -214,6 +211,8 @@ public final class WarDPS {
 				mc.player.displayClientMessage(Component.literal("Final tower: " + fin).withStyle(ChatFormatting.GRAY), false);
 			}
 		});
+		// Attendance is reported only on a captured war (see WarTracker).
+		WarTracker.onWarEnded(won);
 		resetWar();
 	}
 

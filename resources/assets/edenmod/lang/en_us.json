@@ -2,5 +2,7 @@
   "key.edenmod.open_config": "Open Config",
   "key.edenmod.open_emote_picker": "Open Emote Picker",
   "key.edenmod.open_menu": "Open Menu",
+  "key.edenmod.open_territory_menu": "Open Territory Menu",
+  "key.edenmod.toggle_territory_outlines": "Toggle Territory Wall",
   "key.category.minecraft.edenmod": "EdenMod"
 }

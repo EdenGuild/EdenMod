@@ -1619,11 +1619,9 @@ public final class EdenModClient implements ClientModInitializer {
 		// relayed Discord message starts with a fresh shield (like guild chat).
 		DiscordChatFormatter.onServerChatLine();
 		if (onWynncraft) {
-			// War chat cues (war start countdown, war end) feed the local war HUD and
-			// the attendance tracker even while the bridge socket is down.
-			String warLine = message.getString();
-			WarDPS.onChat(warLine);
-			WarTracker.onChat(warLine);
+			// War-end chat cue feeds the local war HUD summary and the attendance tracker
+			// even while the bridge socket is down.
+			WarDPS.onChat(message.getString());
 		}
 		BridgeWebSocketClient current = socket;
 		if (!onWynncraft || current == null) {

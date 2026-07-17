@@ -95,6 +95,8 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow("Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
 		addToggleRow("Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);
 		addToggleRow("Click-to-congratulate", () -> config.clickToCongratulate, v -> config.clickToCongratulate = v, "On", "Off", false);
+		addButtonRow("HUD layout", () -> Component.literal("Edit..."), () -> this.minecraft.setScreen(new HudLayoutScreen(this, config)), () -> {
+		});
 		EditBox congratsBox = new EditBox(this.font, 0, 0, CONTROL_W, 20, Component.literal("Congrats message"));
 		congratsBox.setMaxLength(80);
 		congratsBox.setValue(config.congratsMessage);
