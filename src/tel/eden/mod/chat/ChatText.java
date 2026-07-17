@@ -20,6 +20,11 @@ import net.minecraft.network.chat.Style;
 final class ChatText {
 	static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
 	private static final Pattern HOVER_REAL_NAME = Pattern.compile("(?:'(?:s)? real name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
+	// Wynncraft's other nick-hover shape leads with the real name: "<real>'s nickname is
+	// <nick>". Also used to peel a "real/nick" suffix or "real(nick)" wrapper off a
+	// displayed name so the bare account name is left.
+	private static final Pattern NICK_HOVER = Pattern.compile("([a-zA-Z0-9_]{3,16})'s nickname is", Pattern.CASE_INSENSITIVE);
+	private static final Pattern NICK_PAREN = Pattern.compile("^([a-zA-Z0-9_]{3,16})\\s*\\(.+\\)$");
 
 	private ChatText() {
 	}
@@ -145,8 +150,40 @@ final class ChatText {
 			if (matcher.find()) {
 				return matcher.group(1);
 			}
+			// "<real>'s nickname is <nick>": the real name is the leading token.
+			Matcher nick = NICK_HOVER.matcher(text);
+			if (nick.find()) {
+				return nick.group(1);
+			}
 		}
 		return null;
+	}
+
+	/**
+	 * Resolve the real account username for a click target (a shout reply or congratulate
+	 * button) whose displayed name may be nicked in any of Wynncraft's forms — {@code
+	 * real/nick}, {@code real(nick)}, or a bare {@code nick} carrying a "&lt;real&gt;'s
+	 * nickname is &lt;nick&gt;" (or "'s real name is") hover. Peels the display decoration
+	 * off, then prefers the hover/insertion metadata; falls back to the stripped name.
+	 */
+	static String resolveClickTargetName(Component message, String displayed) {
+		String base = stripNickDecoration(displayed);
+		String resolved = resolveRealNameAnywhere(message, base);
+		return resolved != null ? resolved : base;
+	}
+
+	/** Peel a "/nick" suffix or "(nick)" wrapper off a display name, leaving the account name. */
+	private static String stripNickDecoration(String displayed) {
+		String name = displayed == null ? "" : displayed.trim();
+		int slash = name.indexOf('/');
+		if (slash > 0) {
+			return name.substring(0, slash).trim();
+		}
+		Matcher paren = NICK_PAREN.matcher(name);
+		if (paren.matches()) {
+			return paren.group(1).trim();
+		}
+		return name;
 	}
 
 	private record MetaChar(char value, String hover, String insertion) {

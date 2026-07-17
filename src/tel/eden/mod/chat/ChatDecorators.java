@@ -24,7 +24,9 @@ public final class ChatDecorators {
 	}
 
 	// Wynncraft milestone broadcast, e.g. "[!] Congratulations to Zasper for reaching level 106!"
-	private static final Pattern CONGRATS = Pattern.compile("\\[!\\] Congratulations to (\\w+) for reaching .+!");
+	// The name token can be nicked ("real/nick", "real(nick)", or a bare nick), so capture
+	// the whole non-space token and resolve it to the real account name for the /msg.
+	private static final Pattern CONGRATS = Pattern.compile("\\[!\\] Congratulations to (\\S+) for reaching .+!");
 
 	/** Players with an unclaimed congratulate button (one-shot per broadcast). */
 	private static final Set<String> pendingCongrats = ConcurrentHashMap.newKeySet();
@@ -56,7 +58,8 @@ public final class ChatDecorators {
 		if (!matcher.find()) {
 			return message;
 		}
-		String name = matcher.group(1);
+		// Resolve any nickname to the real account name so /msg reaches the right player.
+		String name = ChatText.resolveClickTargetName(message, matcher.group(1));
 		pendingCongrats.add(name);
 		Style style = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden congratulate " + name)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Send: /msg " + name + " " + congratsMessage)));
 		return message.copy().append(Component.literal(" [Congratulate]").setStyle(style));

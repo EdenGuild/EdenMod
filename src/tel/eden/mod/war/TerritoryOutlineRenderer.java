@@ -21,7 +21,9 @@ import org.lwjgl.glfw.GLFW;
  * <p>A keybind (comma by default) toggles it on. While on, it always shows the border of
  * the player's <em>current</em> territory as four full-height translucent walls (world
  * bottom to top, no terrain sampling) with a bright top rail — <b>green</b> when that
- * territory is under attack, <b>red</b> otherwise. Walking into a different territory
+ * territory is under attack, <b>red</b> otherwise. The walls are depth-tested (not
+ * always-on-top), so terrain occludes them: they hide behind blocks. Walking into a
+ * different territory
  * switches the wall to that territory's border; standing outside all territories shows
  * nothing. The walls sit at fixed territory borders (whole perimeter, not clipped to a
  * radius) so they never appear to follow the player.
@@ -102,8 +104,10 @@ public final class TerritoryOutlineRenderer {
 		Vec3 bottom2 = new Vec3(x2, WALL_BOTTOM, z2);
 		Vec3 top2 = new Vec3(x2, WALL_TOP, z2);
 		// Both windings so the filled face shows from either side; plus a crisp top rail.
-		Gizmos.rect(top1, top2, bottom2, bottom1, GizmoStyle.fill(fill)).setAlwaysOnTop();
-		Gizmos.rect(top2, top1, bottom1, bottom2, GizmoStyle.fill(fill)).setAlwaysOnTop();
-		Gizmos.line(top1, top2, rail, RAIL_WIDTH).setAlwaysOnTop();
+		// No setAlwaysOnTop() — the gizmos are depth-tested by default, so the wall is
+		// occluded by terrain (hidden behind blocks) without any block scanning.
+		Gizmos.rect(top1, top2, bottom2, bottom1, GizmoStyle.fill(fill));
+		Gizmos.rect(top2, top1, bottom1, bottom2, GizmoStyle.fill(fill));
+		Gizmos.line(top1, top2, rail, RAIL_WIDTH);
 	}
 }
