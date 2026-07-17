@@ -892,7 +892,7 @@ public final class EdenModClient implements ClientModInitializer {
 			if (hostedParty != null) {
 				mc.setScreen(new PartyManageScreen(mc.screen, this, hostedParty));
 			} else if (mc.player != null) {
-				mc.player.displayClientMessage(Component.literal("You are not hosting a party!").withStyle(net.minecraft.ChatFormatting.RED), true);
+				mc.player.displayClientMessage(Component.literal("You are not hosting a party!").withStyle(net.minecraft.ChatFormatting.RED), false);
 			}
 		});
 		return 1;

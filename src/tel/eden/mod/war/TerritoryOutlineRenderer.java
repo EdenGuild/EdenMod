@@ -54,7 +54,7 @@ public final class TerritoryOutlineRenderer {
 		while (key.consumeClick()) {
 			enabled = !enabled;
 			if (mc.player != null) {
-				mc.player.displayClientMessage(Component.literal("Territory wall " + (enabled ? "enabled" : "disabled")).withStyle(enabled ? ChatFormatting.GREEN : ChatFormatting.RED), true);
+				mc.player.displayClientMessage(Component.literal("Territory wall " + (enabled ? "enabled" : "disabled")).withStyle(enabled ? ChatFormatting.GREEN : ChatFormatting.RED), false);
 			}
 		}
 	}

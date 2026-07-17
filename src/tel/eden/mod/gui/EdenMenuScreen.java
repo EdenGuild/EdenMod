@@ -60,7 +60,7 @@ public class EdenMenuScreen extends Screen {
 			if (myParty != null) {
 				this.minecraft.setScreen(new PartyManageScreen(this, EdenModClient.instance(), myParty));
 			} else {
-				this.minecraft.player.displayClientMessage(Component.literal("You are not hosting a party!").withStyle(net.minecraft.ChatFormatting.RED), true);
+				this.minecraft.player.displayClientMessage(Component.literal("You are not hosting a party!").withStyle(net.minecraft.ChatFormatting.RED), false);
 			}
 		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 2), metrics.buttonWidth, metrics.buttonHeight).build());
 
