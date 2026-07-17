@@ -43,8 +43,8 @@ public final class WarTracker {
 	private static final String WAR_START_PHRASE = "war battle will start";
 	// War fighters cluster on the tower; keep the radius tight to exclude passers-by.
 	private static final int CAPTURE_RADIUS = 45;
-	// A player must appear in at least this many one-second samples (~5s) to count.
-	private static final int MIN_SIGHTINGS = 5;
+	// A player must appear in at least this many one-second samples (~2s) to count.
+	private static final int MIN_SIGHTINGS = 2;
 	// If no tower bar appears within this long of the countdown, we aren't in this war.
 	private static final long NO_WAR_TIMEOUT_MS = 40_000L;
 	// Hard safety cap on how long one capture may run.
