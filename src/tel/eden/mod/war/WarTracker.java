@@ -21,13 +21,14 @@ import tel.eden.mod.mixin.BossHealthOverlayAccessor;
  * Detects guild wars the player actually fights and reports the attendance to the
  * backend on a <em>won</em> war only.
  *
- * <p>Attendance is captured only while the tower boss bar is up (i.e. at the territory
- * during the fight), never during the pre-war countdown — the countdown fires guild-wide
- * so a member sitting in a hub would otherwise scoop up dozens of bystanders. Players
- * near the tower are counted each second; only those seen repeatedly (persistent at the
- * fight, not passing through) are reported, and only when the war is captured. Losses and
- * abandoned wars report nothing. War counts stay backend-authoritative; the optional HUD
- * chip shows the player's own 7-day count from the last {@code warCountsReply}.
+ * <p>Capture opens on the "war battle will start in 25 seconds" line and runs through
+ * the fight, sampling nearby players once a second; only those present for enough of it
+ * (a persistent-sighting threshold) count, so passers-by are excluded. Crucially, a
+ * report is only sent if this client actually saw the tower boss bar — i.e. it was at the
+ * war, not just a guildmate who saw the countdown broadcast from a hub — and only when
+ * the war is won. Losses and abandoned attempts report nothing. War counts stay
+ * backend-authoritative; the optional HUD chip shows the player's own 7-day count from
+ * the last {@code warCountsReply}.
  */
 public final class WarTracker {
 	private WarTracker() {
@@ -39,12 +40,15 @@ public final class WarTracker {
 	private static final int PANEL_BG = 0x64000000;
 
 	private static final Pattern IGN = Pattern.compile("^[A-Za-z0-9_]{1,16}$");
+	private static final String WAR_START_PHRASE = "war battle will start";
 	// War fighters cluster on the tower; keep the radius tight to exclude passers-by.
 	private static final int CAPTURE_RADIUS = 45;
-	// Only players seen in at least this many one-second samples count as participants.
-	private static final int MIN_SIGHTINGS = 2;
-	// Drop a tracked war whose tower bar hasn't been seen for this long (abandoned).
-	private static final long WAR_TIMEOUT_MS = 40_000L;
+	// A player must appear in at least this many one-second samples (~5s) to count.
+	private static final int MIN_SIGHTINGS = 5;
+	// If no tower bar appears within this long of the countdown, we aren't in this war.
+	private static final long NO_WAR_TIMEOUT_MS = 40_000L;
+	// Hard safety cap on how long one capture may run.
+	private static final long MAX_CAPTURE_MS = 300_000L;
 
 	/** Reports the detected war to the backend (or queues it while disconnected). */
 	@FunctionalInterface
@@ -53,8 +57,9 @@ public final class WarTracker {
 	}
 
 	private static AttendanceReporter reporter;
+	private static volatile boolean capturing;
+	private static volatile long captureStart;
 	private static String currentWar;
-	private static long lastBarSeen;
 	private static int tickCounter;
 	private static final Map<String, Integer> sightings = new HashMap<>();
 	/** Own war count over the last 7 days, from the backend; -1 until known. */
@@ -68,27 +73,41 @@ public final class WarTracker {
 		weeklyWars = wars;
 	}
 
-	/** Track the active war from the tower bar and sample nearby fighters each second. */
+	/** War-start countdown opens the capture window; may be called off-thread. */
+	public static void onChat(String rawLine) {
+		if (WarDPS.clean(rawLine).contains(WAR_START_PHRASE)) {
+			capturing = true;
+			captureStart = System.currentTimeMillis();
+			currentWar = null;
+			synchronized (sightings) {
+				sightings.clear();
+			}
+		}
+	}
+
+	/** Sample nearby players each second while capturing; note the war's territory. */
 	public static void onTick() {
+		if (!capturing) {
+			return;
+		}
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.player == null || mc.level == null) {
 			return;
 		}
+		long now = System.currentTimeMillis();
 		String territory = activeTowerTerritory();
 		if (territory != null) {
-			if (!territory.equals(currentWar)) {
-				// A new war started; forget the previous fight's samples.
-				currentWar = territory;
-				sightings.clear();
-			}
-			lastBarSeen = System.currentTimeMillis();
-			tickCounter++;
-			if (tickCounter % 20 == 0) {
-				sampleNearbyFighters();
-			}
-		} else if (currentWar != null && System.currentTimeMillis() - lastBarSeen > WAR_TIMEOUT_MS) {
-			// The war ended without a win chat line (abandoned/left); report nothing.
+			currentWar = territory;
+		}
+		// A guildmate who only saw the countdown (no tower bar, not at the war) stops
+		// capturing so their bystanders are never reported.
+		if ((currentWar == null && now - captureStart > NO_WAR_TIMEOUT_MS) || now - captureStart > MAX_CAPTURE_MS) {
 			reset();
+			return;
+		}
+		tickCounter++;
+		if (tickCounter % 20 == 0) {
+			sampleNearbyFighters();
 		}
 	}
 
@@ -101,8 +120,11 @@ public final class WarTracker {
 	}
 
 	private static void reset() {
+		capturing = false;
 		currentWar = null;
-		sightings.clear();
+		synchronized (sightings) {
+			sightings.clear();
+		}
 	}
 
 	/** The territory of an active tower boss bar the player can see, or null. */
@@ -126,9 +148,10 @@ public final class WarTracker {
 		Player self = mc.player;
 		AABB box = new AABB(self.getX() - CAPTURE_RADIUS, self.getY() - CAPTURE_RADIUS, self.getZ() - CAPTURE_RADIUS, self.getX() + CAPTURE_RADIUS, self.getY() + CAPTURE_RADIUS, self.getZ() + CAPTURE_RADIUS);
 		List<Player> players = mc.level.getEntitiesOfClass(Player.class, box, p -> IGN.matcher(p.getName().getString()).matches());
-		for (Player player : players) {
-			String name = player.getName().getString();
-			sightings.merge(name, 1, Integer::sum);
+		synchronized (sightings) {
+			for (Player player : players) {
+				sightings.merge(player.getName().getString(), 1, Integer::sum);
+			}
 		}
 	}
 
@@ -153,10 +176,11 @@ public final class WarTracker {
 		if (mc.player != null) {
 			members.add(mc.player.getName().getString());
 		}
-		// Only persistent presences count; a passer-by seen once is excluded.
-		for (Map.Entry<String, Integer> entry : sightings.entrySet()) {
-			if (entry.getValue() >= MIN_SIGHTINGS && !members.contains(entry.getKey())) {
-				members.add(entry.getKey());
+		synchronized (sightings) {
+			for (Map.Entry<String, Integer> entry : sightings.entrySet()) {
+				if (entry.getValue() >= MIN_SIGHTINGS && !members.contains(entry.getKey())) {
+					members.add(entry.getKey());
+				}
 			}
 		}
 		if (reporter != null && !members.isEmpty()) {
@@ -169,9 +193,8 @@ public final class WarTracker {
 		if (!config.warWeeklyCountHud || weeklyWars < 0) {
 			return;
 		}
-		Minecraft mc = Minecraft.getInstance();
 		String text = weeklyWars + (weeklyWars == 1 ? " war" : " wars");
-		int width = mc.font.width(text) + 6;
+		int width = Minecraft.getInstance().font.width(text) + 6;
 		int height = 12;
 		HudPanel panel = new HudPanel();
 		panel.add(new RectangleElement(0, 0, width, height, PANEL_BG));

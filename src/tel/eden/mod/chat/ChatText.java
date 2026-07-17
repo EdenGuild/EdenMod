@@ -1,8 +1,11 @@
 package tel.eden.mod.chat;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.network.chat.Component;
@@ -50,6 +53,53 @@ final class ChatText {
 		}
 		String cleaned = displayed.replaceAll("[^a-zA-Z0-9_]", "");
 		return IGN.matcher(cleaned).matches() ? cleaned : null;
+	}
+
+	/**
+	 * Resolve the real account username from a whole message's hover/insertion metadata,
+	 * independent of where the displayed name sits in the text. This mirrors the guild
+	 * chat resolver ({@code GuildChatParser.findRealUsername}) — collect every hover
+	 * real-name and valid-IGN shift-click insertion, then prefer a candidate the nickname
+	 * is a prefix of, else any candidate that differs from the nickname. Returns null when
+	 * no metadata is present (caller falls back to the displayed name).
+	 */
+	static String resolveRealNameAnywhere(Component message, String displayed) {
+		Set<String> candidates = new LinkedHashSet<>();
+		message.visit((style, fragment) -> {
+			String hover = hoverRealName(style);
+			if (hover != null) {
+				candidates.add(hover);
+			}
+			String insertion = style.getInsertion();
+			if (insertion != null && IGN.matcher(insertion).matches()) {
+				candidates.add(insertion);
+			}
+			return Optional.empty();
+		}, Style.EMPTY);
+		if (candidates.isEmpty()) {
+			return null;
+		}
+		String nick = displayed == null ? "" : displayed.trim();
+		if (nick.isEmpty()) {
+			return candidates.iterator().next();
+		}
+		String nickLower = nick.toLowerCase(Locale.ROOT);
+		String bestPrefix = null;
+		for (String candidate : candidates) {
+			String lower = candidate.toLowerCase(Locale.ROOT);
+			if (!lower.equals(nickLower) && lower.startsWith(nickLower) && (bestPrefix == null || candidate.length() > bestPrefix.length())) {
+				bestPrefix = candidate;
+			}
+		}
+		if (bestPrefix != null) {
+			return bestPrefix;
+		}
+		for (String candidate : candidates) {
+			if (!candidate.equalsIgnoreCase(nick)) {
+				return candidate;
+			}
+		}
+		return candidates.iterator().next();
 	}
 
 	private static List<MetaChar> flatten(Component message) {

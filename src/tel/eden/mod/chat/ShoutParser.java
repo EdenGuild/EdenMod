@@ -71,14 +71,17 @@ public final class ShoutParser {
 		return text.replaceAll("(?i)https?://", "");
 	}
 
-	/** Real account name from hover, else the displayed name minus any "/nick". */
+	/** Real account name from hover/insertion metadata, else the "/nick"-stripped name. */
 	private static String resolve(Component message, String displayed) {
-		String resolved = ChatText.resolveRealName(message, displayed);
+		String name = displayed.trim();
+		int slash = name.indexOf('/');
+		String base = slash > 0 ? name.substring(0, slash).trim() : name;
+		// Prefer the metadata resolver (works for fully-nicked shouts, where the base is
+		// just the nickname); fall back to the "/nick"-stripped display name.
+		String resolved = ChatText.resolveRealNameAnywhere(message, base);
 		if (resolved != null) {
 			return resolved;
 		}
-		String name = displayed.trim();
-		int slash = name.indexOf('/');
-		return slash > 0 ? name.substring(0, slash).trim() : name;
+		return base;
 	}
 }

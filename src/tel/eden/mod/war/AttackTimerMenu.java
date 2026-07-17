@@ -57,6 +57,16 @@ public final class AttackTimerMenu {
 		return soonestTerritory;
 	}
 
+	/** Territories with an active queued attack right now, soonest first (from the
+	 * scoreboard, independent of whether the HUD is shown). Empty when none. */
+	public static List<String> attackedTerritories() {
+		List<String> out = new ArrayList<>();
+		for (Upcoming attack : upcomingAttacks()) {
+			out.add(attack.territory());
+		}
+		return out;
+	}
+
 	/** Record a guild-reported defense rating (from the chat-defense intake). */
 	public static void reportDefense(String username, String territory, String defense) {
 		chatDefenses.put(territory, new ChatDefenseInfo(username, territory, defense, System.currentTimeMillis()));

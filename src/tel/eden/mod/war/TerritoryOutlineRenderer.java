@@ -19,12 +19,12 @@ import org.lwjgl.glfw.GLFW;
  * Draws the boundary of a single territory as a flat wall, using the per-frame debug
  * gizmos (added during {@code WorldRenderEvents.AFTER_ENTITIES}).
  *
- * <p>A keybind (comma by default) toggles it on. Only the territory the player is in —
- * or the last one they were in — is drawn: its border becomes a translucent wall with a
- * bright top rail. The wall uses a flat baseline anchored to the player's current height
- * (no terrain sampling), so it floats level with the player and rises/falls as they do.
- * Green while the player is inside that territory, red once they step outside it. Other
- * territories are never shown.
+ * <p>A keybind (comma by default) toggles it on, but it only draws while a territory is
+ * actually under attack (from the scoreboard timers) — the border of the attacked
+ * territory becomes a full-height translucent wall (world bottom to top, no terrain
+ * sampling) with a bright top rail. Green while the player is standing in the attacked
+ * territory, red once they step outside it into an unattacked territory (or none). When
+ * several are attacked at once it shows the one the player is in, else the soonest.
  */
 public final class TerritoryOutlineRenderer {
 	private TerritoryOutlineRenderer() {
@@ -35,19 +35,19 @@ public final class TerritoryOutlineRenderer {
 	private static final int FILL_GREEN = 0x5533CC33;
 	private static final int FILL_RED = 0x55FF4040;
 	private static final float RAIL_WIDTH = 2.5f;
-	// The wall spans from BASE_BELOW blocks under the player's feet to WALL_HEIGHT above.
-	private static final int BASE_BELOW = 2;
-	private static final int WALL_HEIGHT = 6;
+	// The wall spans the full world height (a taller quad is the same 4 vertices, so this
+	// costs no more than a short wall). Covers the vanilla build range with margin.
+	private static final int WALL_BOTTOM = -64;
+	private static final int WALL_TOP = 320;
 	// Only draw border columns within this many blocks of the player.
 	private static final int DRAW_RADIUS = 48;
 
 	private static KeyMapping key;
 	private static boolean enabled;
-	private static String lockedTerritory;
 
 	// Cached border columns near the player, split into contiguous in-range runs so
-	// quads never bridge a gap. Each column is an {x, z} pair; the Y is a flat baseline
-	// applied fresh each frame from the player's height (so no rebuild on vertical move).
+	// quads never bridge a gap. Each column is an {x, z} pair; the Y is the full-height
+	// baseline applied fresh each frame.
 	private static final List<List<int[]>> cachedRuns = new ArrayList<>();
 	private static String cachedTerritory;
 	private static long cachedPos = Long.MIN_VALUE;
@@ -77,30 +77,31 @@ public final class TerritoryOutlineRenderer {
 		if (player == null || mc.level == null) {
 			return;
 		}
-		BlockPos pos = player.blockPosition();
-		String inside = TerritoryData.territoryAt(pos.getX(), pos.getZ());
-		// Lock onto whichever territory the player is currently standing in; if they've
-		// stepped out, keep the last one but draw it red.
-		if (inside != null) {
-			lockedTerritory = inside;
-		}
-		if (lockedTerritory == null) {
+		// Only render while a territory is actually under attack; show the one being
+		// attacked. When defending several, prefer the one the player is standing in.
+		List<String> attacked = AttackTimerMenu.attackedTerritories();
+		if (attacked.isEmpty()) {
 			return;
 		}
-		int[] rect = TerritoryData.rect(lockedTerritory);
+		BlockPos pos = player.blockPosition();
+		String inside = TerritoryData.territoryAt(pos.getX(), pos.getZ());
+		String target = (inside != null && attacked.contains(inside)) ? inside : attacked.get(0);
+		int[] rect = TerritoryData.rect(target);
 		if (rect == null) {
 			return;
 		}
 		long posKey = (((long) pos.getX()) << 32) ^ (pos.getZ() & 0xffffffffL);
-		if (!lockedTerritory.equals(cachedTerritory) || posKey != cachedPos) {
+		if (!target.equals(cachedTerritory) || posKey != cachedPos) {
 			rebuildWall(rect, pos);
-			cachedTerritory = lockedTerritory;
+			cachedTerritory = target;
 			cachedPos = posKey;
 		}
-		// Flat baseline anchored to the player's current feet height.
-		double base = player.getY() - BASE_BELOW;
-		double top = base + WALL_HEIGHT;
-		boolean here = lockedTerritory.equals(inside);
+		// Full-height wall from world bottom to top (flat, terrain-independent).
+		double base = WALL_BOTTOM;
+		double top = WALL_TOP;
+		// Green while standing in the attacked territory, red when outside it (in another
+		// territory not under attack, or none).
+		boolean here = target.equals(inside);
 		int fill = here ? FILL_GREEN : FILL_RED;
 		int rail = here ? RAIL_GREEN : RAIL_RED;
 		for (List<int[]> run : cachedRuns) {

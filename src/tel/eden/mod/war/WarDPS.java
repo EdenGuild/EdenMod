@@ -192,9 +192,15 @@ public final class WarDPS {
 	}
 
 	private static void warEnded(boolean won) {
-		long timeInWar = warStartTime > 0 ? (System.currentTimeMillis() - warStartTime) / 1000 : 0;
-		double fightSeconds = firstDamageTime > 0 ? (System.currentTimeMillis() - firstDamageTime) / 1000.0 : 0;
-		double averageDps = fightSeconds > 0 ? (won ? maxEhp : maxEhp - previousEhp) / fightSeconds : 0;
+		long now = System.currentTimeMillis();
+		// Sub-second wars are real, so keep a decimal and never divide by ~0.
+		double timeInWar = warStartTime > 0 ? (now - warStartTime) / 1000.0 : 0;
+		// On an instant kill the per-second damage tick never latched firstDamageTime, so
+		// fall back to the war start; a floor keeps a 0-1s war from reporting absurd DPS.
+		long damageStart = firstDamageTime > 0 ? firstDamageTime : warStartTime;
+		double fightSeconds = damageStart > 0 ? Math.max(0.5, (now - damageStart) / 1000.0) : 0.5;
+		double damageDone = won ? maxEhp : Math.max(0, maxEhp - previousEhp);
+		double averageDps = damageDone / fightSeconds;
 		String initial = statsTail(initialStats);
 		String fin = statsTail(latestStats);
 		Minecraft.getInstance().execute(() -> {
@@ -202,18 +208,22 @@ public final class WarDPS {
 			if (mc.player == null) {
 				return;
 			}
-			mc.player.displayClientMessage(Component.literal("Time in war: " + timeInWar + "s").withStyle(ChatFormatting.LIGHT_PURPLE), false);
+			mc.player.displayClientMessage(Component.literal("Time in war: " + formatSeconds(timeInWar)).withStyle(ChatFormatting.LIGHT_PURPLE), false);
 			mc.player.displayClientMessage(Component.literal("Average DPS: " + readable(averageDps)).withStyle(ChatFormatting.LIGHT_PURPLE), false);
 			if (!initial.isEmpty()) {
-				mc.player.displayClientMessage(Component.literal("Initial tower: " + initial).withStyle(ChatFormatting.GRAY), false);
+				mc.player.displayClientMessage(Component.literal("Initial tower: " + initial).withStyle(ChatFormatting.LIGHT_PURPLE), false);
 			}
 			if (!won && !fin.isEmpty()) {
-				mc.player.displayClientMessage(Component.literal("Final tower: " + fin).withStyle(ChatFormatting.GRAY), false);
+				mc.player.displayClientMessage(Component.literal("Final tower: " + fin).withStyle(ChatFormatting.LIGHT_PURPLE), false);
 			}
 		});
 		// Attendance is reported only on a captured war (see WarTracker).
 		WarTracker.onWarEnded(won);
 		resetWar();
+	}
+
+	private static String formatSeconds(double seconds) {
+		return seconds < 10 ? String.format("%.1fs", seconds) : String.format("%.0fs", seconds);
 	}
 
 	/** The stat portion of a tower bar ("❤ ... - ☠ ..."), without the territory name. */
