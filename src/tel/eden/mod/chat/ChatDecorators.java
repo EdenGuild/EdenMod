@@ -24,9 +24,10 @@ public final class ChatDecorators {
 	}
 
 	// Wynncraft milestone broadcast, e.g. "[!] Congratulations to Zasper for reaching level 106!"
-	// The name token can be nicked ("real/nick", "real(nick)", or a bare nick), so capture
-	// the whole non-space token and resolve it to the real account name for the /msg.
-	private static final Pattern CONGRATS = Pattern.compile("\\[!\\] Congratulations to (\\S+) for reaching .+!");
+	// The name can be nicked ("real/nick", "real(nick)", or a bare nick) and a nickname may
+	// contain spaces (e.g. "Mintum/read kagurabachi"), so capture everything up to
+	// " for reaching" and resolve it to the real account name for the /msg.
+	private static final Pattern CONGRATS = Pattern.compile("\\[!\\] Congratulations to (.+?) for reaching .+!");
 
 	/** Players with an unclaimed congratulate button (one-shot per broadcast). */
 	private static final Set<String> pendingCongrats = ConcurrentHashMap.newKeySet();
