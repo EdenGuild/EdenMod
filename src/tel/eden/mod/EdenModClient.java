@@ -9,6 +9,7 @@ import tel.eden.mod.chat.ChatRelay;
 import tel.eden.mod.chat.DiscordChatFormatter;
 import tel.eden.mod.chat.EmoteRegistry;
 import tel.eden.mod.chat.GuildAnnounceParser;
+import tel.eden.mod.chat.ChatDecorators;
 import tel.eden.mod.chat.GuildChatParser;
 import tel.eden.mod.chat.GuildEvent;
 import tel.eden.mod.chat.GuildEventParser;
@@ -342,6 +343,9 @@ public final class EdenModClient implements ClientModInitializer {
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
 				requestWarCounts(ctx.getSource(), com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "days"));
+				return 1;
+			}))).then(ClientCommandManager.literal("congratulate").then(ClientCommandManager.argument("name", StringArgumentType.word()).executes(ctx -> {
+				congratulate(ctx.getSource(), StringArgumentType.getString(ctx, "name"));
 				return 1;
 			}))).then(ClientCommandManager.literal("wartest").executes(ctx -> {
 				for (String line : AttackTimerMenu.debugSidebarLines()) {
@@ -733,6 +737,18 @@ public final class EdenModClient implements ClientModInitializer {
 			return;
 		}
 		current.sendOnlineRequest();
+	}
+
+	/** One-shot congratulate: DM the configured message if the button is unclaimed. */
+	private void congratulate(FabricClientCommandSource source, String name) {
+		if (!ChatDecorators.consumePending(name)) {
+			source.sendFeedback(DiscordChatFormatter.systemLine(name + " has nothing to be congratulated for!", ChatFormatting.GOLD));
+			return;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.getConnection() != null) {
+			mc.getConnection().sendCommand("msg " + name + " " + config.congratsMessage);
+		}
 	}
 
 	/** In-game {@code /eden wars}: backend-authoritative counts (matches Discord). */

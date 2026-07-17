@@ -1,6 +1,7 @@
 package tel.eden.mod.mixin;
 
 import tel.eden.mod.EdenModClient;
+import tel.eden.mod.chat.ChatDecorators;
 import tel.eden.mod.chat.DiscordChatFormatter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -23,6 +24,10 @@ public class ClientPacketListenerMixin {
 			mod.handleSystemChat(packet.content());
 		}
 		Component modified = DiscordChatFormatter.processEmotes(packet.content());
+		if (mod != null) {
+			// Display-only decorations: click-to-reply shouts, congratulate buttons.
+			modified = ChatDecorators.decorate(modified, mod.config());
+		}
 		if (modified != packet.content()) {
 			// This HEAD inject fires before vanilla's ensureRunningOnSameThread, i.e.
 			// on the netty network thread. Marshal the re-display onto the client

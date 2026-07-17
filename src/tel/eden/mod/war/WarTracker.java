@@ -29,7 +29,8 @@ import tel.eden.mod.mixin.BossHealthOverlayAccessor;
  * player's own 7-day count from the last {@code warCountsReply}.
  */
 public final class WarTracker {
-	private WarTracker() {}
+	private WarTracker() {
+	}
 
 	private static final String PANEL = "weeklyWars";
 	private static final float DEFAULT_X = 0.83f;
@@ -90,11 +91,8 @@ public final class WarTracker {
 	private static void captureNearbyPlayers() {
 		Minecraft mc = Minecraft.getInstance();
 		Player self = mc.player;
-		AABB box = new AABB(
-				self.getX() - CAPTURE_RADIUS, self.getY() - CAPTURE_RADIUS, self.getZ() - CAPTURE_RADIUS,
-				self.getX() + CAPTURE_RADIUS, self.getY() + CAPTURE_RADIUS, self.getZ() + CAPTURE_RADIUS);
-		List<Player> players = mc.level.getEntitiesOfClass(Player.class, box,
-				p -> IGN.matcher(p.getName().getString()).matches());
+		AABB box = new AABB(self.getX() - CAPTURE_RADIUS, self.getY() - CAPTURE_RADIUS, self.getZ() - CAPTURE_RADIUS, self.getX() + CAPTURE_RADIUS, self.getY() + CAPTURE_RADIUS, self.getZ() + CAPTURE_RADIUS);
+		List<Player> players = mc.level.getEntitiesOfClass(Player.class, box, p -> IGN.matcher(p.getName().getString()).matches());
 		synchronized (nearbyMembers) {
 			for (Player player : players) {
 				nearbyMembers.add(player.getName().getString());

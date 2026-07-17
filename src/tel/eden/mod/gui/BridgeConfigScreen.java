@@ -8,6 +8,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -94,6 +95,22 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow("Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
 		addToggleRow("Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);
 		addToggleRow("Click-to-congratulate", () -> config.clickToCongratulate, v -> config.clickToCongratulate = v, "On", "Off", false);
+		EditBox congratsBox = new EditBox(this.font, 0, 0, CONTROL_W, 20, Component.literal("Congrats message"));
+		congratsBox.setMaxLength(80);
+		congratsBox.setValue(config.congratsMessage);
+		congratsBox.setResponder(value -> {
+			config.congratsMessage = value;
+			config.save();
+		});
+		addRow("Congrats message", congratsBox, () -> {
+			// Don't clobber in-progress typing; the responder already saved it.
+			if (!congratsBox.isFocused() && !congratsBox.getValue().equals(config.congratsMessage)) {
+				congratsBox.setValue(config.congratsMessage);
+			}
+		}, () -> {
+			config.congratsMessage = "Congrats!";
+			congratsBox.setValue("Congrats!");
+		});
 		// ------------------------------------------------------------------------
 
 		this.addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose()).bounds(cx, this.height - 30, cw, 20).build());

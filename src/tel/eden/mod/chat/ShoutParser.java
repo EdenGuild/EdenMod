@@ -51,6 +51,21 @@ public final class ShoutParser {
 		return Optional.of(resolve(message, matcher.group(1)) + " shouts: " + body);
 	}
 
+	/**
+	 * The shouter's real account name, if this message is a shout. Used to make
+	 * shouts clickable-to-reply; purely display-side, no relay effect.
+	 */
+	public static Optional<String> shouterRealName(Component message) {
+		if (!isCandidate(message)) {
+			return Optional.empty();
+		}
+		Matcher matcher = SHOUT.matcher(ChatText.normalize(message.getString()));
+		if (!matcher.matches()) {
+			return Optional.empty();
+		}
+		return Optional.of(resolve(message, matcher.group(1)));
+	}
+
 	/** Strip http(s):// from any links so Discord doesn't auto-embed them when relayed. */
 	private static String stripLinkSchemes(String text) {
 		return text.replaceAll("(?i)https?://", "");

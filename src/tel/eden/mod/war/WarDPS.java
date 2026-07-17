@@ -25,7 +25,8 @@ import tel.eden.mod.mixin.BossHealthOverlayAccessor;
  * stats) is printed to chat.
  */
 public final class WarDPS {
-	private WarDPS() {}
+	private WarDPS() {
+	}
 
 	private static final String PANEL = "warInfo";
 	private static final float DEFAULT_X = 0.015f;
@@ -87,8 +88,7 @@ public final class WarDPS {
 		}
 		if (line.startsWith("You have taken control of ")) {
 			warEnded(true);
-		} else if (line.startsWith("Your guild has lost the war for ")
-				|| line.startsWith("Your active attack was canceled and refunded to your headquarter")) {
+		} else if (line.startsWith("Your guild has lost the war for ") || line.startsWith("Your active attack was canceled and refunded to your headquarter")) {
 			warEnded(false);
 		}
 	}
@@ -260,7 +260,7 @@ public final class WarDPS {
 	/** Strip colour codes and private-use glyphs (war-message prefixes) from a line. */
 	static String clean(String raw) {
 		StringBuilder out = new StringBuilder(raw.length());
-		for (int i = 0; i < raw.length(); ) {
+		for (int i = 0; i < raw.length();) {
 			int cp = raw.codePointAt(i);
 			i += Character.charCount(cp);
 			if (cp == 0xA7) { // section sign: skip it and the following code char
