@@ -38,6 +38,7 @@ import tel.eden.mod.item.WynntilsItemDecoder;
 import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.net.PartyInfo;
 import tel.eden.mod.net.PendingEntry;
+import tel.eden.mod.net.WarCountEntry;
 import tel.eden.mod.reward.GuildRewards;
 import tel.eden.mod.update.UpdateChecker;
 import tel.eden.mod.update.UpdateInfo;
@@ -48,7 +49,9 @@ import tel.eden.mod.war.BeaconManager;
 import tel.eden.mod.war.TerritoryData;
 import tel.eden.mod.war.TerritoryMenuKeybind;
 import tel.eden.mod.war.TerritoryOutlineRenderer;
+import tel.eden.mod.war.WarDPS;
 import tel.eden.mod.war.WarHud;
+import tel.eden.mod.war.WarTracker;
 import tel.eden.mod.util.WynntilsChatBridge;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -168,6 +171,16 @@ public final class EdenModClient implements ClientModInitializer {
 	// ("version_rejected", "not_member", "http_401", etc.) so onClientTick can
 	// show the right message once the player is loaded.
 	private volatile String pendingConnectionCode;
+
+	/** Suppresses chat output for the next warCountsReply (background chip refresh). */
+	private volatile boolean suppressNextWarCountsDisplay;
+
+	/** Detected wars not yet delivered because the socket was down; flushed on tick. */
+	private record PendingWarReport(String territory, List<String> members) {
+	}
+
+	private final java.util.concurrent.ConcurrentLinkedQueue<PendingWarReport> pendingWarReports = new java.util.concurrent.ConcurrentLinkedQueue<>();
+	private long lastWeeklyWarsRefresh;
 	// Set on game join, sent once the bridge connects, cleared on send/disconnect, so
 	// a "logged in" notice fires per game session (not on every WS reconnect).
 	private volatile boolean loginPending;
@@ -265,6 +278,7 @@ public final class EdenModClient implements ClientModInitializer {
 		openEmotePickerKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_emote_picker", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_MIDDLE, edenCategory));
 		TerritoryMenuKeybind.register(edenCategory);
 		TerritoryOutlineRenderer.register(edenCategory);
+		WarTracker.setReporter(this::relayWarAttended);
 
 		// War-suite 2D HUD overlays, drawn only while on Wynncraft.
 		HudRenderCallback.EVENT.register((graphics, tickCounter) -> {
@@ -323,7 +337,13 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wartest").executes(ctx -> {
+			}))).then(buildGiftCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
+				requestWarCounts(ctx.getSource(), 7);
+				return 1;
+			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
+				requestWarCounts(ctx.getSource(), com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "days"));
+				return 1;
+			}))).then(ClientCommandManager.literal("wartest").executes(ctx -> {
 				for (String line : AttackTimerMenu.debugSidebarLines()) {
 					ctx.getSource().sendFeedback(Component.literal("[wartest] " + line).withStyle(ChatFormatting.AQUA));
 				}
@@ -337,11 +357,40 @@ public final class EdenModClient implements ClientModInitializer {
 		LOGGER.info("EdenMod initialised");
 	}
 
+	/** Send a detected war's attendance now, or queue it until the socket is back. */
+	private void relayWarAttended(String territory, List<String> members) {
+		BridgeWebSocketClient current = socket;
+		if (current == null || !current.sendWarAttended(territory, members)) {
+			pendingWarReports.add(new PendingWarReport(territory, members));
+		} else {
+			LOGGER.info("War attended: {} ({} members)", territory, members.size());
+		}
+	}
+
 	private void onClientTick(Minecraft client) {
 		if (onWynncraft) {
 			TerritoryData.onTick();
 			TerritoryMenuKeybind.onTick(client);
 			TerritoryOutlineRenderer.onTick(client);
+			WarDPS.onTick(config);
+			WarTracker.onTick();
+			BridgeWebSocketClient current = socket;
+			if (current != null) {
+				// Flush war reports that were detected while disconnected.
+				PendingWarReport pending;
+				while ((pending = pendingWarReports.poll()) != null) {
+					if (!current.sendWarAttended(pending.territory(), pending.members())) {
+						pendingWarReports.add(pending);
+						break;
+					}
+				}
+				// Keep the weekly war-count chip fresh without spamming chat.
+				if (config.warWeeklyCountHud && System.currentTimeMillis() - lastWeeklyWarsRefresh > 10 * 60 * 1000L) {
+					lastWeeklyWarsRefresh = System.currentTimeMillis();
+					suppressNextWarCountsDisplay = true;
+					current.sendWarCountsRequest(7);
+				}
+			}
 		}
 		while (openConfigKey.consumeClick()) {
 			client.setScreen(BridgeConfigScreen.create(client.screen, this));
@@ -508,6 +557,21 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
+				public void onWarCounts(int days, java.util.List<WarCountEntry> entries, String requester, String color) {
+					// Cache the player's own 7-day count for the HUD chip regardless of
+					// who triggered the request.
+					if (days == 7 && !requester.isEmpty()) {
+						int own = entries.stream().filter(e -> e.name().equalsIgnoreCase(requester)).mapToInt(WarCountEntry::wars).findFirst().orElse(0);
+						WarTracker.setWeeklyWars(own);
+					}
+					if (suppressNextWarCountsDisplay) {
+						suppressNextWarCountsDisplay = false;
+						return;
+					}
+					displayColored(color, () -> DiscordChatFormatter.warCounts(days, entries, requester));
+				}
+
+				@Override
 				public void onConnectionRejected(String code) {
 					pendingConnectionCode = code;
 					Minecraft.getInstance().execute(() -> socket = null);
@@ -669,6 +733,16 @@ public final class EdenModClient implements ClientModInitializer {
 			return;
 		}
 		current.sendOnlineRequest();
+	}
+
+	/** In-game {@code /eden wars}: backend-authoritative counts (matches Discord). */
+	private void requestWarCounts(FabricClientCommandSource source, int days) {
+		BridgeWebSocketClient current = socket;
+		if (current == null) {
+			source.sendFeedback(notConnected());
+			return;
+		}
+		current.sendWarCountsRequest(days);
 	}
 
 	private void requestCoinflip(FabricClientCommandSource source) {
@@ -1418,7 +1492,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -1528,6 +1602,13 @@ public final class EdenModClient implements ClientModInitializer {
 		// A real chat line breaks any in-progress Discord emblem block, so the next
 		// relayed Discord message starts with a fresh shield (like guild chat).
 		DiscordChatFormatter.onServerChatLine();
+		if (onWynncraft) {
+			// War chat cues (war start countdown, war end) feed the local war HUD and
+			// the attendance tracker even while the bridge socket is down.
+			String warLine = message.getString();
+			WarDPS.onChat(warLine);
+			WarTracker.onChat(warLine);
+		}
 		BridgeWebSocketClient current = socket;
 		if (!onWynncraft || current == null) {
 			return;

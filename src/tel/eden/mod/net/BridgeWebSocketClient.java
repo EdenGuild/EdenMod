@@ -79,6 +79,14 @@ public final class BridgeWebSocketClient {
 		 * default gold.
 		 */
 		void onPillMessage(String label, String content, String colorHex);
+
+		/**
+		 * Response to a {@code warCountsRequest}: per-member war counts over the last
+		 * {@code days} days (backend-authoritative, same source as the Discord
+		 * {@code /eden wars}). {@code requester} is this player's username so their
+		 * own row can be highlighted/cached.
+		 */
+		void onWarCounts(int days, java.util.List<WarCountEntry> entries, String requester, String color);
 	}
 
 	private final URI uri;
@@ -288,6 +296,41 @@ public final class BridgeWebSocketClient {
 	/** Ask the backend to roll a die and announce who rolled it + the result. */
 	public void sendDiceroll() {
 		sendType("diceroll");
+	}
+
+	/**
+	 * Report a detected guild war: the territory and the players seen fighting in it
+	 * (this client included). The backend merges reports from every attending client
+	 * and attaches the party to the territory-capture embed; it never affects the
+	 * authoritative war counts. Returns false when the socket is down (caller queues).
+	 */
+	public boolean sendWarAttended(String territory, java.util.List<String> members) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "warAttended");
+		obj.addProperty("territory", territory);
+		com.google.gson.JsonArray array = new com.google.gson.JsonArray();
+		for (String member : members) {
+			array.add(member);
+		}
+		obj.add("members", array);
+		current.sendText(obj.toString(), true);
+		return true;
+	}
+
+	/** Ask for the guild's per-member war counts over the last {@code days} days. */
+	public void sendWarCountsRequest(int days) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "warCountsRequest");
+		obj.addProperty("days", days);
+		current.sendText(obj.toString(), true);
 	}
 
 	/**
@@ -544,6 +587,7 @@ public final class BridgeWebSocketClient {
 				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"), get(obj, "color"));
 				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
 				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"));
+				case "warCountsReply" -> sink.onWarCounts(getInt(obj, "days", 7), parseWarCounts(obj), get(obj, "requester"), get(obj, "color"));
 				case "error" -> {
 					String code = get(obj, "code");
 					LOGGER.warn("Bridge rejected connection: {}", code);
@@ -580,6 +624,19 @@ public final class BridgeWebSocketClient {
 			for (var element : obj.get("parties").getAsJsonArray()) {
 				if (element.isJsonObject()) {
 					out.add(parseParty(element.getAsJsonObject()));
+				}
+			}
+		}
+		return out;
+	}
+
+	private static java.util.List<WarCountEntry> parseWarCounts(JsonObject obj) {
+		java.util.List<WarCountEntry> out = new java.util.ArrayList<>();
+		if (obj.has("members") && obj.get("members").isJsonArray()) {
+			for (var element : obj.get("members").getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject member = element.getAsJsonObject();
+					out.add(new WarCountEntry(get(member, "name"), getInt(member, "wars", 0)));
 				}
 			}
 		}

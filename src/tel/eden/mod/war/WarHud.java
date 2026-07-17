@@ -19,5 +19,7 @@ public final class WarHud {
 			return;
 		}
 		AttackTimerMenu.render(config, graphics);
+		WarDPS.render(config, graphics);
+		WarTracker.renderChip(config, graphics);
 	}
 }

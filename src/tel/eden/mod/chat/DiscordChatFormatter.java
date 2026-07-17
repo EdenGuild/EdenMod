@@ -128,6 +128,20 @@ public final class DiscordChatFormatter {
 		return Component.empty().append(prefix(SHIELD)).append(Component.literal(body).withStyle(ChatFormatting.GREEN));
 	}
 
+	/** Guild war counts (backend-authoritative), own row highlighted. */
+	public static Component warCounts(int days, java.util.List<tel.eden.mod.net.WarCountEntry> entries, String requester) {
+		MutableComponent out = Component.empty().append(prefix(SHIELD));
+		if (entries.isEmpty()) {
+			return out.append(Component.literal("No guild wars in the last " + days + " days.").withStyle(ChatFormatting.GOLD));
+		}
+		out.append(Component.literal("Guild wars — last " + days + " days:").withStyle(ChatFormatting.GREEN));
+		for (tel.eden.mod.net.WarCountEntry entry : entries) {
+			boolean own = entry.name().equalsIgnoreCase(requester);
+			out.append(Component.literal("\n  " + entry.name()).withStyle(own ? ChatFormatting.LIGHT_PURPLE : ChatFormatting.AQUA)).append(Component.literal(" — " + entry.wars()).withStyle(ChatFormatting.GRAY));
+		}
+		return out;
+	}
+
 	/** A client-side list of who has how many pending aspects (Chiefs' reward helper). */
 	public static Component aspectsPending(List<PendingEntry> entries, String error) {
 		if (error != null && !error.isEmpty()) {
