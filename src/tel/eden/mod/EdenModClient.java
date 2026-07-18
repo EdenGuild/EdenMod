@@ -160,9 +160,11 @@ public final class EdenModClient implements ClientModInitializer {
 	// thread; copy-on-write keeps those cross-thread reads from racing the writes.
 	private final java.util.List<PartyInfo> knownParties = new java.util.concurrent.CopyOnWriteArrayList<>();
 	// Latest aspects-owed list from the backend, read by AspectsPayoutScreen on the
-	// render thread. The generation counter lets the screen tell "no reply yet" apart
-	// from "replied with an empty list".
-	private final java.util.List<PendingEntry> knownPendingAspects = new java.util.concurrent.CopyOnWriteArrayList<>();
+	// render thread. Each reply replaces the whole list, so publishing an immutable
+	// one through a volatile field keeps readers from ever seeing a half-applied
+	// update. The generation counter lets the screen tell "no reply yet" apart from
+	// "replied with an empty list".
+	private volatile java.util.List<PendingEntry> knownPendingAspects = java.util.List.of();
 	private volatile String pendingAspectsError;
 	private volatile int pendingAspectsGeneration;
 	// GitHub update check: run once per game session; the prompt offers a one-click
@@ -263,7 +265,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/** Members owed aspects, highest first, as of the last backend reply. */
 	public java.util.List<PendingEntry> knownPendingAspects() {
-		return java.util.List.copyOf(knownPendingAspects);
+		return knownPendingAspects;
 	}
 
 	/** The error from the last aspects-pending reply, or {@code null} if it succeeded. */
@@ -557,8 +559,7 @@ public final class EdenModClient implements ClientModInitializer {
 					// reader sees the biggest debts first.
 					java.util.List<PendingEntry> sorted = new ArrayList<>(entries);
 					sorted.sort(java.util.Comparator.comparingInt(PendingEntry::aspects).reversed());
-					knownPendingAspects.clear();
-					knownPendingAspects.addAll(sorted);
+					knownPendingAspects = java.util.List.copyOf(sorted);
 					pendingAspectsError = (error == null || error.isEmpty()) ? null : error;
 					pendingAspectsGeneration++;
 				}
