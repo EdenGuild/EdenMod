@@ -27,6 +27,9 @@ loom {
 
 repositories {
     // Fabric/Mojang/Minecraft repos are added by Loom automatically.
+    // Mod Menu is sourced from Modrinth's (Cloudflare-backed) maven — terraformersmc's
+    // own maven intermittently truncates downloads, which stalls CI. Kept as a fallback.
+    maven { url "https://api.modrinth.com/maven" }
     maven { url "https://maven.terraformersmc.com/releases/" }
     // TwelveMonkeys ImageIO plugins (image-preview decoding) live on Maven Central.
     mavenCentral()
@@ -41,7 +44,8 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
     // Mod Menu API (compile-only): adds a config-screen button in Mod Menu when
     // it's installed; not bundled, and the entrypoint is inert without Mod Menu.
-    modCompileOnly "com.terraformersmc:modmenu:${modmenu_version}"
+    // From Modrinth's maven (project "modmenu") for reliable CI downloads.
+    modCompileOnly "maven.modrinth:modmenu:${modmenu_version}"
 
     // ImageIO plugins for in-game image previews. STB (NativeImage) only decodes
     // PNG/JPEG/BMP/GIF, so WebP (Discord/Tenor/Giphy) and awkward JPEGs fail. These
