@@ -113,6 +113,22 @@ public final class BridgeConfig {
 	public String congratsMessage = "Congrats!";
 
 	/**
+	 * Custom textures for crafted consumables (food/potions/scrolls), avomod2-style. Off by
+	 * default: the models/textures ship as a resource pack under {@code assets/edenmod/}, so
+	 * without those assets present there is nothing to show.
+	 */
+	public boolean customItemTextures = false;
+
+	/** Radial emote wheel (hold the keybind) for playing Wynncraft {@code /emote} animations. */
+	public boolean emoteWheelEnabled = true;
+
+	/** The emote-wheel favorites, one per slot (empty string = unused slot). */
+	public List<String> emoteWheelFavorites = new ArrayList<>();
+
+	/** Emotes detected as unlocked from Wynncraft's emotes menu (for the favorites picker). */
+	public List<String> emoteUnlocked = new ArrayList<>();
+
+	/**
 	 * Saved HUD element positions as {@code name -> [xFraction, yFraction]} (0-1 of
 	 * the screen). Absent elements fall back to their built-in default anchor.
 	 */
@@ -240,6 +256,12 @@ public final class BridgeConfig {
 					}
 					if (config.hudScales == null) {
 						config.hudScales = new HashMap<>();
+					}
+					if (config.emoteWheelFavorites == null) {
+						config.emoteWheelFavorites = new ArrayList<>();
+					}
+					if (config.emoteUnlocked == null) {
+						config.emoteUnlocked = new ArrayList<>();
 					}
 					if (config.chatEmoteUiEnabled != null) {
 						config.chatEmoteToolsMode = config.chatEmoteUiEnabled ? ChatEmoteToolsMode.UI_AND_AUTO : ChatEmoteToolsMode.NONE;

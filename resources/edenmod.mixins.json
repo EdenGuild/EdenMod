@@ -9,6 +9,7 @@
     "ClientPacketListenerCommandAliasMixin",
     "ClientPacketListenerMixin",
     "GuiGraphicsMixin",
+    "ItemRenderMixin",
     "TitleScreenMixin"
   ],
   "injectors": {

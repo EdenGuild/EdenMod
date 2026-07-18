@@ -279,6 +279,7 @@ public final class EdenModClient implements ClientModInitializer {
 		openEmotePickerKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_emote_picker", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_MIDDLE, edenCategory));
 		TerritoryMenuKeybind.register(edenCategory);
 		TerritoryOutlineRenderer.register(edenCategory);
+		tel.eden.mod.emote.EmoteWheel.register(edenCategory);
 		WarTracker.setReporter(this::relayWarAttended);
 
 		// War-suite 2D HUD overlays, drawn only while on Wynncraft.
@@ -378,6 +379,8 @@ public final class EdenModClient implements ClientModInitializer {
 			TerritoryOutlineRenderer.onTick(client);
 			WarDPS.onTick(config);
 			WarTracker.onTick();
+			tel.eden.mod.emote.EmoteWheel.onTick(client);
+			tel.eden.mod.emote.UnlockedEmoteDetector.onTick(client);
 			BridgeWebSocketClient current = socket;
 			if (current != null) {
 				// Flush war reports that were detected while disconnected.
