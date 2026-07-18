@@ -113,11 +113,11 @@ public final class BridgeConfig {
 	public String congratsMessage = "Congrats!";
 
 	/**
-	 * Custom textures for crafted consumables (food/potions/scrolls), avomod2-style. Off by
-	 * default: the models/textures ship as a resource pack under {@code assets/edenmod/}, so
-	 * without those assets present there is nothing to show.
+	 * Custom textures for crafted consumables (food/potions/scrolls), avomod2-style. The
+	 * models/textures ship under {@code assets/edenmod/{items,models,textures}} (ported from
+	 * avomod2), so this is on by default.
 	 */
-	public boolean customItemTextures = false;
+	public boolean customItemTextures = true;
 
 	/** Radial emote wheel (hold the keybind) for playing Wynncraft {@code /emote} animations. */
 	public boolean emoteWheelEnabled = true;

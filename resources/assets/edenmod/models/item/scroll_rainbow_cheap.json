@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "edenmod:item/scroll_rainbow_cheap"
+  }
+}

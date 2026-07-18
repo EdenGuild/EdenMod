@@ -21,11 +21,11 @@ import tel.eden.mod.mixin.BossHealthOverlayAccessor;
  * Detects guild wars the player actually fights and reports the attendance to the
  * backend on a <em>won</em> war only.
  *
- * <p>Capture opens on the "war battle will start in 25 seconds" line and runs through
- * the fight, sampling nearby players once a second; only those present for enough of it
+ * <p>Capture opens on the "The battle has begun!" line and runs through
+ * the fight, sampling nearby players a couple of times a second; only those present for enough of it
  * (a persistent-sighting threshold) count, so passers-by are excluded. Crucially, a
  * report is only sent if this client actually saw the tower boss bar — i.e. it was at the
- * war, not just a guildmate who saw the countdown broadcast from a hub — and only when
+ * war, not just a guildmate who saw the broadcast from a hub — and only when
  * the war is won. Losses and abandoned attempts report nothing. War counts stay
  * backend-authoritative; the optional HUD chip shows the player's own 7-day count from
  * the last {@code warCountsReply}.
@@ -40,12 +40,19 @@ public final class WarTracker {
 	private static final int PANEL_BG = 0x64000000;
 
 	private static final Pattern IGN = Pattern.compile("^[A-Za-z0-9_]{1,16}$");
-	private static final String WAR_START_PHRASE = "war battle will start";
+	// The fight itself starting ("... The battle has begun!") — capture opens here, so we
+	// only sample who's actually at the tower, not who saw the earlier countdown broadcast.
+	private static final String WAR_START_PHRASE = "battle has begun";
 	// War fighters cluster on the tower; keep the radius tight to exclude passers-by.
 	private static final int CAPTURE_RADIUS = 45;
-	// A player must appear in at least this many one-second samples (~2s) to count.
-	private static final int MIN_SIGHTINGS = 2;
-	// If no tower bar appears within this long of the countdown, we aren't in this war.
+	// A player seen in even one sample counts — very short wars barely last a tick.
+	private static final int MIN_SIGHTINGS = 1;
+	// How often (in ticks) to sample nearby players while capturing (~2x/second).
+	private static final int SAMPLE_INTERVAL_TICKS = 10;
+	// Keep sampling this long after the war ends: the tower bar and the roster linger a
+	// second or two post-war, which is where a sub-second war's attendance comes from.
+	private static final long POST_WAR_GRACE_MS = 2500L;
+	// If no tower bar appears within this long of the start, we aren't in this war.
 	private static final long NO_WAR_TIMEOUT_MS = 40_000L;
 	// Hard safety cap on how long one capture may run.
 	private static final long MAX_CAPTURE_MS = 300_000L;
@@ -61,6 +68,9 @@ public final class WarTracker {
 	private static volatile long captureStart;
 	private static String currentWar;
 	private static int tickCounter;
+	// Post-war grace: once the war ends we keep sampling until this timestamp, then report.
+	private static long graceEndsAt;
+	private static boolean pendingWon;
 	private static final Map<String, Integer> sightings = new HashMap<>();
 	/** Own war count over the last 7 days, from the backend; -1 until known. */
 	private static volatile int weeklyWars = -1;
@@ -73,12 +83,16 @@ public final class WarTracker {
 		weeklyWars = wars;
 	}
 
-	/** War-start countdown opens the capture window; may be called off-thread. */
+	/** The battle-start line opens the capture window; may be called off-thread. */
 	public static void onChat(String rawLine) {
 		if (WarDPS.clean(rawLine).contains(WAR_START_PHRASE)) {
 			capturing = true;
 			captureStart = System.currentTimeMillis();
 			currentWar = null;
+			graceEndsAt = 0;
+			pendingWon = false;
+			// Reset so the very next tick samples the initial roster (short wars need it).
+			tickCounter = 0;
 			synchronized (sightings) {
 				sightings.clear();
 			}
@@ -99,21 +113,37 @@ public final class WarTracker {
 		if (territory != null) {
 			currentWar = territory;
 		}
-		// A guildmate who only saw the countdown (no tower bar, not at the war) stops
+		// A guildmate who only saw the broadcast (no tower bar, not at the war) stops
 		// capturing so their bystanders are never reported.
 		if ((currentWar == null && now - captureStart > NO_WAR_TIMEOUT_MS) || now - captureStart > MAX_CAPTURE_MS) {
 			reset();
 			return;
 		}
-		tickCounter++;
-		if (tickCounter % 20 == 0) {
+		// First tick (counter 0) samples immediately, then every SAMPLE_INTERVAL_TICKS.
+		if (tickCounter % SAMPLE_INTERVAL_TICKS == 0) {
 			sampleNearbyFighters();
+		}
+		tickCounter++;
+		// After the war ends we keep sampling through the grace window, then report.
+		if (graceEndsAt > 0 && now >= graceEndsAt) {
+			finalizeReport();
 		}
 	}
 
-	/** Called by {@link WarDPS} when a war ends; reports attendance only on a win. */
+	/**
+	 * Called by {@link WarDPS} when a war ends; opens a short post-war grace window (we keep
+	 * sampling the lingering roster) after which attendance is reported — only on a win.
+	 */
 	public static void onWarEnded(boolean won) {
-		if (won && currentWar != null) {
+		if (!capturing) {
+			return;
+		}
+		pendingWon = won;
+		graceEndsAt = System.currentTimeMillis() + POST_WAR_GRACE_MS;
+	}
+
+	private static void finalizeReport() {
+		if (pendingWon && currentWar != null) {
 			reportWar(currentWar);
 		}
 		reset();
@@ -122,6 +152,8 @@ public final class WarTracker {
 	private static void reset() {
 		capturing = false;
 		currentWar = null;
+		graceEndsAt = 0;
+		pendingWon = false;
 		synchronized (sightings) {
 			sightings.clear();
 		}

@@ -25,8 +25,9 @@ import org.lwjgl.glfw.GLFW;
  * always-on-top), so terrain occludes them: they hide behind blocks. Walking into a
  * different territory
  * switches the wall to that territory's border; standing outside all territories shows
- * nothing. The walls sit at fixed territory borders (whole perimeter, not clipped to a
- * radius) so they never appear to follow the player.
+ * nothing. Edges sit at fixed territory borders and are drawn only when the player is near
+ * them (distance-culled to spare fill-rate on large territories), so a wall fades in as you
+ * approach a border rather than following you.
  */
 public final class TerritoryOutlineRenderer {
 	private TerritoryOutlineRenderer() {
@@ -37,10 +38,14 @@ public final class TerritoryOutlineRenderer {
 	private static final int FILL_GREEN = 0x5533CC33;
 	private static final int FILL_RED = 0x55FF4040;
 	private static final float RAIL_WIDTH = 2.5f;
-	// The wall spans the full world height (a taller quad is the same 4 vertices, so this
-	// costs no more than a short wall). Covers the vanilla build range with margin.
+	// The wall spans most of the world height; the quad is the same 4 vertices regardless of
+	// height, but a shorter one is less translucent overdraw for low-end GPUs.
 	private static final int WALL_BOTTOM = -64;
-	private static final int WALL_TOP = 320;
+	private static final int WALL_TOP = 270;
+	// Only draw edges whose nearest point is within this many blocks of the player. A big
+	// territory otherwise paints distant full-height translucent walls, which is fill-rate
+	// heavy; edges stay fixed, so a wall just fades in as you approach a border.
+	private static final double CULL_DIST = 96.0;
 
 	private static KeyMapping key;
 	private static boolean enabled;
@@ -91,10 +96,31 @@ public final class TerritoryOutlineRenderer {
 		int minZ = rect[1];
 		int maxX = rect[2] + 1;
 		int maxZ = rect[3] + 1;
-		wall(minX, minZ, maxX, minZ, fill, rail);
-		wall(maxX, minZ, maxX, maxZ, fill, rail);
-		wall(maxX, maxZ, minX, maxZ, fill, rail);
-		wall(minX, maxZ, minX, minZ, fill, rail);
+		int px = pos.getX();
+		int pz = pos.getZ();
+		maybeWall(minX, minZ, maxX, minZ, px, pz, fill, rail);
+		maybeWall(maxX, minZ, maxX, maxZ, px, pz, fill, rail);
+		maybeWall(maxX, maxZ, minX, maxZ, px, pz, fill, rail);
+		maybeWall(minX, maxZ, minX, minZ, px, pz, fill, rail);
+	}
+
+	/** Draw an edge only when the player is within {@link #CULL_DIST} of it. */
+	private static void maybeWall(int x1, int z1, int x2, int z2, int px, int pz, int fill, int rail) {
+		if (segmentDistance(px, pz, x1, z1, x2, z2) <= CULL_DIST) {
+			wall(x1, z1, x2, z2, fill, rail);
+		}
+	}
+
+	/** Nearest distance from (px, pz) to the segment (x1,z1)-(x2,z2) in the XZ plane. */
+	private static double segmentDistance(int px, int pz, int x1, int z1, int x2, int z2) {
+		double dx = x2 - x1;
+		double dz = z2 - z1;
+		double lenSq = dx * dx + dz * dz;
+		double t = lenSq == 0 ? 0 : ((px - x1) * dx + (pz - z1) * dz) / lenSq;
+		t = Math.max(0, Math.min(1, t));
+		double cx = x1 + t * dx;
+		double cz = z1 + t * dz;
+		return Math.hypot(px - cx, pz - cz);
 	}
 
 	/** Draw one full-height wall segment from (x1,z1) to (x2,z2), visible from both sides. */
