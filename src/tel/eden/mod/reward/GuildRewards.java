@@ -11,11 +11,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -87,6 +87,14 @@ public final class GuildRewards {
 				case EMERALD -> EMERALDS_PER_ITEM + " Emeralds";
 			};
 		}
+	}
+
+	/** A guild member's join time and role bucket ("chief", "recruit", ...) from the API. */
+	public record MemberInfo(long joinedEpochMillis, String rank) {
+	}
+
+	/** One member's share of a batch payout. */
+	public record PayoutTarget(String name, int aspects) {
 	}
 
 	/** Notified once per completed gift run with the exact number of handouts. */
@@ -161,7 +169,7 @@ public final class GuildRewards {
 	});
 
 	private volatile String rank = "";
-	private volatile Map<String, Long> members = Map.of();
+	private volatile Map<String, MemberInfo> members = emptyMembers();
 	private volatile long lastRefresh = 0L;
 	private volatile boolean refreshing;
 
@@ -186,6 +194,40 @@ public final class GuildRewards {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * A roster map that matches names case-insensitively while keeping each member's
+	 * original spelling as the key. Making that a property of the map itself means no
+	 * lookup site has to remember to normalise (and can't trip over locale-dependent
+	 * {@code toLowerCase} in the process).
+	 */
+	private static Map<String, MemberInfo> emptyMembers() {
+		return new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+	}
+
+	/** Look up a member's cached info by name (case-insensitive), or {@code null}. */
+	private MemberInfo memberInfo(String name) {
+		if (name == null || name.isBlank()) {
+			return null;
+		}
+		return members.get(name);
+	}
+
+	/** Display rank ("Chief", "Recruit", ...) for a member, or {@code null} if unknown. */
+	public String memberRank(String name) {
+		MemberInfo info = memberInfo(name);
+		if (info == null || info.rank() == null || info.rank().isBlank()) {
+			return null;
+		}
+		String rankName = info.rank();
+		return Character.toUpperCase(rankName.charAt(0)) + rankName.substring(1).toLowerCase();
+	}
+
+	/** When a member joined the guild, or {@code null} if unknown. */
+	public Long memberJoined(String name) {
+		MemberInfo info = memberInfo(name);
+		return info == null ? null : info.joinedEpochMillis();
 	}
 
 	/** Refresh the rank + member list from the API if stale, off-thread (non-blocking). */
@@ -213,7 +255,7 @@ public final class GuildRewards {
 		JsonObject player = getJson("https://api.wynncraft.com/v3/player/" + URLEncoder.encode(playerName, StandardCharsets.UTF_8));
 		if (player == null || !player.has("guild") || player.get("guild").isJsonNull()) {
 			rank = "";
-			members = Map.of();
+			members = emptyMembers();
 			return;
 		}
 		JsonObject guild = player.getAsJsonObject("guild");
@@ -224,8 +266,8 @@ public final class GuildRewards {
 		lastRefresh = System.currentTimeMillis();
 	}
 
-	private static Map<String, Long> parseMembers(JsonObject guild) {
-		Map<String, Long> out = new HashMap<>();
+	private static Map<String, MemberInfo> parseMembers(JsonObject guild) {
+		Map<String, MemberInfo> out = emptyMembers();
 		if (guild == null || !guild.has("members") || !guild.get("members").isJsonObject()) {
 			return out;
 		}
@@ -239,7 +281,8 @@ public final class GuildRewards {
 				}
 				JsonObject data = member.getValue().getAsJsonObject();
 				long joined = data.has("joined") ? Instant.parse(data.get("joined").getAsString()).toEpochMilli() : 0L;
-				out.put(member.getKey(), joined);
+				// The bucket key is the member's rank (owner/chief/strategist/...).
+				out.put(member.getKey(), new MemberInfo(joined, role.getKey()));
 			}
 		}
 		return out;
@@ -270,83 +313,202 @@ public final class GuildRewards {
 				chat("Only guild Chiefs can gift rewards.", ChatFormatting.RED);
 				return;
 			}
-			Long joined = members.get(name);
-			if (joined == null) {
+			MemberInfo info = memberInfo(name);
+			if (info == null) {
 				chat("Unknown member: " + name, ChatFormatting.RED);
 				return;
 			}
-			if (System.currentTimeMillis() - joined < WEEK_MS) {
+			if (System.currentTimeMillis() - info.joinedEpochMillis() < WEEK_MS) {
 				chat(name + " has not been in the guild for a week, and is not eligible " + "for rewards.", ChatFormatting.YELLOW);
 				return;
 			}
-			Minecraft mc = Minecraft.getInstance();
-			onClientRun(() -> {
-				if (mc.getConnection() != null) {
-					mc.getConnection().sendCommand("gu man");
-				}
-			});
-			sleep(MENU_DELAY_MS);
-			onClientRun(() -> click(OPEN_MEMBERS_SLOT));
-			sleep(MENU_DELAY_MS);
-			if (!Boolean.TRUE.equals(onClient(this::containerOpen))) {
-				chat("Couldn't open the guild manage menu — try again.", ChatFormatting.RED);
-				return;
-			}
-			// Read all three counts up front (index == RewardType.hotbar): the gifted
-			// type gives us `available`, and the trio becomes the post-gift snapshot.
-			long[] counts = onClient(this::readAllCounts);
-			if (counts == null) {
-				counts = new long[]{0, 0, 0};
-			}
-			int available = (int) counts[type.hotbar];
-			int availableItems = type == RewardType.EMERALD ? available / EMERALDS_PER_ITEM : available;
-			// Never attempt to gift more than the guild actually has; this both avoids
-			// wasted clicks and keeps the reported handout count exact.
-			int amount = dump ? availableItems : Math.min(requested, availableItems);
-			if (amount <= 0) {
-				chat("There aren't any " + type.label + " to gift!", ChatFormatting.YELLOW);
-				onClientRun(this::closeMenu);
-				return;
-			}
-			int slot = findMemberSlot(name);
-			if (slot < 0) {
-				chat("Couldn't find " + name + "'s item in the menu.", ChatFormatting.RED);
-				onClientRun(this::closeMenu);
-				return;
-			}
-			int total = type == RewardType.EMERALD ? amount * EMERALDS_PER_ITEM : amount;
-			chat("Gifting " + name + " " + total + " " + type.label + "...", ChatFormatting.GREEN);
-			for (int i = 0; i < amount; i++) {
-				final int target = slot;
-				onClientRun(() -> swapHotbar(target, type.hotbar));
-				sleep(GIFT_DELAY_MS);
-			}
-			onClientRun(this::closeMenu);
-			// Report the exact handout count so the backend logs the right total even
-			// if the server bunched some identical reward announcements together.
-			RewardReporter currentReporter = reporter;
-			if (currentReporter != null) {
-				currentReporter.report(name, type, amount);
-			}
-			// Relay the exact storage left after this run (authoritative final value):
-			// decrement the gifted type by what we just handed out.
-			long[] finalCounts = counts.clone();
-			finalCounts[type.hotbar] -= type == RewardType.EMERALD ? (long) amount * EMERALDS_PER_ITEM : amount;
-			StorageReporter currentStorageReporter = storageReporter;
-			if (currentStorageReporter != null) {
-				currentStorageReporter.report((int) finalCounts[0], (int) finalCounts[1], finalCounts[2]);
-			}
-			if (type.resetKind != null) {
-				// Show the matching /manage reset command, clickable to copy, so the
-				// pending balance can be zeroed on Discord after the in-game payout.
-				String command = "/manage reset kind:" + type.resetKind + " player:" + name;
-				chatComponent(Component.literal(command).withStyle(Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.CopyToClipboard(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to copy this command")))));
-			} else {
-				chat("Done — gifted " + name + " " + total + " " + type.label + ".", ChatFormatting.GREEN);
-			}
+			runSingle(name, type, requested, dump);
 		} catch (Exception e) {
 			LOGGER.warn("Gift run failed", e);
 			chat("Gift failed: " + e.getMessage(), ChatFormatting.RED);
+		} finally {
+			giftInProgress = false;
+		}
+	}
+
+	/**
+	 * Drive one member's gift run through the guild-manage menu. Assumes the caller has
+	 * already validated chief/membership/eligibility and owns the {@code giftInProgress}
+	 * flag. Returns true when at least one unit was handed out; a false return means a
+	 * soft failure (menu wouldn't open, nothing to gift, member item missing) that has
+	 * already been reported in chat. Client-thread timeouts propagate as exceptions.
+	 */
+	private boolean runSingle(String name, RewardType type, int requested, boolean dump) {
+		if (!openRewardsMenu()) {
+			chat("Couldn't open the guild manage menu — try again.", ChatFormatting.RED);
+			return false;
+		}
+		// Read all three counts up front (index == RewardType.hotbar): the gifted
+		// type gives us `available`, and the trio becomes the post-gift snapshot.
+		long[] counts = onClient(this::readAllCounts);
+		if (counts == null) {
+			counts = new long[]{0, 0, 0};
+		}
+		int available = (int) counts[type.hotbar];
+		int availableItems = type == RewardType.EMERALD ? available / EMERALDS_PER_ITEM : available;
+		// Never attempt to gift more than the guild actually has; this both avoids
+		// wasted clicks and keeps the reported handout count exact.
+		int amount = dump ? availableItems : Math.min(requested, availableItems);
+		if (amount <= 0) {
+			chat("There aren't any " + type.label + " to gift!", ChatFormatting.YELLOW);
+			onClientRun(this::closeMenu);
+			return false;
+		}
+		int slot = findMemberSlot(name);
+		if (slot < 0) {
+			chat("Couldn't find " + name + "'s item in the menu.", ChatFormatting.RED);
+			onClientRun(this::closeMenu);
+			return false;
+		}
+		int total = type == RewardType.EMERALD ? amount * EMERALDS_PER_ITEM : amount;
+		chat("Gifting " + name + " " + total + " " + type.label + "...", ChatFormatting.GREEN);
+		for (int i = 0; i < amount; i++) {
+			final int target = slot;
+			onClientRun(() -> swapHotbar(target, type.hotbar));
+			sleep(GIFT_DELAY_MS);
+		}
+		onClientRun(this::closeMenu);
+		// Report the exact handout count so the backend logs the right total even
+		// if the server bunched some identical reward announcements together.
+		RewardReporter currentReporter = reporter;
+		if (currentReporter != null) {
+			currentReporter.report(name, type, amount);
+		}
+		// Relay the exact storage left after this run (authoritative final value):
+		// decrement the gifted type by what we just handed out.
+		long[] finalCounts = counts.clone();
+		finalCounts[type.hotbar] -= type == RewardType.EMERALD ? (long) amount * EMERALDS_PER_ITEM : amount;
+		StorageReporter currentStorageReporter = storageReporter;
+		if (currentStorageReporter != null) {
+			currentStorageReporter.report((int) finalCounts[0], (int) finalCounts[1], finalCounts[2]);
+		}
+		if (type.resetKind != null) {
+			// Show the matching /manage reset command, clickable to copy, so the
+			// pending balance can be zeroed on Discord after the in-game payout.
+			String command = "/manage reset kind:" + type.resetKind + " player:" + name;
+			chatComponent(Component.literal(command).withStyle(Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.CopyToClipboard(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to copy this command")))));
+		} else {
+			chat("Done — gifted " + name + " " + total + " " + type.label + ".", ChatFormatting.GREEN);
+		}
+		return true;
+	}
+
+	/** Open {@code /gu man} and step into member management. True if the menu came up. */
+	private boolean openRewardsMenu() {
+		Minecraft mc = Minecraft.getInstance();
+		onClientRun(() -> {
+			if (mc.getConnection() != null) {
+				mc.getConnection().sendCommand("gu man");
+			}
+		});
+		sleep(MENU_DELAY_MS);
+		onClientRun(() -> click(OPEN_MEMBERS_SLOT));
+		sleep(MENU_DELAY_MS);
+		return Boolean.TRUE.equals(onClient(this::containerOpen));
+	}
+
+	/**
+	 * Pay out aspects to several members in one go (off-thread). The whole batch is
+	 * checked against the guild's available aspects first: if it doesn't fit, nothing
+	 * is distributed at all.
+	 */
+	public void payoutAspects(List<PayoutTarget> targets) {
+		List<PayoutTarget> copy = List.copyOf(targets);
+		if (!copy.isEmpty()) {
+			worker.submit(() -> batchRun(copy));
+		}
+	}
+
+	private void batchRun(List<PayoutTarget> requested) {
+		giftInProgress = true;
+		try {
+			if (!isChief()) {
+				chat("Only guild Chiefs can pay out rewards.", ChatFormatting.RED);
+				return;
+			}
+			if (members.isEmpty()) {
+				chat("The guild roster hasn't loaded yet — try again in a moment.", ChatFormatting.RED);
+				return;
+			}
+			// Validate every target up front, before any aspects move. A member the
+			// roster doesn't know is dropped from the batch rather than aborting it:
+			// the roster refreshes on its own schedule, so an unknown name usually
+			// means a stale snapshot, and one such name shouldn't block everyone else.
+			// A positively-too-new member is a different matter — the screen greys
+			// those rows out, so one reaching us means the selection raced a refresh,
+			// and paying the rest of a batch the user picked under stale information
+			// isn't obviously what they wanted.
+			List<String> tooNew = new ArrayList<>();
+			List<String> unknown = new ArrayList<>();
+			List<PayoutTarget> targets = new ArrayList<>();
+			int total = 0;
+			for (PayoutTarget target : requested) {
+				MemberInfo info = memberInfo(target.name());
+				if (info == null) {
+					unknown.add(target.name());
+					continue;
+				}
+				if (System.currentTimeMillis() - info.joinedEpochMillis() < WEEK_MS) {
+					tooNew.add(target.name());
+					continue;
+				}
+				targets.add(target);
+				total += Math.max(0, target.aspects());
+			}
+			if (!tooNew.isEmpty()) {
+				chat("Nothing was distributed — these members joined less than a week ago: " + String.join(", ", tooNew), ChatFormatting.RED);
+				return;
+			}
+			if (!unknown.isEmpty()) {
+				chat("Skipping (not in the guild roster): " + String.join(", ", unknown), ChatFormatting.YELLOW);
+			}
+			if (total <= 0) {
+				chat("Nothing to pay out.", ChatFormatting.YELLOW);
+				return;
+			}
+
+			if (!openRewardsMenu()) {
+				chat("Couldn't open the guild manage menu — try again.", ChatFormatting.RED);
+				return;
+			}
+			long[] counts = onClient(this::readAllCounts);
+			int available = counts == null ? 0 : (int) counts[RewardType.ASPECT.hotbar];
+			onClientRun(this::closeMenu);
+			if (total > available) {
+				chat("Not enough aspects: selected " + total + " but the guild only has " + available + " — nothing was distributed.", ChatFormatting.RED);
+				return;
+			}
+
+			chat("Paying out " + total + " aspects to " + targets.size() + " members...", ChatFormatting.GREEN);
+			List<String> skipped = new ArrayList<>();
+			int paid = 0;
+			int done = 0;
+			try {
+				for (PayoutTarget target : targets) {
+					done++;
+					if (runSingle(target.name(), RewardType.ASPECT, target.aspects(), false)) {
+						paid++;
+					} else {
+						skipped.add(target.name());
+					}
+				}
+			} catch (Exception e) {
+				LOGGER.warn("Batch payout interrupted", e);
+				chat("Payout stopped after " + done + " of " + targets.size() + " members: " + e.getMessage(), ChatFormatting.RED);
+				return;
+			}
+			chat("Payout complete: " + paid + "/" + targets.size() + " members paid.", ChatFormatting.GREEN);
+			if (!skipped.isEmpty()) {
+				chat("Skipped: " + String.join(", ", skipped), ChatFormatting.RED);
+			}
+		} catch (Exception e) {
+			LOGGER.warn("Batch payout failed", e);
+			chat("Payout failed: " + e.getMessage(), ChatFormatting.RED);
 		} finally {
 			giftInProgress = false;
 		}

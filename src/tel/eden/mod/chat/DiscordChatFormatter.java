@@ -1,6 +1,5 @@
 package tel.eden.mod.chat;
 
-import tel.eden.mod.net.PendingEntry;
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
@@ -140,23 +139,6 @@ public final class DiscordChatFormatter {
 		for (tel.eden.mod.net.WarCountEntry entry : entries) {
 			boolean own = entry.name().equalsIgnoreCase(requester);
 			out.append(Component.literal("\n  " + entry.name()).withStyle(own ? ChatFormatting.LIGHT_PURPLE : ChatFormatting.AQUA)).append(Component.literal(" — " + entry.wars()).withStyle(ChatFormatting.GRAY));
-		}
-		return out;
-	}
-
-	/** A client-side list of who has how many pending aspects (Chiefs' reward helper). */
-	public static Component aspectsPending(List<PendingEntry> entries, String error) {
-		if (error != null && !error.isEmpty()) {
-			return Component.empty().append(prefix(SHIELD)).append(Component.literal(error).withStyle(ChatFormatting.RED));
-		}
-		if (entries.isEmpty()) {
-			return Component.empty().append(prefix(SHIELD)).append(Component.literal("No members have pending aspects.").withStyle(ChatFormatting.GREEN));
-		}
-		MutableComponent out = Component.empty().append(prefix(SHIELD)).append(Component.literal("Pending aspects (" + entries.size() + "):").withStyle(ChatFormatting.GREEN));
-		for (PendingEntry entry : entries) {
-			String command = "/eden gift " + entry.name() + " aspect " + entry.aspects();
-			Style click = Style.EMPTY.withColor(ChatFormatting.YELLOW).withUnderlined(true).withClickEvent(new ClickEvent.SuggestCommand(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to fill: " + command)));
-			out.append("\n").append(Component.literal("  " + entry.name() + " ").withStyle(ChatFormatting.AQUA)).append(Component.literal("[" + entry.aspects() + " aspects]").setStyle(click));
 		}
 		return out;
 	}

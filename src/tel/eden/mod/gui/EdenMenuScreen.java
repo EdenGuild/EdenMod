@@ -12,7 +12,7 @@ public class EdenMenuScreen extends Screen {
 	private static final int BASE_CONTENT_WIDTH = 200;
 	private static final int BUTTON_HEIGHT = 20;
 	private static final int BUTTON_SPACING = 24;
-	private static final int BUTTON_COUNT = 6;
+	private static final int BUTTON_COUNT = 7;
 	private static final int LOGO_WIDTH = 128;
 	private static final int LOGO_GAP = 20;
 	private static final int CONTENT_MARGIN = 12;
@@ -68,13 +68,17 @@ public class EdenMenuScreen extends Screen {
 			this.minecraft.setScreen(new PartyListScreen(this, EdenModClient.instance()));
 		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 3), metrics.buttonWidth, metrics.buttonHeight).build());
 
+		this.addRenderableWidget(Button.builder(Component.literal("Aspect Payouts"), button -> {
+			this.minecraft.setScreen(new AspectsPayoutScreen(this, EdenModClient.instance()));
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 4), metrics.buttonWidth, metrics.buttonHeight).build());
+
 		this.addRenderableWidget(Button.builder(Component.literal("Command Aliases"), button -> {
 			this.minecraft.setScreen(new CommandAliasScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 4), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 5), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Command Keybinds"), button -> {
 			this.minecraft.setScreen(new CommandKeybindScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 5), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 6), metrics.buttonWidth, metrics.buttonHeight).build());
 	}
 
 	@Override

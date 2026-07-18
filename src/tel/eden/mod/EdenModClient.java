@@ -159,6 +159,17 @@ public final class EdenModClient implements ClientModInitializer {
 	// Mutated on the inbound-message path and read from GUI screens on the render
 	// thread; copy-on-write keeps those cross-thread reads from racing the writes.
 	private final java.util.List<PartyInfo> knownParties = new java.util.concurrent.CopyOnWriteArrayList<>();
+	// Latest aspects-owed list from the backend, read by AspectsPayoutScreen on the
+	// render thread. Each reply replaces the whole list, so publishing an immutable
+	// one through a volatile field keeps readers from ever seeing a half-applied
+	// update. The generation counter lets the screen tell "no reply yet" apart from
+	// "replied with an empty list".
+	private volatile java.util.List<PendingEntry> knownPendingAspects = java.util.List.of();
+	private volatile String pendingAspectsError;
+	// Atomic rather than a volatile int: a lost increment between two concurrent
+	// replies would leave a reader's cached generation matching the live one, and
+	// it would sit on a stale list believing it was current.
+	private final java.util.concurrent.atomic.AtomicInteger pendingAspectsGeneration = new java.util.concurrent.atomic.AtomicInteger();
 	// GitHub update check: run once per game session; the prompt offers a one-click
 	// download (applied on game close) and a link to the release page.
 	private final UpdateChecker updateChecker = new UpdateChecker();
@@ -253,6 +264,32 @@ public final class EdenModClient implements ClientModInitializer {
 	/** An immutable snapshot of the currently known parties, safe to read off-thread. */
 	public java.util.List<PartyInfo> knownParties() {
 		return java.util.List.copyOf(knownParties);
+	}
+
+	/** Members owed aspects, highest first, as of the last backend reply. */
+	public java.util.List<PendingEntry> knownPendingAspects() {
+		return knownPendingAspects;
+	}
+
+	/** The error from the last aspects-pending reply, or {@code null} if it succeeded. */
+	public String pendingAspectsError() {
+		return pendingAspectsError;
+	}
+
+	/**
+	 * Bumped on every aspects-pending reply; 0 means none has arrived yet.
+	 *
+	 * <p>Readers must sample this <em>before</em> reading the list, mirroring the
+	 * write order below: sampling it afterwards can pair an old list with a new
+	 * generation, and the reader then never notices it missed a reply.
+	 */
+	public int pendingAspectsGeneration() {
+		return pendingAspectsGeneration.get();
+	}
+
+	/** The guild reward helper (rank lookups + gifting). */
+	public GuildRewards guildRewards() {
+		return guildRewards;
 	}
 
 	@Override
@@ -527,7 +564,15 @@ public final class EdenModClient implements ClientModInitializer {
 
 				@Override
 				public void onAspectsPending(java.util.List<PendingEntry> entries, String error, String color) {
-					displayColored(color, () -> DiscordChatFormatter.aspectsPending(entries, error));
+					// Rendered by AspectsPayoutScreen rather than chat; sort here so every
+					// reader sees the biggest debts first.
+					java.util.List<PendingEntry> sorted = new ArrayList<>(entries);
+					sorted.sort(java.util.Comparator.comparingInt(PendingEntry::aspects).reversed());
+					// Generation last: it is the reader's signal that the other two
+					// fields are the ones belonging to this reply.
+					knownPendingAspects = java.util.List.copyOf(sorted);
+					pendingAspectsError = (error == null || error.isEmpty()) ? null : error;
+					pendingAspectsGeneration.incrementAndGet();
 				}
 
 				@Override
@@ -783,12 +828,11 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private void requestAspectsPending(FabricClientCommandSource source) {
-		BridgeWebSocketClient current = socket;
-		if (current == null) {
-			source.sendFeedback(notConnected());
-			return;
-		}
-		current.sendAspectsPendingRequest();
+		// Warm the rank cache so the payout table can show ranks straight away; the
+		// screen itself issues the backend request from its init().
+		guildRewards.ensureFresh(playerName());
+		Minecraft mc = Minecraft.getInstance();
+		mc.execute(() -> mc.setScreen(new tel.eden.mod.gui.AspectsPayoutScreen(mc.screen, this)));
 	}
 
 	/** Build {@code /eden gift <member> <aspect|emerald|tome> <amount>} (Chiefs only). */
