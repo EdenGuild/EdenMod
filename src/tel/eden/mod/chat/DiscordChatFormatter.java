@@ -45,10 +45,12 @@ public final class DiscordChatFormatter {
 	private static final int[] SHIELD = {0xCFFFC, 0xE006, 0xCFFFF, 0xE002, 0xCFFFE};
 	private static final int[] CONTINUATION = {0xCFFFC, 0xE001, 0xD0006};
 
-	// Bare http(s) links become clickable, and :shortcode: tokens matching a
-	// known emote (see EmoteRegistry) become an inline image, in a single pass
-	// over relayed message content so both interleave correctly with plain text.
-	private static final Pattern TOKEN_PATTERN = Pattern.compile("(?<url>https?://\\S+)|:(?<emote>[a-zA-Z0-9_+\\-]{2,32}):");
+	// A relayed sticker tag "[sticker: <name>] <url>" collapses to one previewable token,
+	// bare http(s) links become clickable, and :shortcode: tokens matching a known emote
+	// (see EmoteRegistry) become an inline image — all in a single pass over the message so
+	// they interleave correctly with plain text. The sticker alternative comes first so it
+	// claims its trailing url instead of that url matching on its own.
+	private static final Pattern TOKEN_PATTERN = Pattern.compile("\\[sticker: (?<sname>[^\\]]+)\\] (?<surl>https?://\\S+)|(?<url>https?://\\S+)|:(?<emote>[a-zA-Z0-9_+\\-]{2,32}):");
 
 	// Matches any :shortcode: token (shared with linkify).
 	private static final Pattern EMOTE_PATTERN = Pattern.compile(":(?<emote>[a-zA-Z0-9_+\\-]{2,32}):");
@@ -231,8 +233,16 @@ public final class DiscordChatFormatter {
 			if (matcher.start() > last) {
 				out.append(Component.literal(content.substring(last, matcher.start())).withStyle(ChatFormatting.GREEN));
 			}
+			String stickerName = matcher.group("sname");
 			String url = matcher.group("url");
-			if (url != null) {
+			if (stickerName != null) {
+				// A relayed Discord sticker: render the single "[sticker: <name>]" token,
+				// hoverable to preview the sticker image itself (same trusted-CDN preview
+				// path as image links).
+				String stickerUrl = matcher.group("surl");
+				boolean isImage = ImagePreviewManager.isPreviewable(stickerUrl);
+				out.append(Component.literal("[sticker: " + stickerName + "]").withStyle(linkStyle(stickerUrl, isImage)));
+			} else if (url != null) {
 				// Only images from trusted CDNs (Discord, Imgur, Tenor, Giphy, etc.) or
 				// a Tenor share-page link become an inline preview; any other
 				// image-looking link stays a plain link so hovering it can't make the

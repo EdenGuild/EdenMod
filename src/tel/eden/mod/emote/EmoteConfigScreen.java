@@ -65,9 +65,7 @@ public final class EmoteConfigScreen extends Screen {
 			int row = i / columns;
 			int x = startX + col * (BUTTON_W + GAP_X);
 			int y = startY + row * (BUTTON_H + GAP_Y);
-			CycleButton<String> button = CycleButton.<String>builder(value -> Component.literal(value.isEmpty() ? "(none)" : value), favorites[index])
-					.withValues(options)
-					.create(x, y, BUTTON_W, BUTTON_H, Component.literal("Slot " + (index + 1)), (widget, value) -> favorites[index] = value);
+			CycleButton<String> button = CycleButton.<String>builder(value -> Component.literal(value.isEmpty() ? "(none)" : value), favorites[index]).withValues(options).create(x, y, BUTTON_W, BUTTON_H, Component.literal("Slot " + (index + 1)), (widget, value) -> favorites[index] = value);
 			this.addRenderableWidget(button);
 		}
 
