@@ -11,11 +11,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -169,7 +169,7 @@ public final class GuildRewards {
 	});
 
 	private volatile String rank = "";
-	private volatile Map<String, MemberInfo> members = Map.of();
+	private volatile Map<String, MemberInfo> members = emptyMembers();
 	private volatile long lastRefresh = 0L;
 	private volatile boolean refreshing;
 
@@ -196,17 +196,22 @@ public final class GuildRewards {
 		return false;
 	}
 
+	/**
+	 * A roster map that matches names case-insensitively while keeping each member's
+	 * original spelling as the key. Making that a property of the map itself means no
+	 * lookup site has to remember to normalise (and can't trip over locale-dependent
+	 * {@code toLowerCase} in the process).
+	 */
+	private static Map<String, MemberInfo> emptyMembers() {
+		return new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+	}
+
 	/** Look up a member's cached info by name (case-insensitive), or {@code null}. */
 	private MemberInfo memberInfo(String name) {
 		if (name == null || name.isBlank()) {
 			return null;
 		}
-		for (Map.Entry<String, MemberInfo> entry : members.entrySet()) {
-			if (entry.getKey().equalsIgnoreCase(name)) {
-				return entry.getValue();
-			}
-		}
-		return null;
+		return members.get(name);
 	}
 
 	/** Display rank ("Chief", "Recruit", ...) for a member, or {@code null} if unknown. */
@@ -250,7 +255,7 @@ public final class GuildRewards {
 		JsonObject player = getJson("https://api.wynncraft.com/v3/player/" + URLEncoder.encode(playerName, StandardCharsets.UTF_8));
 		if (player == null || !player.has("guild") || player.get("guild").isJsonNull()) {
 			rank = "";
-			members = Map.of();
+			members = emptyMembers();
 			return;
 		}
 		JsonObject guild = player.getAsJsonObject("guild");
@@ -262,7 +267,7 @@ public final class GuildRewards {
 	}
 
 	private static Map<String, MemberInfo> parseMembers(JsonObject guild) {
-		Map<String, MemberInfo> out = new HashMap<>();
+		Map<String, MemberInfo> out = emptyMembers();
 		if (guild == null || !guild.has("members") || !guild.get("members").isJsonObject()) {
 			return out;
 		}
@@ -419,7 +424,7 @@ public final class GuildRewards {
 		}
 	}
 
-	private void batchRun(List<PayoutTarget> targets) {
+	private void batchRun(List<PayoutTarget> requested) {
 		giftInProgress = true;
 		try {
 			if (!isChief()) {
@@ -430,22 +435,37 @@ public final class GuildRewards {
 				chat("The guild roster hasn't loaded yet — try again in a moment.", ChatFormatting.RED);
 				return;
 			}
-			// Validate every target up front so an ineligible pick aborts the batch
-			// before any aspects move, rather than halfway through.
-			List<String> ineligible = new ArrayList<>();
+			// Validate every target up front, before any aspects move. A member the
+			// roster doesn't know is dropped from the batch rather than aborting it:
+			// the roster refreshes on its own schedule, so an unknown name usually
+			// means a stale snapshot, and one such name shouldn't block everyone else.
+			// A positively-too-new member is a different matter — the screen greys
+			// those rows out, so one reaching us means the selection raced a refresh,
+			// and paying the rest of a batch the user picked under stale information
+			// isn't obviously what they wanted.
+			List<String> tooNew = new ArrayList<>();
+			List<String> unknown = new ArrayList<>();
+			List<PayoutTarget> targets = new ArrayList<>();
 			int total = 0;
-			for (PayoutTarget target : targets) {
+			for (PayoutTarget target : requested) {
 				MemberInfo info = memberInfo(target.name());
 				if (info == null) {
-					ineligible.add(target.name() + " (not in the guild)");
-				} else if (System.currentTimeMillis() - info.joinedEpochMillis() < WEEK_MS) {
-					ineligible.add(target.name() + " (joined less than a week ago)");
+					unknown.add(target.name());
+					continue;
 				}
+				if (System.currentTimeMillis() - info.joinedEpochMillis() < WEEK_MS) {
+					tooNew.add(target.name());
+					continue;
+				}
+				targets.add(target);
 				total += Math.max(0, target.aspects());
 			}
-			if (!ineligible.isEmpty()) {
-				chat("Nothing was distributed — these members aren't eligible: " + String.join(", ", ineligible), ChatFormatting.RED);
+			if (!tooNew.isEmpty()) {
+				chat("Nothing was distributed — these members joined less than a week ago: " + String.join(", ", tooNew), ChatFormatting.RED);
 				return;
+			}
+			if (!unknown.isEmpty()) {
+				chat("Skipping (not in the guild roster): " + String.join(", ", unknown), ChatFormatting.YELLOW);
 			}
 			if (total <= 0) {
 				chat("Nothing to pay out.", ChatFormatting.YELLOW);

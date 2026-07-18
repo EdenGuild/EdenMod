@@ -166,7 +166,10 @@ public final class EdenModClient implements ClientModInitializer {
 	// "replied with an empty list".
 	private volatile java.util.List<PendingEntry> knownPendingAspects = java.util.List.of();
 	private volatile String pendingAspectsError;
-	private volatile int pendingAspectsGeneration;
+	// Atomic rather than a volatile int: a lost increment between two concurrent
+	// replies would leave a reader's cached generation matching the live one, and
+	// it would sit on a stale list believing it was current.
+	private final java.util.concurrent.atomic.AtomicInteger pendingAspectsGeneration = new java.util.concurrent.atomic.AtomicInteger();
 	// GitHub update check: run once per game session; the prompt offers a one-click
 	// download (applied on game close) and a link to the release page.
 	private final UpdateChecker updateChecker = new UpdateChecker();
@@ -273,9 +276,15 @@ public final class EdenModClient implements ClientModInitializer {
 		return pendingAspectsError;
 	}
 
-	/** Bumped on every aspects-pending reply; 0 means none has arrived yet. */
+	/**
+	 * Bumped on every aspects-pending reply; 0 means none has arrived yet.
+	 *
+	 * <p>Readers must sample this <em>before</em> reading the list, mirroring the
+	 * write order below: sampling it afterwards can pair an old list with a new
+	 * generation, and the reader then never notices it missed a reply.
+	 */
 	public int pendingAspectsGeneration() {
-		return pendingAspectsGeneration;
+		return pendingAspectsGeneration.get();
 	}
 
 	/** The guild reward helper (rank lookups + gifting). */
@@ -559,9 +568,11 @@ public final class EdenModClient implements ClientModInitializer {
 					// reader sees the biggest debts first.
 					java.util.List<PendingEntry> sorted = new ArrayList<>(entries);
 					sorted.sort(java.util.Comparator.comparingInt(PendingEntry::aspects).reversed());
+					// Generation last: it is the reader's signal that the other two
+					// fields are the ones belonging to this reply.
 					knownPendingAspects = java.util.List.copyOf(sorted);
 					pendingAspectsError = (error == null || error.isEmpty()) ? null : error;
-					pendingAspectsGeneration++;
+					pendingAspectsGeneration.incrementAndGet();
 				}
 
 				@Override

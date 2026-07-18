@@ -83,8 +83,12 @@ public final class AspectsPayoutScreen extends EdenReferenceScreen {
 
 	/** Adopt the latest backend reply, keeping selections for names that survived it. */
 	private void refreshSnapshot() {
-		List<PendingEntry> latest = mod.knownPendingAspects();
+		// Generation first, list second — the opposite of the write order. Sampling
+		// the generation after the list could pair the previous reply's rows with the
+		// new reply's generation, and tick() would then see nothing left to pick up.
+		// This way the worst case is snapshotting the same reply twice.
 		seenGeneration = mod.pendingAspectsGeneration();
+		List<PendingEntry> latest = mod.knownPendingAspects();
 
 		Set<String> stillListed = new LinkedHashSet<>();
 		for (PendingEntry entry : latest) {
@@ -249,7 +253,11 @@ public final class AspectsPayoutScreen extends EdenReferenceScreen {
 				break;
 			}
 			PendingEntry entry = rows.get(index);
-			boolean eligible = isEligible(entry.name());
+			// One roster lookup each per row per frame; both were previously repeated
+			// two or three times on the way through this loop.
+			boolean tooNew = isTooNew(entry.name());
+			String rank = rankOf(entry.name());
+			boolean eligible = !tooNew;
 			boolean checked = selected.contains(entry.name());
 
 			int rowTop = layout.y(38 + visible * ROW_HEIGHT);
@@ -264,8 +272,8 @@ public final class AspectsPayoutScreen extends EdenReferenceScreen {
 			int rankColor = eligible ? 0xFFAAAAAA : 0xFF666666;
 			g.drawString(this.font, trimToWidth(entry.name(), layout.w(140)), layout.x(45), textY, nameColor);
 
-			String rank = isTooNew(entry.name()) ? rankOf(entry.name()) + " (<1 week)" : rankOf(entry.name());
-			g.drawString(this.font, trimToWidth(rank, layout.w(120)), layout.x(196), textY, rankColor);
+			String rankLabel = tooNew ? rank + " (<1 week)" : rank;
+			g.drawString(this.font, trimToWidth(rankLabel, layout.w(120)), layout.x(196), textY, rankColor);
 
 			String owed = entry.aspects() + " aspects";
 			g.drawString(this.font, owed, layout.x(385) - this.font.width(owed), textY, eligible ? 0xFFFFD24A : 0xFF7A6A32);
