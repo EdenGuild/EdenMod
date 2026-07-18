@@ -48,3 +48,39 @@ chat relays and client mods touch areas Wynncraft's rules speak to:
   messages into Minecraft — Discord messages are display-only.
 - Members opt in by installing the mod and linking their own account; account
   linking is per-user via official Wynncraft OAuth2.
+
+## Credits
+
+EdenMod's **territory/war suite** (attack timers, in-world territory walls, war
+DPS/attendance tracking, clickable shouts, congratulate button) and several
+**extra features** (custom crafted-consumable item textures, the radial emote
+wheel) are heavily inspired by — and in places ported from —
+[AviciaGuild/avomod2](https://github.com/AviciaGuild/avomod2), which is released
+under the MIT License. Huge thanks to its authors. Where their code or assets are
+reused, the original MIT notice is retained:
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2022 AviciaGuild/avomod2 contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in the
+Software without restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+EdenMod as a whole is licensed under the GNU AGPL-3.0 (see `LICENSE.md`); the MIT
+components above are included under that license as permitted by the MIT terms.
