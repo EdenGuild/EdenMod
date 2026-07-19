@@ -50,10 +50,16 @@ public final class CustomItemTextures {
 
 	// Sentinel meaning "scanned, matched nothing" in the decision cache (never set on a stack).
 	private static final Identifier NO_MATCH = Identifier.fromNamespaceAndPath(NAMESPACE, "no_match");
-	// Texture decision cached by a cheap (name, lore) fingerprint: a bank full of identical
-	// items — and overlays that rebuild stacks each frame — then resolve once, not per frame.
+	// Texture decision cached by the item's (name, lore) components: a bank full of identical
+	// items — and overlays that rebuild stacks each frame — resolve once, not per frame. Keyed
+	// by the components' own value equality (no hash-collision risk) and computable without
+	// flattening the lore to strings, so a cache hit skips that per-item work too.
 	private static final int CACHE_LIMIT = 4096;
-	private static final Map<Long, Identifier> DECISION_CACHE = new HashMap<>();
+	private static final Map<CacheKey, Identifier> DECISION_CACHE = new HashMap<>();
+
+	/** Value-equality cache key: the item's name and lore components. */
+	private record CacheKey(Component name, ItemLore lore) {
+	}
 
 	private static Map<String, List<Rule>> compileRules() {
 		Map<String, List<Rule>> byType = new HashMap<>();
@@ -81,13 +87,10 @@ public final class CustomItemTextures {
 		if (Minecraft.getInstance().player == null || !isEligible(stack)) {
 			return;
 		}
-		String name = stack.getHoverName().getString();
-		if (name.equals("Air")) {
-			return;
-		}
-		List<String> lore = loreStrings(stack);
-
-		long key = fingerprint(name, lore);
+		// Key off the components directly (cheap, no string flattening) and check the cache
+		// before doing any lore/name string work.
+		ItemLore loreComponent = stack.get(DataComponents.LORE);
+		CacheKey key = new CacheKey(stack.getHoverName(), loreComponent == null ? ItemLore.EMPTY : loreComponent);
 		Identifier cached = DECISION_CACHE.get(key);
 		if (cached != null) {
 			if (cached != NO_MATCH) {
@@ -95,7 +98,10 @@ public final class CustomItemTextures {
 			}
 			return;
 		}
-		Identifier match = resolve(stack, name, lore);
+		// Cache miss: now pay for flattening the lore to strings and scanning the rules.
+		String name = stack.getHoverName().getString();
+		List<String> lore = loreStrings(stack);
+		Identifier match = name.equals("Air") ? null : resolve(stack, name, lore);
 		if (DECISION_CACHE.size() >= CACHE_LIMIT) {
 			DECISION_CACHE.clear();
 		}
@@ -173,15 +179,6 @@ public final class CustomItemTextures {
 			}
 		}
 		return null;
-	}
-
-	/** Cheap fingerprint of an item's identity for the decision cache. */
-	private static long fingerprint(String name, List<String> lore) {
-		long hash = name.hashCode();
-		for (String line : lore) {
-			hash = hash * 31 + line.hashCode();
-		}
-		return hash;
 	}
 
 	private static boolean nameMatches(List<Pattern> patterns, String name) {

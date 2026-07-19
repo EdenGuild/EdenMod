@@ -48,6 +48,11 @@ public final class AttackTimerMenu {
 	/** Screen rectangles [x1,y1,x2,y2] of the last-rendered rows, for click hit-testing. */
 	private static final Map<String, int[]> clickBoxes = new HashMap<>();
 	private static volatile String soonestTerritory = null;
+	// The scoreboard sidebar changes at most once per tick, but both the HUD (render()) and
+	// the territory wall (attackedTerritories()) query it every frame. Memoize the scan per
+	// game tick so the two callers, and multiple frames within a tick, share one parse.
+	private static long cachedAttacksTick = Long.MIN_VALUE;
+	private static List<Upcoming> cachedAttacks = List.of();
 
 	private record Upcoming(String time, String territory) {
 	}
@@ -61,10 +66,21 @@ public final class AttackTimerMenu {
 	 * scoreboard, independent of whether the HUD is shown). Empty when none. */
 	public static List<String> attackedTerritories() {
 		List<String> out = new ArrayList<>();
-		for (Upcoming attack : upcomingAttacks()) {
+		for (Upcoming attack : currentAttacks()) {
 			out.add(attack.territory());
 		}
 		return out;
+	}
+
+	/** The upcoming attacks, scanned at most once per game tick (shared across callers). */
+	private static List<Upcoming> currentAttacks() {
+		Minecraft mc = Minecraft.getInstance();
+		long tick = mc.level != null ? mc.level.getGameTime() : Long.MIN_VALUE;
+		if (tick != cachedAttacksTick) {
+			cachedAttacks = upcomingAttacks();
+			cachedAttacksTick = tick;
+		}
+		return cachedAttacks;
 	}
 
 	/** Record a guild-reported defense rating (from the chat-defense intake). */
@@ -100,7 +116,7 @@ public final class AttackTimerMenu {
 			soonestTerritory = null;
 			return;
 		}
-		List<Upcoming> attacks = upcomingAttacks();
+		List<Upcoming> attacks = currentAttacks();
 		if (attacks.isEmpty()) {
 			soonestTerritory = null;
 			return;
@@ -206,8 +222,23 @@ public final class AttackTimerMenu {
 				}
 			}
 		}
-		attacks.sort((a, b) -> a.time().compareTo(b.time()));
+		// Sort by actual remaining time, not lexicographically: "9:05" is sooner than "10:02"
+		// even though '1' < '9' as text.
+		attacks.sort((a, b) -> Integer.compare(seconds(a.time()), seconds(b.time())));
 		return attacks;
+	}
+
+	/** Parse an "M:SS"/"MM:SS" timer to total seconds; malformed sorts last. */
+	private static int seconds(String time) {
+		String[] parts = time.split(":");
+		if (parts.length != 2) {
+			return Integer.MAX_VALUE;
+		}
+		try {
+			return Integer.parseInt(parts[0].trim()) * 60 + Integer.parseInt(parts[1].trim());
+		} catch (NumberFormatException e) {
+			return Integer.MAX_VALUE;
+		}
 	}
 
 	/**

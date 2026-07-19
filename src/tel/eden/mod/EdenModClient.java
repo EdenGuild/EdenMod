@@ -1667,10 +1667,15 @@ public final class EdenModClient implements ClientModInitializer {
 		DiscordChatFormatter.onServerChatLine();
 		if (onWynncraft) {
 			// War chat cues (start countdown → attendance capture; end → HUD summary)
-			// work even while the bridge socket is down.
+			// work even while the bridge socket is down. handleSystemChat runs on the netty
+			// network thread (see ClientPacketListenerMixin), but the war subsystem's state
+			// is otherwise only touched on the client thread (tick + render), so marshal
+			// these onto it to avoid racing that state.
 			String warLine = message.getString();
-			WarTracker.onChat(warLine);
-			WarDPS.onChat(warLine);
+			Minecraft.getInstance().execute(() -> {
+				WarTracker.onChat(warLine);
+				WarDPS.onChat(warLine);
+			});
 		}
 		BridgeWebSocketClient current = socket;
 		if (!onWynncraft || current == null) {
@@ -1794,8 +1799,12 @@ public final class EdenModClient implements ClientModInitializer {
 		Optional<CapturedMessage> captured = GuildChatParser.parse(message);
 		if (captured.isPresent() && config.warAttackTimers) {
 			// Fold any "<territory> defense is <rating>" report (e.g. Wynntils') into the
-			// attack-timer HUD as fresher intel than the scraped advancement value.
-			AttackTimerMenu.intakeChat(captured.get().username(), captured.get().message());
+			// attack-timer HUD as fresher intel than the scraped advancement value. Marshal
+			// onto the client thread — the HUD reads chatDefenses on the render thread, and
+			// this runs on the netty network thread.
+			String username = captured.get().username();
+			String body = captured.get().message();
+			Minecraft.getInstance().execute(() -> AttackTimerMenu.intakeChat(username, body));
 		}
 		if (captured.isPresent() && chatRelay.shouldSend(captured.get())) {
 			CapturedMessage line = captured.get();
