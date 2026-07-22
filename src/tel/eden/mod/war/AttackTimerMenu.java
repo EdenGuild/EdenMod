@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -87,6 +86,11 @@ public final class AttackTimerMenu {
 	// heading anywhere, so it only sends on a change (enter/leave the target territory).
 	private static boolean wasGoing;
 	private static boolean lastReportedInside;
+	// A crossing must hold this long before it's reported, so wiggling on a territory edge
+	// never spams updates. The settled value is what gets sent, so state can't desync.
+	private static final long INSIDE_SETTLE_MS = 500L;
+	private static boolean pendingInside;
+	private static long pendingSince;
 	/** Screen rectangles [x1,y1,x2,y2] of the last-rendered rows, for click hit-testing. */
 	private static final Map<String, int[]> clickBoxes = new HashMap<>();
 	/** Screen rectangles of the last-rendered heads and the names to show on hover. */
@@ -228,12 +232,34 @@ public final class AttackTimerMenu {
 		}
 		BlockPos pos = mc.player.blockPosition();
 		boolean inside = myTerritory.equals(TerritoryData.territoryAt(pos.getX(), pos.getZ()));
-		if (!wasGoing || inside != lastReportedInside) {
+		if (!wasGoing) {
+			// First report of this trip: send the initial state at once.
 			wasGoing = true;
 			lastReportedInside = inside;
-			if (socket != null) {
-				socket.sendWarGoingInside(inside);
-			}
+			pendingInside = inside;
+			sendInside(socket, inside);
+			return;
+		}
+		if (inside == lastReportedInside) {
+			pendingInside = inside; // steady at the value the backend already has
+			return;
+		}
+		// Differs from what the backend has: only report once it has held for the settle
+		// window, and always the settled value — so border-edge jitter can't spam, and the
+		// backend never ends up with a stale value we then never correct.
+		long now = System.currentTimeMillis();
+		if (inside != pendingInside) {
+			pendingInside = inside;
+			pendingSince = now;
+		} else if (now - pendingSince >= INSIDE_SETTLE_MS) {
+			lastReportedInside = inside;
+			sendInside(socket, inside);
+		}
+	}
+
+	private static void sendInside(BridgeWebSocketClient socket, boolean inside) {
+		if (socket != null) {
+			socket.sendWarGoingInside(inside);
 		}
 	}
 
@@ -261,6 +287,8 @@ public final class AttackTimerMenu {
 		soonestTerritory = null;
 		wasGoing = false;
 		lastReportedInside = false;
+		pendingInside = false;
+		pendingSince = 0;
 	}
 
 	public static void render(BridgeConfig config, GuiGraphics graphics) {
@@ -433,8 +461,13 @@ public final class AttackTimerMenu {
 	private static final Logger LOGGER = LoggerFactory.getLogger("edenmod");
 	/** Skins resolved by uuid from Mojang, for goers not in our player list (cross-world). */
 	private static final Map<UUID, PlayerSkin> resolvedSkins = new ConcurrentHashMap<>();
-	/** Uuids with a resolve in flight, so each is fetched at most once. */
-	private static final Set<UUID> skinFetching = ConcurrentHashMap.newKeySet();
+	/**
+	 * Earliest time (ms) each uuid may be (re)fetched. Set on every attempt so a failed or
+	 * empty resolve backs off instead of re-submitting every frame; a success caches into
+	 * {@link #resolvedSkins} and is served before this map is ever consulted again.
+	 */
+	private static final Map<UUID, Long> skinNextAttempt = new ConcurrentHashMap<>();
+	private static final long SKIN_RETRY_MS = 30_000L;
 	private static final ExecutorService skinWorker = Executors.newSingleThreadExecutor(runnable -> {
 		Thread thread = new Thread(runnable, "eden-war-skins");
 		thread.setDaemon(true);
@@ -471,25 +504,26 @@ public final class AttackTimerMenu {
 
 	/**
 	 * Resolve a goer's skin by uuid off-thread (Mojang session lookup → texture load),
-	 * caching the result. Runs once per uuid; a transient failure clears the guard so a
-	 * later frame retries, a successful profile fetch does not (the skin loads on its own).
+	 * caching the result. Rate-limited per uuid ({@link #SKIN_RETRY_MS}) so a failed or
+	 * empty resolve backs off instead of re-submitting every frame the head is drawn; a
+	 * success caches the skin, which is then served before this method is called again.
 	 */
 	private static void fetchSkin(Minecraft mc, UUID uuid, String name) {
-		if (!skinFetching.add(uuid)) {
+		long now = System.currentTimeMillis();
+		Long next = skinNextAttempt.get(uuid);
+		if (next != null && now < next) {
 			return;
 		}
+		skinNextAttempt.put(uuid, now + SKIN_RETRY_MS);
 		LOGGER.debug("Resolving war-head skin for {} ({}) — not in the player list", name, uuid);
 		skinWorker.submit(() -> {
 			try {
 				var result = mc.services().sessionService().fetchProfile(uuid, false);
-				if (result == null) {
-					skinFetching.remove(uuid);
-					return;
+				if (result != null) {
+					GameProfile profile = result.profile();
+					mc.execute(() -> mc.getSkinManager().get(profile).thenAccept(skin -> skin.ifPresent(value -> resolvedSkins.put(uuid, value))));
 				}
-				GameProfile profile = result.profile();
-				mc.execute(() -> mc.getSkinManager().get(profile).thenAccept(skin -> skin.ifPresent(value -> resolvedSkins.put(uuid, value))));
 			} catch (RuntimeException e) {
-				skinFetching.remove(uuid);
 				LOGGER.debug("War-head skin fetch failed for {}", uuid, e);
 			}
 		});
