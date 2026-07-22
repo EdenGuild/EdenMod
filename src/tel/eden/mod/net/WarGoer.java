@@ -2,8 +2,8 @@ package tel.eden.mod.net;
 
 /**
  * One guild member heading to a territory (from the {@code warBoard} broadcast):
- * their display name and Wynncraft uuid, used to draw their head on the attack-timer
- * HUD.
+ * their display name, Wynncraft uuid, and whether they are currently inside that
+ * territory ({@code inside} — green head border when true, red while en route).
  */
-public record WarGoer(String name, String uuid) {
+public record WarGoer(String name, String uuid, boolean inside) {
 }

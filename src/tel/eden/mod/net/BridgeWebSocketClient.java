@@ -362,6 +362,21 @@ public final class BridgeWebSocketClient {
 	}
 
 	/**
+	 * Report whether this player is currently inside the territory they marked heading to,
+	 * so their head border shows green (inside) or red (en route) on every member's HUD.
+	 */
+	public void sendWarGoingInside(boolean inside) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "warGoingInside");
+		obj.addProperty("inside", inside);
+		current.sendText(obj.toString(), true);
+	}
+
+	/**
 	 * Tell the backend a territory's attack timer has ended (no longer on the scoreboard),
 	 * so it clears that territory's cached defence/conflict/who's-going and the next war on
 	 * it starts fresh.
@@ -721,7 +736,7 @@ public final class BridgeWebSocketClient {
 					for (var goerElement : entry.get("going").getAsJsonArray()) {
 						if (goerElement.isJsonObject()) {
 							JsonObject goer = goerElement.getAsJsonObject();
-							going.add(new WarGoer(get(goer, "name"), get(goer, "uuid")));
+							going.add(new WarGoer(get(goer, "name"), get(goer, "uuid"), getBool(goer, "inside")));
 						}
 					}
 				}

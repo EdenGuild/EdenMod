@@ -1,10 +1,16 @@
 package tel.eden.mod.war;
 
+import com.mojang.authlib.GameProfile;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
@@ -21,6 +27,8 @@ import net.minecraft.world.scores.PlayerScoreEntry;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
 import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.hud.HudLayout;
@@ -57,6 +65,9 @@ public final class AttackTimerMenu {
 	private static final int HEAD_GAP = 1;
 	// A war party caps at 5, so at most five distinct heads ever need showing.
 	private static final int MAX_HEADS = 5;
+	// Head border: green once a goer is inside their target territory, red while en route.
+	private static final int BORDER_GREEN = 0xFF44FF44;
+	private static final int BORDER_RED = 0xFFFF5050;
 
 	/** Latest fresher-than-scrape defense reports keyed by territory. */
 	private static final Map<String, ChatDefenseInfo> chatDefenses = new HashMap<>();
@@ -72,6 +83,10 @@ public final class AttackTimerMenu {
 	private static final Map<String, List<WarGoer>> going = new HashMap<>();
 	/** Territories that had an attack timer last tick, to detect when one ends. */
 	private static java.util.Set<String> previousActive = new java.util.HashSet<>();
+	// Last inside-status this client reported for its own head, and whether it was
+	// heading anywhere, so it only sends on a change (enter/leave the target territory).
+	private static boolean wasGoing;
+	private static boolean lastReportedInside;
 	/** Screen rectangles [x1,y1,x2,y2] of the last-rendered rows, for click hit-testing. */
 	private static final Map<String, int[]> clickBoxes = new HashMap<>();
 	/** Screen rectangles of the last-rendered heads and the names to show on hover. */
@@ -196,6 +211,42 @@ public final class AttackTimerMenu {
 			}
 		}
 		previousActive = current;
+		reportInside(socket);
+	}
+
+	/**
+	 * If this client marked itself heading to a territory, report whether it's standing
+	 * inside it (only on a change), so its head border flips green/red for everyone. The
+	 * goer's own client is the authority on its position — no one else knows it.
+	 */
+	private static void reportInside(BridgeWebSocketClient socket) {
+		Minecraft mc = Minecraft.getInstance();
+		String myTerritory = mc.player == null ? null : myGoingTerritory(mc.player.getUUID().toString());
+		if (myTerritory == null) {
+			wasGoing = false;
+			return;
+		}
+		BlockPos pos = mc.player.blockPosition();
+		boolean inside = myTerritory.equals(TerritoryData.territoryAt(pos.getX(), pos.getZ()));
+		if (!wasGoing || inside != lastReportedInside) {
+			wasGoing = true;
+			lastReportedInside = inside;
+			if (socket != null) {
+				socket.sendWarGoingInside(inside);
+			}
+		}
+	}
+
+	/** The territory this client is currently marked as heading to (from the board), or null. */
+	private static String myGoingTerritory(String myUuid) {
+		for (Map.Entry<String, List<WarGoer>> entry : going.entrySet()) {
+			for (WarGoer goer : entry.getValue()) {
+				if (goer.uuid().equals(myUuid)) {
+					return entry.getKey();
+				}
+			}
+		}
+		return null;
 	}
 
 	/** Clear all local war-board state (on world change / disconnect). */
@@ -208,6 +259,8 @@ public final class AttackTimerMenu {
 		clickBoxes.clear();
 		headBoxes.clear();
 		soonestTerritory = null;
+		wasGoing = false;
+		lastReportedInside = false;
 	}
 
 	public static void render(BridgeConfig config, GuiGraphics graphics) {
@@ -328,9 +381,12 @@ public final class AttackTimerMenu {
 		Minecraft mc = Minecraft.getInstance();
 		int shown = Math.min(goers.size(), MAX_HEADS);
 		for (int i = 0; i < shown; i++) {
+			WarGoer goer = goers.get(i);
 			int headRelX = relX + i * (HEAD_SIZE + HEAD_GAP);
-			PlayerFaceRenderer.draw(graphics, skinFor(mc, goers.get(i)), headRelX, relY, HEAD_SIZE);
-			headBoxes.add(headBox(headRelX, relY, HEAD_SIZE, HEAD_SIZE, originX, originY, scale, List.of(nameFor(mc, goers.get(i)))));
+			PlayerFaceRenderer.draw(graphics, skinFor(mc, goer), headRelX, relY, HEAD_SIZE);
+			// Border: green once they're inside the territory, red while heading there.
+			drawBorder(graphics, headRelX, relY, HEAD_SIZE, goer.inside() ? BORDER_GREEN : BORDER_RED);
+			headBoxes.add(headBox(headRelX, relY, HEAD_SIZE, HEAD_SIZE, originX, originY, scale, List.of(nameFor(mc, goer))));
 		}
 		int overflow = goers.size() - shown;
 		if (overflow > 0) {
@@ -343,6 +399,14 @@ public final class AttackTimerMenu {
 			}
 			headBoxes.add(headBox(overflowRelX, relY, font.width("+" + overflow), font.lineHeight, originX, originY, scale, rest));
 		}
+	}
+
+	/** Draw a 1px frame on the edge of a head to mark a goer's inside/en-route status. */
+	private static void drawBorder(GuiGraphics graphics, int x, int y, int size, int color) {
+		graphics.fill(x, y, x + size, y + 1, color);
+		graphics.fill(x, y + size - 1, x + size, y + size, color);
+		graphics.fill(x, y, x + 1, y + size, color);
+		graphics.fill(x + size - 1, y, x + size, y + size, color);
 	}
 
 	/** A screen-space hover box from a panel-relative (x, y) run of {@code width}x{@code height}px. */
@@ -366,16 +430,30 @@ public final class AttackTimerMenu {
 		return goer.name();
 	}
 
+	private static final Logger LOGGER = LoggerFactory.getLogger("edenmod");
+	/** Skins resolved by uuid from Mojang, for goers not in our player list (cross-world). */
+	private static final Map<UUID, PlayerSkin> resolvedSkins = new ConcurrentHashMap<>();
+	/** Uuids with a resolve in flight, so each is fetched at most once. */
+	private static final Set<UUID> skinFetching = ConcurrentHashMap.newKeySet();
+	private static final ExecutorService skinWorker = Executors.newSingleThreadExecutor(runnable -> {
+		Thread thread = new Thread(runnable, "eden-war-skins");
+		thread.setDaemon(true);
+		return thread;
+	});
+
 	/**
-	 * The skin to draw for a goer: an online guildmate's already-loaded skin from the
-	 * tab list (no async, no Steve), falling back to the uuid's default skin.
+	 * The skin to draw for a goer. A guildmate on our own world is in the player list with
+	 * their skin already loaded (free). One on a <em>different</em> Wynncraft world instance
+	 * (routine during a war rush) isn't in our list, so their profile carries no textures and
+	 * the game would only give a default skin — we resolve those by uuid from Mojang in the
+	 * background (cached), showing the default until it lands.
 	 */
 	private static PlayerSkin skinFor(Minecraft mc, WarGoer goer) {
 		UUID uuid;
 		try {
 			uuid = UUID.fromString(goer.uuid());
 		} catch (IllegalArgumentException e) {
-			return DefaultPlayerSkin.get(UUID.nameUUIDFromBytes(goer.name().getBytes()));
+			return DefaultPlayerSkin.get(UUID.nameUUIDFromBytes(goer.name().getBytes(StandardCharsets.UTF_8)));
 		}
 		if (mc.getConnection() != null) {
 			PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
@@ -383,7 +461,38 @@ public final class AttackTimerMenu {
 				return info.getSkin();
 			}
 		}
+		PlayerSkin resolved = resolvedSkins.get(uuid);
+		if (resolved != null) {
+			return resolved;
+		}
+		fetchSkin(mc, uuid, goer.name());
 		return DefaultPlayerSkin.get(uuid);
+	}
+
+	/**
+	 * Resolve a goer's skin by uuid off-thread (Mojang session lookup → texture load),
+	 * caching the result. Runs once per uuid; a transient failure clears the guard so a
+	 * later frame retries, a successful profile fetch does not (the skin loads on its own).
+	 */
+	private static void fetchSkin(Minecraft mc, UUID uuid, String name) {
+		if (!skinFetching.add(uuid)) {
+			return;
+		}
+		LOGGER.debug("Resolving war-head skin for {} ({}) — not in the player list", name, uuid);
+		skinWorker.submit(() -> {
+			try {
+				var result = mc.services().sessionService().fetchProfile(uuid, false);
+				if (result == null) {
+					skinFetching.remove(uuid);
+					return;
+				}
+				GameProfile profile = result.profile();
+				mc.execute(() -> mc.getSkinManager().get(profile).thenAccept(skin -> skin.ifPresent(value -> resolvedSkins.put(uuid, value))));
+			} catch (RuntimeException e) {
+				skinFetching.remove(uuid);
+				LOGGER.debug("War-head skin fetch failed for {}", uuid, e);
+			}
+		});
 	}
 
 	/**
