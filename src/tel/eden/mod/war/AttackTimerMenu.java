@@ -4,22 +4,32 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
+import org.lwjgl.glfw.GLFW;
+import tel.eden.mod.EdenModClient;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.hud.HudLayout;
 import tel.eden.mod.hud.HudPanel;
 import tel.eden.mod.hud.RectangleElement;
 import tel.eden.mod.hud.TextElement;
+import tel.eden.mod.net.BridgeWebSocketClient;
+import tel.eden.mod.net.WarBoardEntry;
+import tel.eden.mod.net.WarGoer;
 
 /**
  * HUD list of upcoming territory attacks read from the scoreboard sidebar, each row
@@ -43,10 +53,29 @@ public final class AttackTimerMenu {
 	// A guild-chat defense report, e.g. "Detlas defense is High" (Wynntils' format).
 	private static final Pattern DEFENSE_REPORT = Pattern.compile("^(.+?) defense is (Very Low|Low|Medium|High|Very High)\\b", Pattern.CASE_INSENSITIVE);
 
+	private static final int HEAD_SIZE = 8;
+	private static final int HEAD_GAP = 1;
+	// A war party caps at 5, so at most five distinct heads ever need showing.
+	private static final int MAX_HEADS = 5;
+
 	/** Latest fresher-than-scrape defense reports keyed by territory. */
 	private static final Map<String, ChatDefenseInfo> chatDefenses = new HashMap<>();
+	/**
+	 * Defence scraped from the {@code /guild attack} menu, keyed by territory — from this
+	 * client's own scrape or the backend's {@code warBoard} broadcast of another member's.
+	 * Normally preferred over the chat report; the chat report wins only on a conflict.
+	 */
+	private static final Map<String, String> scrapedDefenses = new HashMap<>();
+	/** Territories where scouts reported conflicting scraped ratings (from the board). */
+	private static final Map<String, Boolean> defenseConflict = new HashMap<>();
+	/** Who is heading to each territory (from the {@code warBoard} broadcast). */
+	private static final Map<String, List<WarGoer>> going = new HashMap<>();
+	/** Territories that had an attack timer last tick, to detect when one ends. */
+	private static java.util.Set<String> previousActive = new java.util.HashSet<>();
 	/** Screen rectangles [x1,y1,x2,y2] of the last-rendered rows, for click hit-testing. */
 	private static final Map<String, int[]> clickBoxes = new HashMap<>();
+	/** Screen rectangles of the last-rendered heads and the names to show on hover. */
+	private static final List<HeadBox> headBoxes = new ArrayList<>();
 	private static volatile String soonestTerritory = null;
 	// The scoreboard sidebar changes at most once per tick, but both the HUD (render()) and
 	// the territory wall (attackedTerritories()) query it every frame. Memoize the scan per
@@ -55,6 +84,10 @@ public final class AttackTimerMenu {
 	private static List<Upcoming> cachedAttacks = List.of();
 
 	private record Upcoming(String time, String territory) {
+	}
+
+	/** A drawn head's screen rectangle and the names it represents (for hover tooltips). */
+	private record HeadBox(int x1, int y1, int x2, int y2, List<String> names) {
 	}
 
 	/** Territory with the earliest upcoming attack, or null. */
@@ -110,8 +143,76 @@ public final class AttackTimerMenu {
 		};
 	}
 
+	/** Record a defence scraped locally from this client's {@code /guild attack} menu. */
+	public static void reportScrapedDefense(String territory, String defense) {
+		scrapedDefenses.put(territory, canonicalDefense(defense));
+	}
+
+	/**
+	 * Apply a full {@code warBoard} snapshot from the backend. A full replace (not a merge)
+	 * of who's-going, scraped defence, and the conflict flag, so a territory the backend
+	 * dropped (its timer ended) also drops here.
+	 */
+	public static void updateBoard(List<WarBoardEntry> entries) {
+		going.clear();
+		scrapedDefenses.clear();
+		defenseConflict.clear();
+		for (WarBoardEntry entry : entries) {
+			if (!entry.defense().isEmpty()) {
+				scrapedDefenses.put(entry.territory(), canonicalDefense(entry.defense()));
+			}
+			if (entry.conflict()) {
+				defenseConflict.put(entry.territory(), Boolean.TRUE);
+			}
+			if (!entry.going().isEmpty()) {
+				going.put(entry.territory(), entry.going());
+			}
+		}
+	}
+
+	/**
+	 * Detect attack timers that have just ended and clear their state. When a territory
+	 * leaves the scoreboard (its timer expired), drop this client's chat report for it and
+	 * tell the backend to clear the shared defence/conflict/who's-going, so the next war on
+	 * that territory starts fresh. Skipped entirely when the whole sidebar is gone (a world
+	 * switch / disconnect), so that never looks like every war ending at once.
+	 */
+	public static void onTick(BridgeWebSocketClient socket) {
+		Scoreboard scoreboard = sidebarScoreboard();
+		if (scoreboard == null || scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR) == null) {
+			previousActive.clear();
+			return;
+		}
+		java.util.Set<String> current = new java.util.HashSet<>();
+		for (Upcoming attack : currentAttacks()) {
+			current.add(attack.territory());
+		}
+		for (String territory : previousActive) {
+			if (!current.contains(territory)) {
+				chatDefenses.remove(territory);
+				if (socket != null) {
+					socket.sendWarTimerEnded(territory);
+				}
+			}
+		}
+		previousActive = current;
+	}
+
+	/** Clear all local war-board state (on world change / disconnect). */
+	public static void reset() {
+		chatDefenses.clear();
+		scrapedDefenses.clear();
+		defenseConflict.clear();
+		going.clear();
+		previousActive.clear();
+		clickBoxes.clear();
+		headBoxes.clear();
+		soonestTerritory = null;
+	}
+
 	public static void render(BridgeConfig config, GuiGraphics graphics) {
 		clickBoxes.clear();
+		headBoxes.clear();
 		if (!config.warAttackTimers) {
 			soonestTerritory = null;
 			return;
@@ -127,16 +228,31 @@ public final class AttackTimerMenu {
 		Font font = mc.font;
 		String currentTerritory = currentTerritory();
 
+		// Cap the visible rows to the soonest configured max so a 30-40 war spree doesn't
+		// run the HUD off-screen; the rest collapse into a "+N more wars" footer. The
+		// territory wall and beacon still use the full, uncapped list.
+		int maxRows = Math.max(1, Math.min(50, config.warAttackTimerMaxRows));
+		int overflowWars = Math.max(0, attacks.size() - maxRows);
+		List<Upcoming> shown = overflowWars > 0 ? attacks.subList(0, maxRows) : attacks;
+
+		// Per-row text width, so heads sit just past each row's text and the panel is
+		// widened to fit them (keeping the whole row — text and heads — clickable).
 		List<String> lines = new ArrayList<>();
-		for (Upcoming attack : attacks) {
-			lines.add(rowText(attack, currentTerritory));
-		}
+		int[] textWidths = new int[shown.size()];
 		int maxWidth = 0;
-		for (String line : lines) {
-			maxWidth = Math.max(maxWidth, font.width(stripCodes(line)));
+		for (int i = 0; i < shown.size(); i++) {
+			String line = rowText(shown.get(i), currentTerritory);
+			lines.add(line);
+			textWidths[i] = font.width(stripCodes(line));
+			maxWidth = Math.max(maxWidth, textWidths[i] + headsWidth(going.get(shown.get(i).territory())));
 		}
+		String footer = overflowWars > 0 ? "§7+" + overflowWars + " more war" + (overflowWars == 1 ? "" : "s") : null;
+		if (footer != null) {
+			maxWidth = Math.max(maxWidth, font.width(stripCodes(footer)));
+		}
+		int rows = shown.size() + (footer != null ? 1 : 0);
 		int width = maxWidth + 6;
-		int height = attacks.size() * ROW_HEIGHT + 4;
+		int height = rows * ROW_HEIGHT + 4;
 		float scale = HudLayout.scale(config, PANEL);
 		int x = clamp(HudLayout.x(config, PANEL, DEFAULT_X, DEFAULT_Y), Math.round(width * scale), mc.getWindow().getGuiScaledWidth());
 		int y = clamp(HudLayout.y(config, PANEL, DEFAULT_X, DEFAULT_Y), Math.round(height * scale), mc.getWindow().getGuiScaledHeight());
@@ -146,29 +262,152 @@ public final class AttackTimerMenu {
 		HudPanel panel = new HudPanel();
 		panel.add(new RectangleElement(0, 0, width, height, PANEL_BG));
 		int relY = 3;
-		for (int i = 0; i < attacks.size(); i++) {
+		for (int i = 0; i < shown.size(); i++) {
 			panel.add(new TextElement(lines.get(i), 3, relY, 0xFFFFFFFF));
-			clickBoxes.put(attacks.get(i).territory(), new int[]{x, Math.round(y + (relY - 1) * scale), Math.round(x + width * scale), Math.round(y + (relY + ROW_HEIGHT - 1) * scale)});
+			clickBoxes.put(shown.get(i).territory(), new int[]{x, Math.round(y + (relY - 1) * scale), Math.round(x + width * scale), Math.round(y + (relY + ROW_HEIGHT - 1) * scale)});
 			relY += ROW_HEIGHT;
+		}
+		if (footer != null) {
+			panel.add(new TextElement(footer, 3, relY, 0xFFFFFFFF));
 		}
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x, y);
 		graphics.pose().scale(scale, scale);
 		panel.draw(graphics);
+		// Heads draw over the panel, in the same transformed space, just past each row's text.
+		relY = 3;
+		for (int i = 0; i < shown.size(); i++) {
+			drawHeads(graphics, font, 3 + textWidths[i] + 2, relY, going.get(shown.get(i).territory()), x, y, scale);
+			relY += ROW_HEIGHT;
+		}
 		graphics.pose().popMatrix();
 	}
 
-	/** Handle a click while the chat screen is open; true if a row was hit. */
-	public static boolean mouseClicked(BridgeConfig config, double mouseX, double mouseY) {
+	/**
+	 * Show a goer's IGN (or the overflow's names) when the mouse is over their head.
+	 * Called while the chat screen is open — that's when a cursor exists and clicking
+	 * already works, so hovering fits the same interaction.
+	 */
+	public static void renderGoerTooltip(GuiGraphics graphics, int mouseX, int mouseY) {
+		for (HeadBox box : headBoxes) {
+			if (mouseX >= box.x1() && mouseX <= box.x2() && mouseY >= box.y1() && mouseY <= box.y2()) {
+				List<net.minecraft.network.chat.Component> lines = new ArrayList<>();
+				for (String name : box.names()) {
+					lines.add(net.minecraft.network.chat.Component.literal(name));
+				}
+				graphics.setComponentTooltipForNextFrame(Minecraft.getInstance().font, lines, mouseX, mouseY);
+				return;
+			}
+		}
+	}
+
+	/** Pixel width the heads (capped, plus a "+N" overflow) occupy after a row's text. */
+	private static int headsWidth(List<WarGoer> goers) {
+		if (goers == null || goers.isEmpty()) {
+			return 0;
+		}
+		int shown = Math.min(goers.size(), MAX_HEADS);
+		int width = 2 + shown * (HEAD_SIZE + HEAD_GAP);
+		int overflow = goers.size() - shown;
+		if (overflow > 0) {
+			width += Minecraft.getInstance().font.width("+" + overflow) + 2;
+		}
+		return width;
+	}
+
+	/**
+	 * Draw the going players' heads (capped at {@link #MAX_HEADS}, then "+N"), recording
+	 * each head's screen-space rectangle (origin + relative*scale) for hover tooltips.
+	 * {@code relX}/{@code relY} are panel-relative; {@code originX}/{@code originY}/{@code scale}
+	 * map them to the screen for the boxes.
+	 */
+	private static void drawHeads(GuiGraphics graphics, Font font, int relX, int relY, List<WarGoer> goers, int originX, int originY, float scale) {
+		if (goers == null || goers.isEmpty()) {
+			return;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		int shown = Math.min(goers.size(), MAX_HEADS);
+		for (int i = 0; i < shown; i++) {
+			int headRelX = relX + i * (HEAD_SIZE + HEAD_GAP);
+			PlayerFaceRenderer.draw(graphics, skinFor(mc, goers.get(i)), headRelX, relY, HEAD_SIZE);
+			headBoxes.add(headBox(headRelX, relY, HEAD_SIZE, HEAD_SIZE, originX, originY, scale, List.of(nameFor(mc, goers.get(i)))));
+		}
+		int overflow = goers.size() - shown;
+		if (overflow > 0) {
+			// +2 matches the gap headsWidth() reserves before the overflow counter.
+			int overflowRelX = relX + shown * (HEAD_SIZE + HEAD_GAP) + 2;
+			graphics.drawString(font, "+" + overflow, overflowRelX, relY, 0xFFFFFFFF);
+			List<String> rest = new ArrayList<>();
+			for (int i = shown; i < goers.size(); i++) {
+				rest.add(nameFor(mc, goers.get(i)));
+			}
+			headBoxes.add(headBox(overflowRelX, relY, font.width("+" + overflow), font.lineHeight, originX, originY, scale, rest));
+		}
+	}
+
+	/** A screen-space hover box from a panel-relative (x, y) run of {@code width}x{@code height}px. */
+	private static HeadBox headBox(int relX, int relY, int width, int height, int originX, int originY, float scale, List<String> names) {
+		return new HeadBox(Math.round(originX + relX * scale), Math.round(originY + relY * scale), Math.round(originX + (relX + width) * scale), Math.round(originY + (relY + height) * scale), names);
+	}
+
+	/** A goer's current IGN from the tab list (fresh after a rename), else the board name. */
+	private static String nameFor(Minecraft mc, WarGoer goer) {
+		try {
+			UUID uuid = UUID.fromString(goer.uuid());
+			if (mc.getConnection() != null) {
+				PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
+				if (info != null) {
+					return info.getProfile().name();
+				}
+			}
+		} catch (IllegalArgumentException ignored) {
+			// Fall through to the board-provided name.
+		}
+		return goer.name();
+	}
+
+	/**
+	 * The skin to draw for a goer: an online guildmate's already-loaded skin from the
+	 * tab list (no async, no Steve), falling back to the uuid's default skin.
+	 */
+	private static PlayerSkin skinFor(Minecraft mc, WarGoer goer) {
+		UUID uuid;
+		try {
+			uuid = UUID.fromString(goer.uuid());
+		} catch (IllegalArgumentException e) {
+			return DefaultPlayerSkin.get(UUID.nameUUIDFromBytes(goer.name().getBytes()));
+		}
+		if (mc.getConnection() != null) {
+			PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
+			if (info != null) {
+				return info.getSkin();
+			}
+		}
+		return DefaultPlayerSkin.get(uuid);
+	}
+
+	/**
+	 * Handle a click on a timer row while the chat screen is open; true if a row was hit.
+	 * Left-click points Wynncraft's compass at the territory; right-click toggles this
+	 * player's "heading here" marker (a head next to the row, shared with the guild).
+	 */
+	public static boolean mouseClicked(BridgeConfig config, double mouseX, double mouseY, int button) {
 		if (!config.warAttackTimers) {
 			return false;
 		}
 		for (Map.Entry<String, int[]> entry : clickBoxes.entrySet()) {
 			int[] box = entry.getValue();
 			if (mouseX >= box[0] && mouseX <= box[2] && mouseY >= box[1] && mouseY <= box[3]) {
-				int[] middle = TerritoryData.middle(entry.getKey());
-				if (middle != null && Minecraft.getInstance().getConnection() != null) {
-					Minecraft.getInstance().getConnection().sendCommand("compass " + middle[0] + " " + middle[1]);
+				if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+					BridgeWebSocketClient socket = EdenModClient.instance().socket();
+					if (socket != null) {
+						socket.sendWarGoing(entry.getKey());
+					}
+				} else {
+					int[] middle = TerritoryData.middle(entry.getKey());
+					if (middle != null && Minecraft.getInstance().getConnection() != null) {
+						Minecraft.getInstance().getConnection().sendCommand("compass " + middle[0] + " " + middle[1]);
+					}
 				}
 				return true;
 			}
@@ -183,11 +422,31 @@ public final class AttackTimerMenu {
 	}
 
 	private static String coloredDefense(String territory) {
-		// Prefer a recent guild-chat report (fresher intel) over the scraped value;
-		// show a single rating rather than both.
+		// Normal priority: attack-menu scrape > recent chat report > advancement scrape.
+		// Exception: when scouts reported conflicting scraped ratings (an open attack GUI
+		// freezes its value, so two scouts can disagree), the attacker's chat report
+		// ("Olux defense is High", posted as they commit the war) is the tie-breaker, so
+		// chat wins over scrape. All of this resets when the territory's timer ends.
 		ChatDefenseInfo chat = chatDefenses.get(territory);
-		String defense = (chat != null && chat.isRecent()) ? chat.defense() : TerritoryData.defense(territory);
-		return colorFor(defense);
+		boolean chatOk = chat != null && chat.isRecent();
+		String scraped = scrapedDefenses.get(territory);
+		boolean scrapeOk = scraped != null && !scraped.isEmpty();
+		if (Boolean.TRUE.equals(defenseConflict.get(territory))) {
+			if (chatOk) {
+				return colorFor(chat.defense());
+			}
+			if (scrapeOk) {
+				return colorFor(scraped);
+			}
+		} else {
+			if (scrapeOk) {
+				return colorFor(scraped);
+			}
+			if (chatOk) {
+				return colorFor(chat.defense());
+			}
+		}
+		return colorFor(TerritoryData.defense(territory));
 	}
 
 	private static String colorFor(String defense) {
@@ -201,11 +460,10 @@ public final class AttackTimerMenu {
 	}
 
 	private static List<Upcoming> upcomingAttacks() {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.level == null) {
+		Scoreboard scoreboard = sidebarScoreboard();
+		if (scoreboard == null) {
 			return List.of();
 		}
-		Scoreboard scoreboard = mc.level.getScoreboard();
 		Objective sidebar = scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR);
 		if (sidebar == null) {
 			return List.of();
@@ -254,15 +512,28 @@ public final class AttackTimerMenu {
 		return entry.ownerName().getString();
 	}
 
+	/**
+	 * The scoreboard to read timer lines from: the packet-captured shadow when it carries
+	 * a sidebar (so Wynntils hiding the vanilla segment can't blind us), else the game's
+	 * own scoreboard as a fallback.
+	 */
+	private static Scoreboard sidebarScoreboard() {
+		if (ScoreboardCapture.hasSidebar()) {
+			return ScoreboardCapture.scoreboard();
+		}
+		Minecraft mc = Minecraft.getInstance();
+		return mc.level != null ? mc.level.getScoreboard() : null;
+	}
+
 	/** Diagnostic: dump every scoreboard slot/objective and its scores, to locate the
 	 * timer lines when they aren't in the standard sidebar. */
 	public static List<String> debugSidebarLines() {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.level == null) {
+		Scoreboard scoreboard = sidebarScoreboard();
+		if (scoreboard == null) {
 			return List.of("(no world)");
 		}
-		Scoreboard scoreboard = mc.level.getScoreboard();
 		List<String> out = new ArrayList<>();
+		out.add("source: " + (ScoreboardCapture.hasSidebar() ? "captured shadow" : "vanilla scoreboard"));
 		for (DisplaySlot slot : DisplaySlot.values()) {
 			Objective shown = scoreboard.getDisplayObjective(slot);
 			out.add("slot " + slot + " -> " + (shown == null ? "none" : shown.getName()));
