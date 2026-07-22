@@ -214,9 +214,10 @@ public abstract class ChatScreenMixin {
 
 	@Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
 	private void edenmod$handleAttackTimerClick(MouseButtonEvent event, boolean bl, CallbackInfoReturnable<Boolean> cir) {
-		// Runs regardless of the emote-tool settings: clicking an attack-timer row
-		// points Wynncraft's compass at that territory.
-		if (event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT && AttackTimerMenu.mouseClicked(EdenModClient.instance().config(), event.x(), event.y())) {
+		// Runs regardless of the emote-tool settings: left-clicking an attack-timer row
+		// points Wynncraft's compass at that territory; right-clicking marks you heading
+		// there (a head shared with the guild).
+		if (AttackTimerMenu.mouseClicked(EdenModClient.instance().config(), event.x(), event.y(), event.button())) {
 			cir.setReturnValue(true);
 		}
 	}
@@ -260,6 +261,9 @@ public abstract class ChatScreenMixin {
 
 	@Inject(method = "render", at = @At("TAIL"))
 	private void edenmod$renderChatOverlays(GuiGraphics graphics, int mouseX, int mouseY, float delta, CallbackInfo ci) {
+		// Hovering an attack-timer head shows that player's IGN (works regardless of the
+		// emote-tool settings, like the timer click).
+		AttackTimerMenu.renderGoerTooltip(graphics, mouseX, mouseY);
 		if (!edenmod$isChatEmoteUiVisible() && !edenmod$isChatEmoteAutocompleteEnabled()) {
 			edenmod$resetOverlayState();
 			return;

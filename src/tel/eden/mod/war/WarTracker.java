@@ -1,7 +1,6 @@
 package tel.eden.mod.war;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -83,7 +82,7 @@ public final class WarTracker {
 		weeklyWars = wars;
 	}
 
-	/** The battle-start line opens the capture window; may be called off-thread. */
+	/** The battle-start line opens the capture window. Called on the client thread. */
 	public static void onChat(String rawLine) {
 		if (WarDPS.clean(rawLine).contains(WAR_START_PHRASE)) {
 			capturing = true;
@@ -165,8 +164,8 @@ public final class WarTracker {
 		var events = ((BossHealthOverlayAccessor) mc.gui.getBossOverlay()).edenmod$events();
 		for (LerpingBossEvent event : events.values()) {
 			String text = WarDPS.clean(event.getName().getString());
-			if (text.contains("Tower")) {
-				String territory = territoryFromBar(text);
+			if (TowerBar.isTowerBar(text)) {
+				String territory = TowerBar.territory(text);
 				if (territory != null && TerritoryData.territoryNames().contains(territory)) {
 					return territory;
 				}
@@ -185,21 +184,6 @@ public final class WarTracker {
 				sightings.merge(player.getName().getString(), 1, Integer::sum);
 			}
 		}
-	}
-
-	/** Territory name from a tower bar ("[TAG] Some Territory Tower - ..."). */
-	private static String territoryFromBar(String text) {
-		String head = text.split(" - ")[0];
-		String[] bracketSplit = head.split("] ");
-		if (bracketSplit.length < 2) {
-			return null;
-		}
-		String[] words = bracketSplit[1].trim().split(" ");
-		if (words.length < 2) {
-			return null;
-		}
-		// Drop the trailing "Tower" word.
-		return String.join(" ", Arrays.copyOfRange(words, 0, words.length - 1)).trim();
 	}
 
 	private static void reportWar(String territory) {

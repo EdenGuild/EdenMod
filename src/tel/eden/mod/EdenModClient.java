@@ -39,13 +39,16 @@ import tel.eden.mod.item.WynntilsItemDecoder;
 import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.net.PartyInfo;
 import tel.eden.mod.net.PendingEntry;
+import tel.eden.mod.net.WarBoardEntry;
 import tel.eden.mod.net.WarCountEntry;
 import tel.eden.mod.reward.GuildRewards;
 import tel.eden.mod.update.UpdateChecker;
 import tel.eden.mod.update.UpdateInfo;
 import tel.eden.mod.update.UpdateInstaller;
 import tel.eden.mod.util.Wynncraft;
+import tel.eden.mod.war.AttackMenuScraper;
 import tel.eden.mod.war.AttackTimerMenu;
+import tel.eden.mod.war.ScoreboardCapture;
 import tel.eden.mod.war.BeaconManager;
 import tel.eden.mod.war.TerritoryData;
 import tel.eden.mod.war.TerritoryMenuKeybind;
@@ -336,6 +339,10 @@ public final class EdenModClient implements ClientModInitializer {
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			loginPending = true;
+			// Fresh connection: drop the packet-captured scoreboard and all war-board state
+			// so a previous world/session's timers, defence, and heads never linger.
+			ScoreboardCapture.reset();
+			AttackTimerMenu.reset();
 			// Capture whether this server is Wynncraft before evaluateGating() may call
 			// disconnect(), which clears onWynncraft even when the player is still on
 			// Wynncraft (e.g. expired JWT). remindIfUnlinked needs the real server state.
@@ -416,6 +423,8 @@ public final class EdenModClient implements ClientModInitializer {
 			TerritoryOutlineRenderer.onTick(client);
 			WarDPS.onTick(config);
 			WarTracker.onTick();
+			AttackMenuScraper.onTick(client);
+			AttackTimerMenu.onTick(socket);
 			tel.eden.mod.emote.EmoteWheel.onTick(client);
 			tel.eden.mod.emote.UnlockedEmoteDetector.onTick(client);
 			BridgeWebSocketClient current = socket;
@@ -621,6 +630,14 @@ public final class EdenModClient implements ClientModInitializer {
 						return;
 					}
 					displayColored(color, () -> DiscordChatFormatter.warCounts(days, entries, requester));
+				}
+
+				@Override
+				public void onWarBoard(java.util.List<WarBoardEntry> entries) {
+					// Marshal onto the client thread: the attack-timer maps are otherwise
+					// only touched there (render + the menu scraper), so this keeps all
+					// access single-threaded (this callback runs on the websocket thread).
+					Minecraft.getInstance().execute(() -> AttackTimerMenu.updateBoard(entries));
 				}
 
 				@Override
@@ -1654,6 +1671,10 @@ public final class EdenModClient implements ClientModInitializer {
 		tabCheckTick = 0;
 		presenceTick = 0;
 		pendingConnectionCode = null;
+		// Drop the captured scoreboard + war-board state so nothing carries into the next
+		// connection (stale timers/defence/heads).
+		ScoreboardCapture.reset();
+		AttackTimerMenu.reset();
 		if (socket != null) {
 			socket.close();
 			socket = null;
@@ -1667,10 +1688,15 @@ public final class EdenModClient implements ClientModInitializer {
 		DiscordChatFormatter.onServerChatLine();
 		if (onWynncraft) {
 			// War chat cues (start countdown → attendance capture; end → HUD summary)
-			// work even while the bridge socket is down.
+			// work even while the bridge socket is down. handleSystemChat runs on the netty
+			// network thread (see ClientPacketListenerMixin), but the war subsystem's state
+			// is otherwise only touched on the client thread (tick + render), so marshal
+			// these onto it to avoid racing that state.
 			String warLine = message.getString();
-			WarTracker.onChat(warLine);
-			WarDPS.onChat(warLine);
+			Minecraft.getInstance().execute(() -> {
+				WarTracker.onChat(warLine);
+				WarDPS.onChat(warLine);
+			});
 		}
 		BridgeWebSocketClient current = socket;
 		if (!onWynncraft || current == null) {
@@ -1794,8 +1820,12 @@ public final class EdenModClient implements ClientModInitializer {
 		Optional<CapturedMessage> captured = GuildChatParser.parse(message);
 		if (captured.isPresent() && config.warAttackTimers) {
 			// Fold any "<territory> defense is <rating>" report (e.g. Wynntils') into the
-			// attack-timer HUD as fresher intel than the scraped advancement value.
-			AttackTimerMenu.intakeChat(captured.get().username(), captured.get().message());
+			// attack-timer HUD as fresher intel than the scraped advancement value. Marshal
+			// onto the client thread — the HUD reads chatDefenses on the render thread, and
+			// this runs on the netty network thread.
+			String username = captured.get().username();
+			String body = captured.get().message();
+			Minecraft.getInstance().execute(() -> AttackTimerMenu.intakeChat(username, body));
 		}
 		if (captured.isPresent() && chatRelay.shouldSend(captured.get())) {
 			CapturedMessage line = captured.get();

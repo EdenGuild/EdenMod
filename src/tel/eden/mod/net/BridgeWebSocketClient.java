@@ -87,6 +87,13 @@ public final class BridgeWebSocketClient {
 		 * own row can be highlighted/cached.
 		 */
 		void onWarCounts(int days, java.util.List<WarCountEntry> entries, String requester, String color);
+
+		/**
+		 * The live war board changed: each attacked territory's scraped defence rating
+		 * (from someone's {@code /guild attack} menu) and who is heading there. A full
+		 * snapshot — replace, don't merge, the who's-going state.
+		 */
+		void onWarBoard(java.util.List<WarBoardEntry> entries);
 	}
 
 	private final URI uri;
@@ -319,6 +326,70 @@ public final class BridgeWebSocketClient {
 		obj.add("members", array);
 		current.sendText(obj.toString(), true);
 		return true;
+	}
+
+	/**
+	 * Report a territory's defence rating scraped from the {@code /guild attack} menu.
+	 * The backend caches it and broadcasts it to every member's attack-timer HUD, so a
+	 * member who never opened the menu still sees the freshest defence intel.
+	 */
+	public void sendWarDefense(String territory, String defense) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "warDefense");
+		obj.addProperty("territory", territory);
+		obj.addProperty("defense", defense);
+		current.sendText(obj.toString(), true);
+	}
+
+	/**
+	 * Toggle this player's "heading to {@code territory}" marker (right-click on a timer
+	 * row). One assignment per player: marking a new territory moves them, re-marking the
+	 * current one clears it. The backend broadcasts the updated board to everyone.
+	 */
+	public void sendWarGoing(String territory) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "warGoing");
+		obj.addProperty("territory", territory);
+		current.sendText(obj.toString(), true);
+	}
+
+	/**
+	 * Report whether this player is currently inside the territory they marked heading to,
+	 * so their head border shows green (inside) or red (en route) on every member's HUD.
+	 */
+	public void sendWarGoingInside(boolean inside) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "warGoingInside");
+		obj.addProperty("inside", inside);
+		current.sendText(obj.toString(), true);
+	}
+
+	/**
+	 * Tell the backend a territory's attack timer has ended (no longer on the scoreboard),
+	 * so it clears that territory's cached defence/conflict/who's-going and the next war on
+	 * it starts fresh.
+	 */
+	public void sendWarTimerEnded(String territory) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "warTimerEnded");
+		obj.addProperty("territory", territory);
+		current.sendText(obj.toString(), true);
 	}
 
 	/** Ask for the guild's per-member war counts over the last {@code days} days. */
@@ -588,6 +659,7 @@ public final class BridgeWebSocketClient {
 				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
 				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"));
 				case "warCountsReply" -> sink.onWarCounts(getInt(obj, "days", 7), parseWarCounts(obj), get(obj, "requester"), get(obj, "color"));
+				case "warBoard" -> sink.onWarBoard(parseWarBoard(obj));
 				case "error" -> {
 					String code = get(obj, "code");
 					LOGGER.warn("Bridge rejected connection: {}", code);
@@ -604,6 +676,14 @@ public final class BridgeWebSocketClient {
 
 	private static String get(JsonObject obj, String key) {
 		return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : "";
+	}
+
+	private static boolean getBool(JsonObject obj, String key) {
+		try {
+			return obj.has(key) && !obj.get(key).isJsonNull() && obj.get(key).getAsBoolean();
+		} catch (RuntimeException e) {
+			return false;
+		}
 	}
 
 	private static int getInt(JsonObject obj, String key, int fallback) {
@@ -638,6 +718,29 @@ public final class BridgeWebSocketClient {
 					JsonObject member = element.getAsJsonObject();
 					out.add(new WarCountEntry(get(member, "name"), getInt(member, "wars", 0)));
 				}
+			}
+		}
+		return out;
+	}
+
+	private static java.util.List<WarBoardEntry> parseWarBoard(JsonObject obj) {
+		java.util.List<WarBoardEntry> out = new java.util.ArrayList<>();
+		if (obj.has("territories") && obj.get("territories").isJsonArray()) {
+			for (var element : obj.get("territories").getAsJsonArray()) {
+				if (!element.isJsonObject()) {
+					continue;
+				}
+				JsonObject entry = element.getAsJsonObject();
+				java.util.List<WarGoer> going = new java.util.ArrayList<>();
+				if (entry.has("going") && entry.get("going").isJsonArray()) {
+					for (var goerElement : entry.get("going").getAsJsonArray()) {
+						if (goerElement.isJsonObject()) {
+							JsonObject goer = goerElement.getAsJsonObject();
+							going.add(new WarGoer(get(goer, "name"), get(goer, "uuid"), getBool(goer, "inside")));
+						}
+					}
+				}
+				out.add(new WarBoardEntry(get(entry, "territory"), get(entry, "defense"), getBool(entry, "conflict"), going));
 			}
 		}
 		return out;

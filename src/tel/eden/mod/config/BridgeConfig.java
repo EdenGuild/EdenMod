@@ -91,6 +91,12 @@ public final class BridgeConfig {
 	/** HUD list of upcoming territory attacks (scoreboard timers + defense ratings). */
 	public boolean warAttackTimers = true;
 
+	/**
+	 * Max attack-timer rows shown before the rest collapse into a "+N more" footer (the
+	 * soonest are kept). A full-scale war can queue 30-40+ territories. Range 1-50.
+	 */
+	public int warAttackTimerMaxRows = 14;
+
 	/** Green in-world beacon marking the soonest upcoming territory attack. */
 	public boolean warGreenBeacon = true;
 
@@ -275,6 +281,7 @@ public final class BridgeConfig {
 					}
 					config.emotePickerColumns = Math.max(1, Math.min(10, config.emotePickerColumns));
 					config.emotePickerRows = Math.max(1, Math.min(10, config.emotePickerRows));
+					config.warAttackTimerMaxRows = Math.max(1, Math.min(50, config.warAttackTimerMaxRows));
 					config.imagePreviewSize = Math.max(1, Math.min(100, config.imagePreviewSize));
 					return config;
 				}

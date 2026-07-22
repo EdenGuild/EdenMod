@@ -78,15 +78,17 @@ public final class WarDPS {
 		}
 	}
 
-	/** War-end detection from chat; may be called off-thread (display is marshalled). */
+	/** War-end detection from chat. Called on the client thread (marshalled by the caller). */
 	public static void onChat(String rawLine) {
 		if (warStartTime < 0 || System.currentTimeMillis() - lastTimeInWar > END_CHAT_WINDOW_MS) {
 			return;
 		}
-		// Match on key phrases (not the exact territory) so a slightly different result
-		// wording still fires. "contains" tolerates any guild/war prefix on the line.
+		// Our own win reads "You have taken control of <territory> from [Tag]!"; a different
+		// guild capturing a territory broadcasts server-wide as "[Tag] has taken control of
+		// <territory>!". Match the personal "You have taken control of" so another guild's
+		// capture never ends (or falsely reports) our war.
 		String line = clean(rawLine);
-		if (line.contains("taken control of")) {
+		if (line.contains("You have taken control of")) {
 			warEnded(true);
 		} else if (line.contains("lost the war") || line.contains("canceled and refunded") || line.contains("failed to take control")) {
 			warEnded(false);
@@ -136,16 +138,13 @@ public final class WarDPS {
 			List<String> wordList = Arrays.asList(words);
 			int firstDash = wordList.indexOf("-");
 			int lastDash = wordList.lastIndexOf("-");
-			if (firstDash < 2 || lastDash <= firstDash || lastDash + 3 >= words.length + 1) {
+			if (firstDash < 2 || lastDash <= firstDash || lastDash + 3 >= words.length) {
 				return;
 			}
-			StringBuilder name = new StringBuilder();
-			for (int i = 1; i < firstDash - 1; i++) {
-				name.append(words[i]).append(" ");
-			}
-			if (!name.toString().equals(territoryName)) {
+			String name = TowerBar.territory(fullText);
+			if (name != null && !name.equals(territoryName)) {
 				resetWar();
-				territoryName = name.toString();
+				territoryName = name;
 				warStartTime = System.currentTimeMillis();
 				initialStats = fullText;
 			}

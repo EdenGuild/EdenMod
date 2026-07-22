@@ -8,6 +8,7 @@
     "ChatScreenMixin",
     "ClientPacketListenerCommandAliasMixin",
     "ClientPacketListenerMixin",
+    "ConnectionScoreboardMixin",
     "GuiGraphicsMixin",
     "ItemRenderMixin",
     "TitleScreenMixin"
