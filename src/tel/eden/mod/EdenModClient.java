@@ -195,6 +195,17 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private final java.util.concurrent.ConcurrentLinkedQueue<PendingWarReport> pendingWarReports = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+	/** A deduct request sent to the backend and still waiting for its reply. */
+	private record PendingDeduct(String rewardKind, String target, int displayUnits) {
+	}
+
+	// Deduct replies carry no request id, and a failed one carries nothing but the error
+	// string — so matching a failure back to the player it was about means remembering
+	// what we asked for. The socket delivers replies in request order, so the oldest
+	// outstanding request is the one being answered. Cleared on reconnect, since anything
+	// in flight when the socket dropped will never be answered.
+	private final java.util.concurrent.ConcurrentLinkedQueue<PendingDeduct> pendingDeducts = new java.util.concurrent.ConcurrentLinkedQueue<>();
 	private long lastWeeklyWarsRefresh;
 	// Set on game join, sent once the bridge connects, cleared on send/disconnect, so
 	// a "logged in" notice fires per game session (not on every WS reconnect).
@@ -312,6 +323,9 @@ public final class EdenModClient implements ClientModInitializer {
 		// Relay the guild's live reward storage to the backend counter: the exact value
 		// after a gift run, and (in onClientTick) whenever a Chief opens the menu.
 		guildRewards.setStorageReporter(this::relayStorage);
+		// Deduct what was just paid out from the backend's pending balance, so a payout
+		// no longer has to be followed by a /manage reset on Discord.
+		guildRewards.setDeductReporter(this::onRewardHandedOut);
 
 		KeyMapping.Category edenCategory = new KeyMapping.Category(net.minecraft.resources.Identifier.parse("edenmod"));
 		openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, edenCategory));
@@ -383,7 +397,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
+			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
 				requestWarCounts(ctx.getSource(), 7);
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
@@ -582,6 +596,22 @@ public final class EdenModClient implements ClientModInitializer {
 					knownPendingAspects = java.util.List.copyOf(sorted);
 					pendingAspectsError = (error == null || error.isEmpty()) ? null : error;
 					pendingAspectsGeneration.incrementAndGet();
+				}
+
+				@Override
+				public void onRewardDeductReply(String target, String rewardKind, int amount, int remaining, String error, String color) {
+					PendingDeduct sent = pendingDeducts.poll();
+					if (error != null && !error.isEmpty()) {
+						displayColored(color, () -> DiscordChatFormatter.systemLine("Couldn't deduct pending rewards: " + error, ChatFormatting.RED));
+						// Offer the manual route for the request that failed. If nothing is
+						// outstanding the reply answers a request from before a reconnect,
+						// and there is no player to name.
+						if (sent != null) {
+							display(() -> GuildRewards.manageResetFallbackLine(sent.rewardKind(), sent.target()));
+						}
+						return;
+					}
+					displayColored(color, () -> DiscordChatFormatter.systemLine("Deducted " + amount + " pending " + rewardKind + " from " + target + " — " + remaining + " remaining.", ChatFormatting.GREEN));
 				}
 
 				@Override
@@ -861,6 +891,35 @@ public final class EdenModClient implements ClientModInitializer {
 		return ClientCommandManager.literal(literal).then(ClientCommandManager.argument("amount", IntegerArgumentType.integer(1)).executes(ctx -> giftReward(ctx.getSource(), StringArgumentType.getString(ctx, "member"), type, IntegerArgumentType.getInteger(ctx, "amount"))));
 	}
 
+	/** Build {@code /eden deduct <aspects|emeralds> <member> <amount>} (Chiefs only). */
+	private LiteralArgumentBuilder<FabricClientCommandSource> buildDeductCommand() {
+		return ClientCommandManager.literal("deduct").then(deductKindArg("aspects")).then(deductKindArg("emeralds"));
+	}
+
+	private LiteralArgumentBuilder<FabricClientCommandSource> deductKindArg(String kind) {
+		// The bound matches the backend's own validation, so an out-of-range amount is
+		// rejected by the command parser instead of making a doomed round trip.
+		return ClientCommandManager.literal(kind).then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).then(ClientCommandManager.argument("amount", IntegerArgumentType.integer(1, 100_000)).executes(ctx -> deductReward(ctx.getSource(), kind, StringArgumentType.getString(ctx, "member"), IntegerArgumentType.getInteger(ctx, "amount")))));
+	}
+
+	private int deductReward(FabricClientCommandSource source, String rewardKind, String member, int amount) {
+		guildRewards.ensureFresh(playerName());
+		// Courtesy check only — the backend authorises by the linked account either way.
+		// Skipped while the roster is still loading, so a cold rank cache can't refuse a
+		// Chief; the unknown-member case is likewise left to the backend, whose view of
+		// the guild is fresher than the cached roster.
+		if (!guildRewards.memberNames().isEmpty() && !guildRewards.isChief()) {
+			source.sendFeedback(Component.literal("Only guild Chiefs can deduct pending rewards.").withStyle(ChatFormatting.RED));
+			return 0;
+		}
+		if (socket == null) {
+			source.sendFeedback(notConnected());
+			return 0;
+		}
+		sendDeduct(rewardKind, member, amount);
+		return 1;
+	}
+
 	private CompletableFuture<Suggestions> suggestMembers(CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
 		String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
 		for (String name : guildRewards.memberNames()) {
@@ -885,6 +944,39 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 		guildRewards.dumpEmeralds(member);
 		return 1;
+	}
+
+	/**
+	 * A reward with a pending balance was just handed out in-game. Batch payouts deduct
+	 * it straight away; single gifts offer the deduction as a clickable command, since a
+	 * gift isn't necessarily paying off what the member is owed.
+	 *
+	 * <p>Runs on the GuildRewards worker thread.
+	 */
+	private void onRewardHandedOut(String receiver, String rewardKind, int displayUnits, boolean autoDeduct) {
+		if (displayUnits <= 0) {
+			// An emerald handout that doesn't fill whole display units; the backend can't
+			// take a fraction of one, so this still has to be settled by hand.
+			display(() -> GuildRewards.manageResetFallbackLine(rewardKind, receiver));
+			return;
+		}
+		if (autoDeduct) {
+			sendDeduct(rewardKind, receiver, displayUnits);
+		} else {
+			display(() -> DiscordChatFormatter.deductOffer(rewardKind, receiver, displayUnits));
+		}
+	}
+
+	/** Send one deduct request, falling back to the manual command when offline. */
+	private void sendDeduct(String rewardKind, String target, int displayUnits) {
+		BridgeWebSocketClient current = socket;
+		if (current == null) {
+			display(() -> DiscordChatFormatter.systemLine("Not connected to the bridge — deduct " + target + "'s pending " + rewardKind + " by hand:", ChatFormatting.RED));
+			display(() -> GuildRewards.manageResetFallbackLine(rewardKind, target));
+			return;
+		}
+		pendingDeducts.add(new PendingDeduct(rewardKind, target, displayUnits));
+		current.sendRewardDeductRequest(rewardKind, target, displayUnits);
 	}
 
 	/** Gate the reward commands to Wynncraft and ensure the member list is loaded. */
@@ -1572,7 +1664,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -1648,6 +1740,14 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/** On a fresh bridge connection, announce this session's login exactly once. */
 	private void onBridgeConnected() {
+		// Any deduct that was in flight when the socket dropped will never be answered.
+		// Retrying isn't safe — the backend may well have applied it before the drop — so
+		// hand each one back to the Chief to check and settle manually.
+		for (PendingDeduct stale = pendingDeducts.poll(); stale != null; stale = pendingDeducts.poll()) {
+			PendingDeduct entry = stale;
+			display(() -> DiscordChatFormatter.systemLine("Lost the bridge before " + entry.target() + "'s " + entry.displayUnits() + " " + entry.rewardKind() + " were confirmed deducted — check and reset if needed:", ChatFormatting.RED));
+			display(() -> GuildRewards.manageResetFallbackLine(entry.rewardKind(), entry.target()));
+		}
 		if (loginPending) {
 			loginPending = false;
 			BridgeWebSocketClient current = socket;

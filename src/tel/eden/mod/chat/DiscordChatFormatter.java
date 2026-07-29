@@ -118,6 +118,13 @@ public final class DiscordChatFormatter {
 		return line;
 	}
 
+	/** "Paid X N aspects  [Deduct them]" — one click deducts the payout on the backend. */
+	public static Component deductOffer(String rewardKind, String target, int displayUnits) {
+		String command = "/eden deduct " + rewardKind + " " + target + " " + displayUnits;
+		Style deduct = Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to run " + command)));
+		return Component.empty().append(prefix(SHIELD)).append(Component.literal("Paid " + target + " " + displayUnits + " " + rewardKind + "  ").withStyle(ChatFormatting.GOLD)).append(Component.literal("[Deduct them]").setStyle(deduct));
+	}
+
 	/** A green/gold/red client-side notice line with the guild shield prefix. */
 	public static Component systemLine(String text, ChatFormatting color) {
 		return Component.empty().append(prefix(SHIELD)).append(Component.literal(text).withStyle(color));

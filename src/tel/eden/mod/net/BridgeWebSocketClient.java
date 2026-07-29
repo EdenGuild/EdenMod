@@ -52,6 +52,14 @@ public final class BridgeWebSocketClient {
 		 */
 		void onAspectsPending(java.util.List<PendingEntry> entries, String error, String color);
 
+		/**
+		 * Response to a {@code rewardDeductRequest}: on success {@code error} is empty
+		 * and target/kind/amount/remaining carry the display-unit values the backend
+		 * applied. On failure only {@code error} is set — the reply carries no target,
+		 * kind or amount, so the caller has to remember what it asked for.
+		 */
+		void onRewardDeductReply(String target, String rewardKind, int amount, int remaining, String error, String color);
+
 		/** A raid party changed state ({@code open}/{@code join}/{@code full}/etc.). */
 		void onPartyUpdate(String event, String actor, PartyInfo party, String color);
 
@@ -222,6 +230,24 @@ public final class BridgeWebSocketClient {
 	/** Ask the backend for each member's pending aspects (Chiefs only). */
 	public void sendAspectsPendingRequest() {
 		sendType("aspectsPendingRequest");
+	}
+
+	/**
+	 * Ask the backend to deduct {@code amount} pending rewards from {@code target}
+	 * after an in-game payout (Chiefs only; the backend authorises by JWT). The amount
+	 * is in the same display units the Discord side shows, not internal sub-units.
+	 */
+	public void sendRewardDeductRequest(String rewardKind, String target, int amount) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "rewardDeductRequest");
+		obj.addProperty("rewardKind", rewardKind);
+		obj.addProperty("target", target);
+		obj.addProperty("amount", amount);
+		current.sendText(obj.toString(), true);
 	}
 
 	/** Open a new party in-game for the given label (raid name or Annihilation). */
@@ -653,6 +679,7 @@ public final class BridgeWebSocketClient {
 				case "logoutNotice" -> sink.onLogoutNotice(get(obj, "username"), get(obj, "color"));
 				case "onlineList" -> sink.onOnlineList(getStringArray(obj, "users"), get(obj, "color"));
 				case "aspectsPendingReply" -> sink.onAspectsPending(parsePendingEntries(obj), get(obj, "error"), get(obj, "color"));
+				case "rewardDeductReply" -> sink.onRewardDeductReply(get(obj, "target"), get(obj, "rewardKind"), getInt(obj, "amount", 0), getInt(obj, "remaining", 0), get(obj, "error"), get(obj, "color"));
 				case "partyUpdate" -> sink.onPartyUpdate(get(obj, "event"), get(obj, "actor"), parseParty(obj), get(obj, "color"));
 				case "partyListReply" -> sink.onPartyList(parsePartyList(obj), get(obj, "color"));
 				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"), get(obj, "color"));

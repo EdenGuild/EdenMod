@@ -60,6 +60,10 @@ public final class GuildRewards {
 	private static final int NEXT_PAGE_SLOT = 28;
 	private static final int MAX_PAGES = 15;
 	private static final int EMERALDS_PER_ITEM = 1024;
+	// The backend tracks pending emeralds in 4096-emerald display units (one liquid
+	// emerald), but the guild menu hands them out one 1024-emerald item at a time, so
+	// four handouts make up one deductible unit.
+	private static final int ITEMS_PER_DISPLAY_UNIT = 4096 / EMERALDS_PER_ITEM;
 	private static final Pattern COUNT = Pattern.compile("(\\d+)\\s*/\\s*\\d+");
 
 	/** A reward kind and how it maps onto the guild-manage menu. */
@@ -107,8 +111,24 @@ public final class GuildRewards {
 		void report(int aspects, int tomes, long emeralds);
 	}
 
+	/**
+	 * Notified after each handout of a reward kind that has a pending balance on the
+	 * backend ("aspects"/"emeralds"), so the payout can be deducted there instead of
+	 * being reset by hand on Discord.
+	 *
+	 * <p>{@code displayUnits} is the handout in the backend's display units, or -1 when
+	 * the amount handed out doesn't convert to a whole number of them. {@code autoDeduct}
+	 * is true for batch payouts — the Chief already chose those amounts from the pending
+	 * list, so deducting them needs no further confirmation — and false for single gifts,
+	 * which are offered as a clickable command instead.
+	 */
+	public interface DeductReporter {
+		void report(String receiver, String rewardKind, int displayUnits, boolean autoDeduct);
+	}
+
 	private volatile RewardReporter reporter;
 	private volatile StorageReporter storageReporter;
+	private volatile DeductReporter deductReporter;
 	// True while a gift run is driving the menu, so the passive tick-time reader in
 	// EdenModClient doesn't relay a mid-gift (pre-swap) count; the run relays the exact
 	// post-gift value itself.
@@ -122,6 +142,11 @@ public final class GuildRewards {
 	/** Attach the reporter used to relay the guild's live reward storage counts. */
 	public void setStorageReporter(StorageReporter storageReporter) {
 		this.storageReporter = storageReporter;
+	}
+
+	/** Attach the reporter that deducts a handout from the backend's pending balance. */
+	public void setDeductReporter(DeductReporter deductReporter) {
+		this.deductReporter = deductReporter;
 	}
 
 	/** Whether a gift run is currently driving the guild-manage menu. */
@@ -322,7 +347,7 @@ public final class GuildRewards {
 				chat(name + " has not been in the guild for a week, and is not eligible " + "for rewards.", ChatFormatting.YELLOW);
 				return;
 			}
-			runSingle(name, type, requested, dump);
+			runSingle(name, type, requested, dump, false);
 		} catch (Exception e) {
 			LOGGER.warn("Gift run failed", e);
 			chat("Gift failed: " + e.getMessage(), ChatFormatting.RED);
@@ -337,8 +362,11 @@ public final class GuildRewards {
 	 * flag. Returns true when at least one unit was handed out; a false return means a
 	 * soft failure (menu wouldn't open, nothing to gift, member item missing) that has
 	 * already been reported in chat. Client-thread timeouts propagate as exceptions.
+	 *
+	 * <p>{@code batch} marks a run that is part of a payout of the backend's pending
+	 * list, which deducts the handout automatically rather than offering the deduction.
 	 */
-	private boolean runSingle(String name, RewardType type, int requested, boolean dump) {
+	private boolean runSingle(String name, RewardType type, int requested, boolean dump, boolean batch) {
 		if (!openRewardsMenu()) {
 			chat("Couldn't open the guild manage menu — try again.", ChatFormatting.RED);
 			return false;
@@ -388,14 +416,38 @@ public final class GuildRewards {
 			currentStorageReporter.report((int) finalCounts[0], (int) finalCounts[1], finalCounts[2]);
 		}
 		if (type.resetKind != null) {
-			// Show the matching /manage reset command, clickable to copy, so the
-			// pending balance can be zeroed on Discord after the in-game payout.
-			String command = "/manage reset kind:" + type.resetKind + " player:" + name;
-			chatComponent(Component.literal(command).withStyle(Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.CopyToClipboard(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to copy this command")))));
+			DeductReporter currentDeductReporter = deductReporter;
+			if (currentDeductReporter != null) {
+				currentDeductReporter.report(name, type.resetKind, displayUnits(type, amount), batch);
+			} else {
+				chatComponent(manageResetFallbackLine(type.resetKind, name));
+			}
 		} else {
 			chat("Done — gifted " + name + " " + total + " " + type.label + ".", ChatFormatting.GREEN);
 		}
 		return true;
+	}
+
+	/**
+	 * How many of the backend's display units a handout of {@code menuAmount} items is
+	 * worth, or -1 when it doesn't divide into whole units. Aspects map one-to-one;
+	 * emeralds only line up every {@link #ITEMS_PER_DISPLAY_UNIT} items, and the backend
+	 * has no way to take a fraction of a unit.
+	 */
+	public static int displayUnits(RewardType type, int menuAmount) {
+		if (type != RewardType.EMERALD) {
+			return menuAmount;
+		}
+		return menuAmount % ITEMS_PER_DISPLAY_UNIT == 0 ? menuAmount / ITEMS_PER_DISPLAY_UNIT : -1;
+	}
+
+	/**
+	 * The matching {@code /manage reset} command, clickable to copy, so the pending
+	 * balance can still be zeroed by hand on Discord when the bridge can't do it.
+	 */
+	public static Component manageResetFallbackLine(String resetKind, String player) {
+		String command = "/manage reset kind:" + resetKind + " player:" + player;
+		return Component.literal(command).withStyle(Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.CopyToClipboard(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to copy this command"))));
 	}
 
 	/** Open {@code /gu man} and step into member management. True if the menu came up. */
@@ -491,7 +543,7 @@ public final class GuildRewards {
 			try {
 				for (PayoutTarget target : targets) {
 					done++;
-					if (runSingle(target.name(), RewardType.ASPECT, target.aspects(), false)) {
+					if (runSingle(target.name(), RewardType.ASPECT, target.aspects(), false, true)) {
 						paid++;
 					} else {
 						skipped.add(target.name());
