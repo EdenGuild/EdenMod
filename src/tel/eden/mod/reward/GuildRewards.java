@@ -117,10 +117,12 @@ public final class GuildRewards {
 	 * being reset by hand on Discord.
 	 *
 	 * <p>{@code displayUnits} is the handout in the backend's display units, or -1 when
-	 * the amount handed out doesn't convert to a whole number of them. {@code autoDeduct}
-	 * is true for batch payouts — the Chief already chose those amounts from the pending
-	 * list, so deducting them needs no further confirmation — and false for single gifts,
-	 * which are offered as a clickable command instead.
+	 * the amount handed out doesn't convert to a whole number of them.
+	 *
+	 * <p>{@code autoDeduct} asks for the deduction to happen straight away — a payout
+	 * with the screen's auto-update option on, where the Chief picked the amounts off
+	 * the pending list itself. Otherwise it is only offered as a clickable command,
+	 * which is what single gifts do, since a gift needn't be settling what is owed.
 	 */
 	public interface DeductReporter {
 		void report(String receiver, String rewardKind, int displayUnits, boolean autoDeduct);
@@ -363,10 +365,10 @@ public final class GuildRewards {
 	 * soft failure (menu wouldn't open, nothing to gift, member item missing) that has
 	 * already been reported in chat. Client-thread timeouts propagate as exceptions.
 	 *
-	 * <p>{@code batch} marks a run that is part of a payout of the backend's pending
-	 * list, which deducts the handout automatically rather than offering the deduction.
+	 * <p>{@code autoDeduct} takes the handout off the member's pending total on the
+	 * backend instead of only offering the deduction as a clickable command.
 	 */
-	private boolean runSingle(String name, RewardType type, int requested, boolean dump, boolean batch) {
+	private boolean runSingle(String name, RewardType type, int requested, boolean dump, boolean autoDeduct) {
 		if (!openRewardsMenu()) {
 			chat("Couldn't open the guild manage menu — try again.", ChatFormatting.RED);
 			return false;
@@ -418,7 +420,7 @@ public final class GuildRewards {
 		if (type.resetKind != null) {
 			DeductReporter currentDeductReporter = deductReporter;
 			if (currentDeductReporter != null) {
-				currentDeductReporter.report(name, type.resetKind, displayUnits(type, amount), batch);
+				currentDeductReporter.report(name, type.resetKind, displayUnits(type, amount), autoDeduct);
 			} else {
 				chatComponent(manageResetFallbackLine(type.resetKind, name));
 			}
@@ -468,15 +470,18 @@ public final class GuildRewards {
 	 * Pay out aspects to several members in one go (off-thread). The whole batch is
 	 * checked against the guild's available aspects first: if it doesn't fit, nothing
 	 * is distributed at all.
+	 *
+	 * <p>With {@code autoDeduct}, each member's payout is also deducted from their
+	 * pending total on the backend; otherwise the deduction is only offered.
 	 */
-	public void payoutAspects(List<PayoutTarget> targets) {
+	public void payoutAspects(List<PayoutTarget> targets, boolean autoDeduct) {
 		List<PayoutTarget> copy = List.copyOf(targets);
 		if (!copy.isEmpty()) {
-			worker.submit(() -> batchRun(copy));
+			worker.submit(() -> batchRun(copy, autoDeduct));
 		}
 	}
 
-	private void batchRun(List<PayoutTarget> requested) {
+	private void batchRun(List<PayoutTarget> requested, boolean autoDeduct) {
 		giftInProgress = true;
 		try {
 			if (!isChief()) {
@@ -543,7 +548,7 @@ public final class GuildRewards {
 			try {
 				for (PayoutTarget target : targets) {
 					done++;
-					if (runSingle(target.name(), RewardType.ASPECT, target.aspects(), false, true)) {
+					if (runSingle(target.name(), RewardType.ASPECT, target.aspects(), false, autoDeduct)) {
 						paid++;
 					} else {
 						skipped.add(target.name());

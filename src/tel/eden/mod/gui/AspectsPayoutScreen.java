@@ -26,7 +26,10 @@ import tel.eden.mod.reward.GuildRewards;
  */
 public final class AspectsPayoutScreen extends EdenReferenceScreen {
 	private static final int BASE_PANEL_WIDTH = 420;
-	private static final int BASE_PANEL_HEIGHT = 300;
+	private static final int BASE_PANEL_HEIGHT = 322;
+	// The auto-update option row, between the quick actions and Pay Out.
+	private static final int OPTION_ROW_Y = 266;
+	private static final int OPTION_BOX_SIZE = 12;
 	private static final int ROW_HEIGHT = 28;
 	private static final int VISIBLE_ROWS = 7;
 	private static final int LIST_TOP = 36;
@@ -67,8 +70,8 @@ public final class AspectsPayoutScreen extends EdenReferenceScreen {
 		this.addRenderableWidget(Button.builder(Component.literal("Select Non-Chief"), b -> selectNonChief()).bounds(layout.x(148), layout.y(quickY), layout.w(124), layout.h(20)).build());
 		this.addRenderableWidget(Button.builder(Component.literal("Deselect All"), b -> selected.clear()).bounds(layout.x(281), layout.y(quickY), layout.w(124), layout.h(20)).build());
 
-		payOutButton = this.addRenderableWidget(Button.builder(Component.literal("Pay Out"), b -> payOut()).bounds(layout.x(15), layout.y(266), layout.w(190), layout.h(20)).build());
-		this.addRenderableWidget(Button.builder(Component.literal("Back"), b -> this.minecraft.setScreen(parent)).bounds(layout.x(215), layout.y(266), layout.w(190), layout.h(20)).build());
+		payOutButton = this.addRenderableWidget(Button.builder(Component.literal("Pay Out"), b -> payOut()).bounds(layout.x(15), layout.y(288), layout.w(190), layout.h(20)).build());
+		this.addRenderableWidget(Button.builder(Component.literal("Back"), b -> this.minecraft.setScreen(parent)).bounds(layout.x(215), layout.y(288), layout.w(190), layout.h(20)).build());
 
 		requestPending();
 		refreshSnapshot();
@@ -205,7 +208,7 @@ public final class AspectsPayoutScreen extends EdenReferenceScreen {
 		}
 		// The guild-manage menu needs the screen, and progress is reported in chat.
 		this.minecraft.setScreen(null);
-		mod.guildRewards().payoutAspects(targets);
+		mod.guildRewards().payoutAspects(targets, mod.config().payoutAutoDeduct);
 	}
 
 	private void sendChat(String message) {
@@ -243,7 +246,14 @@ public final class AspectsPayoutScreen extends EdenReferenceScreen {
 
 		layout.drawScrollbar(g, layout.x(393), listTop, layout.w(8), listHeight, VISIBLE_ROWS, rows.size(), scrollOffset);
 		g.drawString(this.font, footerText(), layout.x(15), layout.y(228), 0xFFCCCCCC);
+		renderAutoDeductOption(g);
 		popReferencePose(g);
+	}
+
+	private void renderAutoDeductOption(GuiGraphics g) {
+		boolean checked = mod.config().payoutAutoDeduct;
+		drawCheckbox(g, layout.x(15), layout.y(OPTION_ROW_Y), layout.w(OPTION_BOX_SIZE), checked, true);
+		g.drawString(this.font, "Auto-update Pending Totals", layout.x(33), layout.y(OPTION_ROW_Y + 2), checked ? 0xFFFFFFFF : 0xFFAAAAAA);
 	}
 
 	private void renderRows(GuiGraphics g, double mouseX, double mouseY) {
@@ -325,6 +335,11 @@ public final class AspectsPayoutScreen extends EdenReferenceScreen {
 		double mouseY = scaled.y();
 
 		if (scaled.button() == 0) {
+			if (isOverAutoDeductOption(mouseX, mouseY)) {
+				mod.config().payoutAutoDeduct = !mod.config().payoutAutoDeduct;
+				mod.config().save();
+				return true;
+			}
 			if (isOverScrollbar(mouseX, mouseY)) {
 				draggingScrollbar = true;
 				updateScrollFromMouse(mouseY);
@@ -378,6 +393,12 @@ public final class AspectsPayoutScreen extends EdenReferenceScreen {
 
 	private boolean isOverList(double mouseX, double mouseY) {
 		return mouseX >= layout.x(15) && mouseX <= layout.x(401) && mouseY >= layout.y(LIST_TOP) && mouseY <= layout.y(LIST_BOTTOM);
+	}
+
+	/** The whole label is clickable, not just the 12px box — it's a small target. */
+	private boolean isOverAutoDeductOption(double mouseX, double mouseY) {
+		int labelEnd = layout.x(33) + this.font.width("Auto-update Pending Totals");
+		return mouseX >= layout.x(15) && mouseX <= labelEnd && mouseY >= layout.y(OPTION_ROW_Y - 2) && mouseY <= layout.y(OPTION_ROW_Y + OPTION_BOX_SIZE + 2);
 	}
 
 	private boolean isOverScrollbar(double mouseX, double mouseY) {

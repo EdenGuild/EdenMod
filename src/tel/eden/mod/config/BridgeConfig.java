@@ -60,6 +60,14 @@ public final class BridgeConfig {
 	 */
 	public boolean partyAnnounce = true;
 
+	/**
+	 * Whether an aspect payout also deducts what it paid from each member's pending
+	 * total on the backend, so the Discord side matches without a manual reset. Toggled
+	 * by the checkbox on the payout screen, which is where it takes effect; remembered
+	 * so a Chief who settles the totals another way isn't re-ticking it every payout.
+	 */
+	public boolean payoutAutoDeduct = true;
+
 	public enum GameDisplayMode {
 		ALL("Shown (All)"), NONE("Hidden (All)"), REACTIONS("Show Only Reactions");
 
