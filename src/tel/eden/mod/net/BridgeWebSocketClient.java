@@ -236,11 +236,13 @@ public final class BridgeWebSocketClient {
 	 * Ask the backend to deduct {@code amount} pending rewards from {@code target}
 	 * after an in-game payout (Chiefs only; the backend authorises by JWT). The amount
 	 * is in the same display units the Discord side shows, not internal sub-units.
+	 * Returns false when the socket is down (mid-reconnect included), so the caller can
+	 * offer the manual route instead of waiting for a reply that will never come.
 	 */
-	public void sendRewardDeductRequest(String rewardKind, String target, int amount) {
+	public boolean sendRewardDeductRequest(String rewardKind, String target, int amount) {
 		WebSocket current = socket;
 		if (current == null) {
-			return;
+			return false;
 		}
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "rewardDeductRequest");
@@ -248,6 +250,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("target", target);
 		obj.addProperty("amount", amount);
 		current.sendText(obj.toString(), true);
+		return true;
 	}
 
 	/** Open a new party in-game for the given label (raid name or Annihilation). */

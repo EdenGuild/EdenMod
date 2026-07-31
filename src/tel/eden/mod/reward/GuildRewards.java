@@ -397,6 +397,12 @@ public final class GuildRewards {
 		}
 		int total = type == RewardType.EMERALD ? amount * EMERALDS_PER_ITEM : amount;
 		chat("Gifting " + name + " " + total + " " + type.label + "...", ChatFormatting.GREEN);
+		if (!dump && amount < requested) {
+			// The guild ran short: what is about to be handed out no longer matches what
+			// the pending list said was owed, so neither the deduction below nor a
+			// /manage reset settles this member correctly.
+			chat("Only " + total + " of " + requested + " " + type.label + " were available for " + name + " — their pending total needs settling by hand.", ChatFormatting.YELLOW);
+		}
 		for (int i = 0; i < amount; i++) {
 			final int target = slot;
 			onClientRun(() -> swapHotbar(target, type.hotbar));
@@ -424,7 +430,7 @@ public final class GuildRewards {
 			if (currentDeductReporter != null) {
 				currentDeductReporter.report(name, type.resetKind, displayUnits(type, amount), autoDeduct);
 			} else {
-				chatComponent(manageResetFallbackLine(type.resetKind, name));
+				chatComponent(manageResetFallbackLine(type.resetKind, name, displayUnits(type, amount)));
 			}
 		} else {
 			chat("Done — gifted " + name + " " + total + " " + type.label + ".", ChatFormatting.GREEN);
@@ -448,10 +454,16 @@ public final class GuildRewards {
 	/**
 	 * The matching {@code /manage reset} command, clickable to copy, so the pending
 	 * balance can still be zeroed by hand on Discord when the bridge can't do it.
+	 *
+	 * <p>{@code paidUnits} is what the in-game handout actually came to, or -1 when the
+	 * caller doesn't know. Reset zeroes the whole balance, so the two only agree when
+	 * the payout covered all of it — the hover says so rather than leaving a Chief to
+	 * discover it after wiping the remainder of a partially-paid member's total.
 	 */
-	public static Component manageResetFallbackLine(String resetKind, String player) {
+	public static Component manageResetFallbackLine(String resetKind, String player, int paidUnits) {
 		String command = "/manage reset kind:" + resetKind + " player:" + player;
-		return Component.literal(command).withStyle(Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.CopyToClipboard(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to copy this command"))));
+		String hover = paidUnits > 0 ? "Click to copy — this zeroes " + player + "'s whole pending balance, not just the " + paidUnits + " paid" : "Click to copy this command";
+		return Component.literal(command).withStyle(Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.CopyToClipboard(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal(hover))));
 	}
 
 	/** Open {@code /gu man} and step into member management. True if the menu came up. */
