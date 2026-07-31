@@ -417,7 +417,9 @@ public final class GuildRewards {
 		if (currentStorageReporter != null) {
 			currentStorageReporter.report((int) finalCounts[0], (int) finalCounts[1], finalCounts[2]);
 		}
-		if (type.resetKind != null) {
+		// A dump empties the guild bank into one member and isn't settling what anyone
+		// is owed, so it never offers (or performs) a pending-balance deduction.
+		if (type.resetKind != null && !dump) {
 			DeductReporter currentDeductReporter = deductReporter;
 			if (currentDeductReporter != null) {
 				currentDeductReporter.report(name, type.resetKind, displayUnits(type, amount), autoDeduct);
