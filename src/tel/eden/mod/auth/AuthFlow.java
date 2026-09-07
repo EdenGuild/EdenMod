@@ -9,15 +9,13 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Base64;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.util.Util;
 import tel.eden.mod.EdenLogger;
 
 /**
  * Drives the browser link flow: {@code POST /auth/start} -> open the authorization
- * URL in the player's browser -> poll {@code GET /auth/status} until COMPLETE, then
- * hand back the backend-signed JWT and its expiry.
+ * URL in the player's browser -> poll {@code GET /auth/status} until COMPLETE.
  *
  * <p>Runs on a daemon thread so the game is never blocked.
  */
@@ -29,7 +27,7 @@ public final class AuthFlow {
 
 	/** Result callback for the link flow. */
 	public interface Callback {
-		void onSuccess(String jwt, long expiresAt);
+		void onSuccess();
 
 		void onError(String message);
 	}
@@ -41,43 +39,6 @@ public final class AuthFlow {
 		Thread thread = new Thread(() -> run(backendBaseUrl, callback), "edenmod-auth");
 		thread.setDaemon(true);
 		thread.start();
-	}
-
-	/**
-	 * Silently renew {@code currentJwt} against {@code backendBaseUrl}.
-	 * Calls {@link Callback#onSuccess} with a fresh JWT if the server accepts it;
-	 * calls {@link Callback#onError} (with no in-game prompt) if it cannot.
-	 */
-	public void refresh(String backendBaseUrl, String currentJwt, Callback callback) {
-		Thread thread = new Thread(() -> runRefresh(backendBaseUrl, currentJwt, callback), "edenmod-auth-refresh");
-		thread.setDaemon(true);
-		thread.start();
-	}
-
-	private void runRefresh(String backendBaseUrl, String currentJwt, Callback callback) {
-		String base = backendBaseUrl.strip();
-		if (!base.startsWith("https://")) {
-			callback.onError("Backend URL must be https.");
-			return;
-		}
-		if (base.endsWith("/")) {
-			base = base.substring(0, base.length() - 1);
-		}
-		try {
-			HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create(base + "/auth/refresh")).header("Authorization", "Bearer " + currentJwt).header("X-Mod-Version", MOD_VERSION).POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
-			if (response.statusCode() == 200) {
-				JsonObject body = JsonParser.parseString(response.body()).getAsJsonObject();
-				String jwt = stringOrEmpty(body, "jwt");
-				if (!jwt.isEmpty()) {
-					callback.onSuccess(jwt, extractExpiry(jwt));
-					return;
-				}
-			}
-			callback.onError("Refresh failed: HTTP " + response.statusCode());
-		} catch (Exception e) {
-			LOGGER.warn("Token refresh failed", e);
-			callback.onError("Refresh error: " + e.getMessage());
-		}
 	}
 
 	private void run(String backendBaseUrl, Callback callback) {
@@ -116,8 +77,7 @@ public final class AuthFlow {
 			if (response.statusCode() == 200) {
 				JsonObject body = JsonParser.parseString(response.body()).getAsJsonObject();
 				if ("COMPLETE".equals(stringOrEmpty(body, "status"))) {
-					String jwt = stringOrEmpty(body, "jwt");
-					callback.onSuccess(jwt, extractExpiry(jwt));
+					callback.onSuccess();
 					return;
 				}
 			}
@@ -136,29 +96,5 @@ public final class AuthFlow {
 
 	private static String stringOrEmpty(JsonObject obj, String key) {
 		return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : "";
-	}
-
-	/**
-	 * Read the {@code exp} claim purely to schedule re-auth before the token lapses.
-	 *
-	 * <p><strong>This does NOT authenticate the token.</strong> The JWT signature is
-	 * never verified here (the client has no key to verify it with), so the parsed
-	 * claims must never drive any security decision on the client. The bridge backend
-	 * is the sole authority: it must re-validate the signature (and any claims it
-	 * trusts) on every authenticated request, since a MITM or hostile backend could
-	 * hand the mod a forged token with an arbitrary {@code exp}.
-	 */
-	public static long extractExpiry(String jwt) {
-		try {
-			String[] parts = jwt.split("\\.");
-			if (parts.length < 2) {
-				return 0L;
-			}
-			String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
-			JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
-			return obj.has("exp") ? obj.get("exp").getAsLong() : 0L;
-		} catch (RuntimeException e) {
-			return 0L;
-		}
 	}
 }

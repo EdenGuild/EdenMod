@@ -19,8 +19,9 @@ import tel.eden.mod.EdenLogger;
 /**
  * Raw-WebSocket client to the bridge backend.
  *
- * <p>Refuses to connect over non-TLS; carries the bridge JWT as a Bearer header;
- * reconnects with exponential backoff while running; forwards inbound
+ * <p>Refuses to connect over non-TLS; proves the connection via a Mojang session
+ * challenge/response (no bearer token); reconnects with exponential backoff while
+ * running; forwards inbound
  * {@code discordMessage} events to a sink and sends captured guild chat outbound.
  */
 public final class BridgeWebSocketClient {
@@ -95,8 +96,8 @@ public final class BridgeWebSocketClient {
 		/**
 		 * The bridge server rejected the connection. {@code code} is either the
 		 * application-level error code from the server ({@code "version_rejected"},
-		 * {@code "not_member"}) or {@code "http_<status>"} for HTTP-level rejections
-		 * (e.g. {@code "http_401"} for an invalid JWT).
+		 * {@code "not_member"}) or {@code "http_<status>"} for a rejection at the
+		 * HTTP handshake itself (e.g. a proxy or outage, not the mod's session).
 		 */
 		void onConnectionRejected(String code);
 
@@ -346,7 +347,8 @@ public final class BridgeWebSocketClient {
 
 	/**
 	 * Ask the backend to deduct {@code amount} pending rewards from {@code target}
-	 * after an in-game payout (Chiefs only; the backend authorises by JWT). The amount
+	 * after an in-game payout (Chiefs only; the backend authorises by this connection's
+	 * verified guild rank, established at the {@code /ws/v2} handshake). The amount
 	 * is in the same display units the Discord side shows, not internal sub-units.
 	 * Returns false when the socket is down (mid-reconnect included), so the caller can
 	 * offer the manual route instead of waiting for a reply that will never come.
@@ -767,8 +769,9 @@ public final class BridgeWebSocketClient {
 					} catch (Exception ignored) {
 					}
 					LOGGER.warn("Bridge WebSocket rejected: HTTP {}", status);
-					// 4xx = permanent rejection; only 401 (bad JWT) reaches here now that
-					// version/membership errors are sent as application-level messages.
+					// 4xx = permanent rejection at the handshake itself; version/membership/
+					// session errors are all sent as application-level messages instead, so
+					// only proxy- or outage-level failures reach here.
 					rejectConnection("http_" + status);
 					return;
 				}

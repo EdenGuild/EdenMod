@@ -2421,13 +2421,12 @@ public final class EdenModClient implements ClientModInitializer {
 	/**
 	 * Start the browser link flow. On success the account link is recorded on the
 	 * backend (no token is stored locally); we then re-handshake so the bridge re-reads
-	 * our now-linked standing. The {@code jwt}/{@code expiresAt} the flow returns are
-	 * unused — /ws/v2 authenticates the live Minecraft session instead.
+	 * our now-linked standing — /ws/v2 authenticates the live Minecraft session.
 	 */
 	public void startLinkFlow(Runnable onDone) {
 		new AuthFlow().begin(BridgeConfig.DEFAULT_BACKEND_URL, new AuthFlow.Callback() {
 			@Override
-			public void onSuccess(String jwt, long expiresAt) {
+			public void onSuccess() {
 				Minecraft.getInstance().execute(() -> {
 					// An existing observer connection won't upgrade itself; a fresh
 					// handshake makes the backend re-read the now-linked standing.
