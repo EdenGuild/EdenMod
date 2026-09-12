@@ -7,7 +7,7 @@
   "authors": ["Eden Guild"],
   "icon": "assets/edenmod/icon.png",
   "contact": {
-    "homepage": "https://github.com/EdenGuild",
+    "homepage": "https://eden.tel",
     "sources": "https://github.com/EdenGuild/EdenMod",
     "issues": "https://github.com/EdenGuild/EdenMod/issues"
   },
@@ -36,7 +36,8 @@
   "custom": {
     "modmenu": {
       "links": {
-        "modmenu.discord": "https://discord.gg/P4bss3w"
+        "modmenu.discord": "https://discord.gg/P4bss3w",
+        "modmenu.modrinth": "https://modrinth.com/mod/edenmod"
       }
     }
   }
