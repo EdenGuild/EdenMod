@@ -24,7 +24,6 @@ public final class BankEventParser {
 	private static final Pattern BANK_PATTERN = Pattern.compile("^(.+?)\\s+(deposited|withdrew)\\s+(.+?)\\s+(?:to|from)\\s+the Guild Bank\\s+\\((.+)\\)$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern QUANTITY = Pattern.compile("^(?:(\\d+)x\\s+)?(.+)$");
 	private static final Pattern CHARGES = Pattern.compile("^(.*?)(?:\\s+\\[([^\\]]+)\\])?$");
-	private static final Pattern HOVER_REAL_NAME = Pattern.compile("(?:'(?:s)? real name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
 	private static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
 
 	private BankEventParser() {
@@ -77,37 +76,8 @@ public final class BankEventParser {
 	}
 
 	private static String resolvePlayer(Component message, String displayed) {
-		String fromHover = firstHoverRealName(message);
-		if (fromHover != null) {
-			return fromHover;
-		}
-		String cleaned = displayed.replaceAll("[^a-zA-Z0-9_]", "");
-		return IGN.matcher(cleaned).matches() ? cleaned : null;
+		String resolved = PlayerNameResolver.resolve(message, displayed);
+		return IGN.matcher(resolved).matches() ? resolved : null;
 	}
 
-	private static String firstHoverRealName(Component message) {
-		String[] found = {null};
-		message.visit((style, text) -> {
-			if (found[0] == null) {
-				String hover = hoverRealName(style);
-				if (hover != null) {
-					found[0] = hover;
-				}
-			}
-			return Optional.empty();
-		}, Style.EMPTY);
-		return found[0];
-	}
-
-	private static String hoverRealName(Style style) {
-		HoverEvent hover = style.getHoverEvent();
-		if (hover instanceof HoverEvent.ShowText showText) {
-			String text = showText.value().getString().replace('’', '\'').replace('‘', '\'');
-			Matcher matcher = HOVER_REAL_NAME.matcher(text);
-			if (matcher.find()) {
-				return matcher.group(1);
-			}
-		}
-		return null;
-	}
 }

@@ -45,12 +45,11 @@ public final class RankChangeParser {
 		String oldRank = matcher.group(3).trim();
 		String newRank = matcher.group(4).trim();
 
-		String target = ChatText.resolveRealName(message, displayedTarget);
+		String target = PlayerNameResolver.resolve(message, displayedTarget);
 		if (target == null) {
 			return Optional.empty();
 		}
-		String resolvedSetter = ChatText.resolveRealName(message, displayedSetter);
-		String setter = resolvedSetter != null ? resolvedSetter : displayedSetter;
+		String setter = PlayerNameResolver.resolve(message, displayedSetter);
 		return Optional.of(new RankChange(target, oldRank, newRank, setter));
 	}
 }

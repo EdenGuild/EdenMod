@@ -60,7 +60,7 @@ public final class ChatDecorators {
 			return message;
 		}
 		// Resolve any nickname to the real account name so /msg reaches the right player.
-		String name = ChatText.resolveClickTargetName(message, matcher.group(1));
+		String name = PlayerNameResolver.resolve(message, matcher.group(1));
 		pendingCongrats.add(name);
 		Style style = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden congratulate " + name)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Send: /msg " + name + " " + congratsMessage)));
 		return message.copy().append(Component.literal(" [Congratulate]").setStyle(style));

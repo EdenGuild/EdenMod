@@ -76,6 +76,6 @@ public final class ShoutParser {
 	private static String resolve(Component message, String displayed) {
 		// Handles every nick form ("real/nick", "real(nick)", bare nick with a nickname
 		// hover) and falls back to the stripped display name.
-		return ChatText.resolveClickTargetName(message, displayed);
+		return PlayerNameResolver.resolve(message, displayed);
 	}
 }

@@ -44,7 +44,7 @@ public final class RaidCompletionParser {
 	private static final Pattern ASPECTS = Pattern.compile("(\\d+)x Aspects");
 	private static final Pattern EMERALDS = Pattern.compile("(\\d+)x Emeralds");
 	private static final Pattern GUILD_EXP = Pattern.compile("\\+([\\d.]+)m Guild Experience");
-	private static final Pattern HOVER_REAL_NAME_PATTERN = Pattern.compile("(?:'(?:s)? real name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
+	private static final Pattern HOVER_REAL_NAME_PATTERN = Pattern.compile("(?:'(?:s)? real (?:user)?name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
 	private static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
 	private static final Pattern COMMA = Pattern.compile("\\s*,\\s*");
 

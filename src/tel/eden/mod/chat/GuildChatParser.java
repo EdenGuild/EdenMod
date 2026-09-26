@@ -37,7 +37,7 @@ public final class GuildChatParser {
 
 	// "<nick>'s real name is <ign>" (also "<nick>' real name is" for names ending
 	// in s) and the legacy "Real Username: <ign>".
-	private static final Pattern HOVER_REAL_NAME_PATTERN = Pattern.compile("(?:'(?:s)? real name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
+	private static final Pattern HOVER_REAL_NAME_PATTERN = Pattern.compile("(?:'(?:s)? real (?:user)?name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
 
 	private static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
 
@@ -87,6 +87,7 @@ public final class GuildChatParser {
 			return Optional.empty();
 		}
 		String nickname = username.equalsIgnoreCase(displayed) ? username : displayed;
+		PlayerNameResolver.recordAlias(nickname, username);
 		return Optional.of(new CapturedMessage(username, nickname, content));
 	}
 
@@ -210,7 +211,7 @@ public final class GuildChatParser {
 		for (Segment segment : segments) {
 			builder.append(segment.text());
 		}
-		return builder.toString();
+		return ChatText.unwrapWynncraftSoftWraps(builder.toString());
 	}
 
 }

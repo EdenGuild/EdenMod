@@ -114,12 +114,6 @@ public final class GuildEventParser {
 
 	/** Real account name from hover, else the displayed name minus any "/nick". */
 	private static String resolvePlayer(Component message, String displayed) {
-		String resolved = ChatText.resolveRealName(message, displayed);
-		if (resolved != null) {
-			return resolved;
-		}
-		String name = displayed.trim();
-		int slash = name.indexOf('/');
-		return slash > 0 ? name.substring(0, slash).trim() : name;
+		return PlayerNameResolver.resolve(message, displayed);
 	}
 }

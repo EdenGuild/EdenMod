@@ -19,7 +19,12 @@ import net.minecraft.network.chat.Style;
  */
 final class ChatText {
 	static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
-	private static final Pattern HOVER_REAL_NAME = Pattern.compile("(?:'(?:s)? real name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
+	// Wynncraft 2.1 soft-wraps chat as "\n" followed by this private-use marker
+	// and one injected leading space. The marker is invisible in-game but must be
+	// removed before forwarding text, otherwise a URL becomes several tokens.
+	private static final String WYNN_SOFT_WRAP = "\uDAFF\uDFFC\uE001\uDB00\uDC06";
+	private static final Pattern URL_PREFIX = Pattern.compile("https?://[^\\s]*", Pattern.CASE_INSENSITIVE);
+	private static final Pattern HOVER_REAL_NAME = Pattern.compile("(?:'(?:s)? real (?:user)?name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
 	// Wynncraft's other nick-hover shape leads with the real name: "<real>'s nickname is
 	// <nick>". Also used to peel a "real/nick" suffix or "real(nick)" wrapper off a
 	// displayed name so the bare account name is left.
@@ -199,6 +204,39 @@ final class ChatText {
 	}
 
 	/**
+	 * Replace Wynncraft's invisible soft-wrap marker with ordinary text spacing.
+	 * A wrap inside an already-started URL is joined without a space, preserving
+	 * e.g. long Wynnbuilder links; prose still receives the normal single space.
+	 */
+	static String unwrapWynncraftSoftWraps(String raw) {
+		if (raw == null || raw.indexOf(WYNN_SOFT_WRAP) < 0) {
+			return raw;
+		}
+		StringBuilder out = new StringBuilder(raw.length());
+		int cursor = 0;
+		while (true) {
+			int marker = raw.indexOf(WYNN_SOFT_WRAP, cursor);
+			if (marker < 0) {
+				out.append(raw, cursor, raw.length());
+				return out.toString();
+			}
+			int before = marker;
+			if (before > cursor && raw.charAt(before - 1) == '\n') {
+				before--;
+			}
+			out.append(raw, cursor, before);
+			int continuation = marker + WYNN_SOFT_WRAP.length();
+			if (continuation < raw.length() && raw.charAt(continuation) == ' ') {
+				continuation++;
+			}
+			if (!continuesUrl(out, raw, continuation)) {
+				out.append(' ');
+			}
+			cursor = continuation;
+		}
+	}
+
+	/**
 	 * Strip private-use glyph spam and control characters and collapse whitespace
 	 * without changing punctuation spacing. Use this for user-authored text, where a
 	 * space before {@code :shortcode:} or punctuation may be intentional.
@@ -223,6 +261,18 @@ final class ChatText {
 			previousWasSpace = false;
 		}
 		return out.toString().trim();
+	}
+
+	private static boolean continuesUrl(StringBuilder prefix, String raw, int continuation) {
+		int tokenStart = prefix.length();
+		while (tokenStart > 0 && !Character.isWhitespace(prefix.charAt(tokenStart - 1))) {
+			tokenStart--;
+		}
+		if (!URL_PREFIX.matcher(prefix.substring(tokenStart)).matches() || continuation >= raw.length()) {
+			return false;
+		}
+		char first = raw.charAt(continuation);
+		return !Character.isWhitespace(first) && first != '<' && first != '>';
 	}
 
 	/** Whether the code point is a control/format/private-use/surrogate/unassigned char. */
