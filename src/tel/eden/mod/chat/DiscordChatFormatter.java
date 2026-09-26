@@ -118,13 +118,6 @@ public final class DiscordChatFormatter {
 		return line;
 	}
 
-	/** "Paid X N aspects  [Deduct them]" — one click deducts the payout on the backend. */
-	public static Component deductOffer(String rewardKind, String target, int displayUnits) {
-		String command = "/eden deduct " + rewardKind + " " + target + " " + displayUnits;
-		Style deduct = Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to run " + command)));
-		return Component.empty().append(prefix(SHIELD)).append(Component.literal("Paid " + target + " " + displayUnits + " " + rewardKind + "  ").withStyle(ChatFormatting.GOLD)).append(Component.literal("[Deduct them]").setStyle(deduct));
-	}
-
 	/** A green/gold/red client-side notice line with the guild shield prefix. */
 	public static Component systemLine(String text, ChatFormatting color) {
 		return Component.empty().append(prefix(SHIELD)).append(Component.literal(text).withStyle(color));
@@ -189,8 +182,21 @@ public final class DiscordChatFormatter {
 	 * reminder). {@code colorRgb} of {@code null} falls back to the default gold.
 	 */
 	public static Component pill(String label, String content, Integer colorRgb) {
+		return pill(label, content, colorRgb, false);
+	}
+
+	/**
+	 * Build a pill bridge line, optionally bold (e.g. the storage-nearly-full
+	 * in-game warning) — for a message that needs to stand out further than
+	 * color alone.
+	 */
+	public static Component pill(String label, String content, Integer colorRgb, boolean bold) {
 		int rgb = colorRgb != null ? colorRgb : ChatFormatting.GOLD.getColor();
-		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(rgb))).append(Component.literal(" " + content).withStyle(style -> style.withColor(rgb)));
+		// The label is a run of custom glyph codepoints from a resource-pack font
+		// (see pillLabel) — Minecraft's bold rendering does a synthetic pixel-shift
+		// on the glyph bitmap that corrupts non-standard glyphs like these, so bold
+		// only ever applies to the plain-text content segment, never the label.
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(rgb))).append(Component.literal(" " + content).withStyle(style -> style.withColor(rgb).withBold(bold)));
 		return withGuildPrefix(body);
 	}
 

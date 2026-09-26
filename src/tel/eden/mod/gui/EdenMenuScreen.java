@@ -79,8 +79,8 @@ public class EdenMenuScreen extends Screen {
 			this.minecraft.setScreen(new PartyListScreen(this, EdenModClient.instance()));
 		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 3), metrics.buttonWidth, metrics.buttonHeight).build());
 
-		this.addRenderableWidget(Button.builder(Component.literal("Aspect Payouts"), button -> {
-			this.minecraft.setScreen(new AspectsPayoutScreen(this, EdenModClient.instance()));
+		this.addRenderableWidget(Button.builder(Component.literal("Payouts"), button -> {
+			this.minecraft.setScreen(new PayoutScreen(this, EdenModClient.instance()));
 		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 4), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Command Aliases"), button -> {

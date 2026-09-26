@@ -18,18 +18,25 @@ import java.util.Map;
  * may or may not have witnessed, depending on when they connected) don't inflate the
  * count differently across clients and cause duplicate Discord messages.
  *
- * <p>A tiny re-emit guard also coalesces the exact same line delivered twice in
- * quick succession (a single physical event re-sent in the same tick) onto one seq.
+ * <p>An optional tiny re-emit guard also coalesces the exact same line delivered
+ * twice in quick succession onto one seq. Reward tickers disable that guard because
+ * two rapid packets are two authoritative handouts; bank/chat callers retain it.
  */
 public final class OccurrenceSequencer {
 	// The same line re-delivered within this gap is a re-emit, not a new deposit.
 	private static final long REEMIT_GUARD_MS = 200L;
 
 	private final long windowMillis;
+	private final boolean coalesceRapidReemits;
 	private final Map<String, ArrayDeque<Long>> seen = new HashMap<>();
 
 	public OccurrenceSequencer(long windowMillis) {
+		this(windowMillis, true);
+	}
+
+	public OccurrenceSequencer(long windowMillis, boolean coalesceRapidReemits) {
 		this.windowMillis = windowMillis;
+		this.coalesceRapidReemits = coalesceRapidReemits;
 	}
 
 	/** Record an occurrence of {@code signature} and return its index in the window. */
@@ -39,7 +46,7 @@ public final class OccurrenceSequencer {
 		ArrayDeque<Long> times = seen.computeIfAbsent(signature, k -> new ArrayDeque<>());
 		// A near-instant repeat is the same line emitted twice; reuse its index so the
 		// backend dedups it instead of treating it as a second deposit.
-		if (!times.isEmpty() && now - times.peekLast() < REEMIT_GUARD_MS) {
+		if (coalesceRapidReemits && !times.isEmpty() && now - times.peekLast() < REEMIT_GUARD_MS) {
 			return times.size();
 		}
 		times.addLast(now);

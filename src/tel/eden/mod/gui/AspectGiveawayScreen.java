@@ -19,7 +19,7 @@ import tel.eden.mod.reward.GuildRewards;
  * Filter-driven bulk aspect giveaway: flat-gifts a fixed amount of aspects to every
  * current member matching a recency / XP / rank filter, as a way to drain aspect
  * surplus from members who don't claim their own (aspects-blocked members are always
- * excluded). Unlike {@link AspectsPayoutScreen}, targets are computed from filters
+ * excluded). Unlike {@link PayoutScreen}, targets are computed from filters
  * rather than picked row-by-row, so a "Review Gift" step snapshots exactly who will
  * be gifted, the total, and the guild's remaining stock before the Chief commits.
  */
@@ -78,7 +78,7 @@ public final class AspectGiveawayScreen extends EdenReferenceScreen {
 		updateReferenceSpace();
 		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
-		toggleButton = Button.builder(Component.literal("← Payouts"), b -> this.minecraft.setScreen(new AspectsPayoutScreen(parent, mod))).bounds(layout.x(315), layout.y(8), layout.w(90), layout.h(16)).build();
+		toggleButton = Button.builder(Component.literal("← Payouts"), b -> this.minecraft.setScreen(new PayoutScreen(parent, mod))).bounds(layout.x(315), layout.y(8), layout.w(90), layout.h(16)).build();
 
 		hoursField = new EditBox(this.font, layout.x(15), layout.y(40), layout.w(120), layout.h(20), Component.literal("Max hours since seen"));
 		hoursField.setValue(DEFAULT_HOURS);
@@ -211,7 +211,7 @@ public final class AspectGiveawayScreen extends EdenReferenceScreen {
 	// wide enough to survive one missed poll tick (player_last_seen refreshes every
 	// ~60s; see poll_online.py), so an online member is never falsely filtered out.
 	private static final long ONLINE_WINDOW_MS = 120_000L;
-	// Matches GuildRewards/AspectsPayoutScreen's own cooldown: the game refuses to
+	// Matches GuildRewards/PayoutScreen's own cooldown: the game refuses to
 	// gift a member who hasn't been in the guild a week, and GuildRewards.batchRun
 	// rejects a batch outright if even one target is inside it — so a too-new member
 	// must never reach the match list, not just be flagged there.
@@ -220,7 +220,7 @@ public final class AspectGiveawayScreen extends EdenReferenceScreen {
 	/**
 	 * Whether {@code name}'s join date is positively known and inside the cooldown.
 	 * An unknown join date (member list still loading) is treated as eligible rather than
-	 * excluded, matching {@code AspectsPayoutScreen} — the batch's own validation
+	 * excluded, matching {@code PayoutScreen} — the batch's own validation
 	 * catches a genuine too-new member either way.
 	 */
 	private boolean isTooNew(String name) {
@@ -291,7 +291,9 @@ public final class AspectGiveawayScreen extends EdenReferenceScreen {
 		for (GiveawayCandidate c : reviewTargets) {
 			targets.add(new GuildRewards.PayoutTarget(c.name(), reviewAmountEach));
 		}
-		this.minecraft.setScreen(null);
+		GiftProgressScreen progress = new GiftProgressScreen("Aspect Giveaway", mod.guildRewards());
+		mod.guildRewards().setProgressListener(progress);
+		this.minecraft.setScreen(progress);
 		mod.guildRewards().giveaway(targets);
 	}
 

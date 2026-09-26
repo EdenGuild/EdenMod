@@ -1,11 +1,12 @@
 package tel.eden.mod.net;
 
 /**
- * One member's pending-aspect count, from the bot's reply to the in-game
- * {@code /eden aspects pending} request.
+ * One member's pending reward count (aspects or emeralds, depending on which request
+ * this came from — see {@code aspectsPendingReply}/{@code emeraldsPendingReply}), from
+ * the bot's reply to the in-game payout screen.
  *
- * @param name    the member's username
- * @param aspects their pending aspect count
+ * @param name   the member's username
+ * @param amount their pending count, in real (not Liquid Emerald) units for emeralds
  */
-public record PendingEntry(String name, int aspects) {
+public record PendingEntry(String name, int amount) {
 }

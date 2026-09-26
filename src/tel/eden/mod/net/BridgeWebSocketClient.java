@@ -15,6 +15,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import tel.eden.mod.EdenLogger;
+import tel.eden.mod.chat.PlayerNameResolver;
+import tel.eden.mod.guild.GuildLogEvent;
+import tel.eden.mod.guild.GuildManageSnapshot;
 
 /**
  * Raw-WebSocket client to the bridge backend.
@@ -29,6 +32,14 @@ public final class BridgeWebSocketClient {
 	private static final int MAX_BACKOFF_SECONDS = 60;
 	private static final int MAX_SESSION_VERIFY_RETRIES = 3;
 	private static final Pattern SERVER_ID_PATTERN = Pattern.compile("[0-9a-fA-F\\-]{1,128}");
+	/**
+	 * Capability names this build understands. Declared to the server; never
+	 * offered back. Kept as reusable feature-flag infrastructure even when
+	 * empty — do not remove this mechanism just because no flag currently needs
+	 * it (the last one, "guildLogSync", was retired once the server-side code
+	 * that checked for it was removed).
+	 */
+	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of();
 
 	/** Callbacks for inbound bridge events (delivered off the game thread). */
 	public interface MessageSink {
@@ -56,6 +67,9 @@ public final class BridgeWebSocketClient {
 		 * an {@code error} (e.g. not a Chief) when the request was refused.
 		 */
 		void onAspectsPending(java.util.List<PendingEntry> entries, String error, String color);
+
+		/** Emerald counterpart of {@link #onAspectsPending} — real (not Liquid Emerald) units. */
+		void onEmeraldsPending(java.util.List<PendingEntry> entries, String error, String color);
 
 		/**
 		 * Response to an {@code aspectGiveawayRequest}: the whole current member list (the
@@ -105,9 +119,10 @@ public final class BridgeWebSocketClient {
 		 * A pill bridge line (Quick Reactions, {@code /eden cf}/{@code diceroll}, daily
 		 * announcements): a pill labelled {@code label}, then {@code content}.
 		 * {@code colorHex} is an optional {@code "RRGGBB"} override; empty means the
-		 * default gold.
+		 * default gold. {@code bold} makes a message that needs to stand out further
+		 * than color alone (e.g. the storage-nearly-full warning).
 		 */
-		void onPillMessage(String label, String content, String colorHex);
+		void onPillMessage(String label, String content, String colorHex, boolean bold);
 
 		/**
 		 * Response to a {@code warCountsRequest}: per-member war counts over the last
@@ -276,6 +291,39 @@ public final class BridgeWebSocketClient {
 		return true;
 	}
 
+	/** Report one typed root Guild Manage snapshot — season/weekly/territory status, surfaced on "Eden Standings". */
+	public void sendGuildManageStatus(GuildManageSnapshot snapshot) {
+		WebSocket current = socket;
+		if (current == null || snapshot == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "guildManageStatus");
+		obj.addProperty("version", 1);
+		if (snapshot.seasonNumber() != null) {
+			obj.addProperty("seasonNumber", snapshot.seasonNumber());
+		}
+		if (snapshot.seasonEndsIn() != null) {
+			obj.addProperty("seasonEndsIn", snapshot.seasonEndsIn());
+		}
+		if (snapshot.seasonRating() != null) {
+			obj.addProperty("seasonRating", snapshot.seasonRating());
+		}
+		if (snapshot.seasonPosition() != null) {
+			obj.addProperty("seasonPosition", snapshot.seasonPosition());
+		}
+		if (snapshot.weeklyCompleted() != null) {
+			obj.addProperty("weeklyCompleted", snapshot.weeklyCompleted());
+		}
+		if (snapshot.weeklyGoal() != null) {
+			obj.addProperty("weeklyGoal", snapshot.weeklyGoal());
+		}
+		if (snapshot.territoryCount() != null) {
+			obj.addProperty("territoryCount", snapshot.territoryCount());
+		}
+		enqueueSend(current, obj.toString());
+	}
+
 	/**
 	 * Report a raid completion. {@code extraPlayers} is a ranked shortlist of players seen
 	 * around this client during the raid that the announcement did not name — candidates
@@ -340,6 +388,11 @@ public final class BridgeWebSocketClient {
 		sendType("aspectsPendingRequest");
 	}
 
+	/** Ask the backend for each member's pending emeralds (Chiefs only). */
+	public void sendEmeraldsPendingRequest() {
+		sendType("emeraldsPendingRequest");
+	}
+
 	/** Ask the backend for the member list + aspect stock for the giveaway screen (Chiefs only). */
 	public void sendAspectGiveawayRequest() {
 		sendType("aspectGiveawayRequest");
@@ -347,13 +400,13 @@ public final class BridgeWebSocketClient {
 
 	/**
 	 * Ask the backend to deduct {@code amount} pending rewards from {@code target}
-	 * after an in-game payout (Chiefs only; the backend authorises by this connection's
+	 * as a deliberate manual correction (Chiefs only; the backend authorises by this connection's
 	 * verified guild rank, established at the {@code /ws/v2} handshake). The amount
 	 * is in the same display units the Discord side shows, not internal sub-units.
 	 * Returns false when the socket is down (mid-reconnect included), so the caller can
 	 * offer the manual route instead of waiting for a reply that will never come.
 	 */
-	public boolean sendRewardDeductRequest(String rewardKind, String target, int amount) {
+	public boolean sendRewardDeductRequest(String rewardKind, String target, int amount, boolean manual) {
 		WebSocket current = socket;
 		if (current == null) {
 			return false;
@@ -363,6 +416,9 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("rewardKind", rewardKind);
 		obj.addProperty("target", target);
 		obj.addProperty("amount", amount);
+		if (manual) {
+			obj.addProperty("source", "manual");
+		}
 		enqueueSend(current, obj.toString());
 		return true;
 	}
@@ -585,8 +641,6 @@ public final class BridgeWebSocketClient {
 	/**
 	 * Tell the server whether this client is active in a game world ({@code true})
 	 * or dormant (in queue, hub, or AFK with no recent guild activity — {@code false}).
-	 * The server uses this to compute the consensus quorum without counting clients
-	 * that cannot see guild chat.
 	 */
 	public void sendPresence(boolean active) {
 		WebSocket current = socket;
@@ -701,18 +755,95 @@ public final class BridgeWebSocketClient {
 		enqueueSend(current, obj.toString());
 	}
 
-	/** Send the authoritative handout count for a completed {@code /gift} run. */
-	public void sendGuildRewardSummary(String giver, String receiver, String reward, int count) {
+	/**
+	 * Send a bounded, typed Guild Log snapshot for the (currently dormant) bank
+	 * fallback path. Raw menu lore never leaves the client; raids intentionally
+	 * remain local until their reconciliation rules are designed separately.
+	 * Reward rows are still encoded below (the backend simply doesn't act on them
+	 * — see WebSocketRelay._on_guild_log_snapshot) rather than filtered here, so
+	 * this stays a faithful, general-purpose snapshot of what the mod actually saw.
+	 */
+	public void sendGuildLogSnapshot(String category, java.util.List<GuildLogEvent> events) {
 		WebSocket current = socket;
-		if (current == null) {
+		String source = switch (category) {
+			case "General" -> "general";
+			case "Public Bank" -> "publicBank";
+			case "High Ranked Bank" -> "highRankedBank";
+			default -> null;
+		};
+		if (current == null || source == null) {
+			return;
+		}
+		JsonArray encoded = new JsonArray();
+		for (GuildLogEvent event : events) {
+			JsonObject entry = new JsonObject();
+			if (event instanceof GuildLogEvent.Reward reward) {
+				// Guild Log lore carries no hover data, so an unresolved name here is a
+				// player never seen in chat and not currently colocated — better to omit
+				// the reconciliation data point than send a raw nickname the backend can't
+				// act on (it would fail the username lookup and silently no-op).
+				java.util.Optional<String> giver = PlayerNameResolver.resolveKnown(reward.giver());
+				java.util.Optional<String> receiver = PlayerNameResolver.resolveKnown(reward.receiver());
+				if (giver.isEmpty() || receiver.isEmpty()) {
+					continue;
+				}
+				entry.addProperty("kind", "reward");
+				entry.addProperty("occurredAt", reward.occurredAt());
+				entry.addProperty("giver", giver.get());
+				entry.addProperty("receiver", receiver.get());
+				entry.addProperty("reward", reward.kind());
+				entry.addProperty("amount", reward.amount());
+			} else if (event instanceof GuildLogEvent.Bank bank) {
+				java.util.Optional<String> player = PlayerNameResolver.resolveKnown(bank.actor());
+				if (player.isEmpty()) {
+					continue;
+				}
+				entry.addProperty("kind", "bank");
+				entry.addProperty("occurredAt", bank.occurredAt());
+				entry.addProperty("player", player.get());
+				entry.addProperty("action", bank.action());
+				if (bank.quantity() != null) {
+					entry.addProperty("quantity", bank.quantity());
+				}
+				entry.addProperty("item", bank.item());
+				if (bank.charges() != null) {
+					entry.addProperty("charges", bank.charges());
+				}
+				entry.addProperty("accessTier", bank.accessTier());
+			} else if (event instanceof GuildLogEvent.Raid raid) {
+				entry.addProperty("kind", "raid");
+				entry.addProperty("occurredAt", raid.occurredAt());
+				JsonArray participants = new JsonArray();
+				for (String participant : raid.participants()) {
+					participants.add(PlayerNameResolver.canonicalize(participant));
+				}
+				entry.add("participants", participants);
+				entry.addProperty("raid", raid.raid());
+				if (raid.aspects() != null) {
+					entry.addProperty("aspects", raid.aspects());
+				}
+				if (raid.emeralds() != null) {
+					entry.addProperty("emeralds", raid.emeralds());
+				}
+				if (raid.guildExperienceMillions() != null) {
+					entry.addProperty("guildExperienceMillions", raid.guildExperienceMillions());
+				}
+				if (raid.seasonalRating() != null) {
+					entry.addProperty("seasonalRating", raid.seasonalRating());
+				}
+			} else {
+				continue;
+			}
+			encoded.add(entry);
+		}
+		if (encoded.isEmpty()) {
 			return;
 		}
 		JsonObject obj = new JsonObject();
-		obj.addProperty("type", "guildRewardSummary");
-		obj.addProperty("giver", giver);
-		obj.addProperty("receiver", receiver);
-		obj.addProperty("reward", reward);
-		obj.addProperty("count", count);
+		obj.addProperty("type", "guildLogSnapshot");
+		obj.addProperty("version", 1);
+		obj.addProperty("source", source);
+		obj.add("events", encoded);
 		enqueueSend(current, obj.toString());
 	}
 
@@ -882,7 +1013,8 @@ public final class BridgeWebSocketClient {
 				case "loginNotice" -> sink.onLoginNotice(get(obj, "username"), get(obj, "color"));
 				case "logoutNotice" -> sink.onLogoutNotice(get(obj, "username"), get(obj, "color"));
 				case "onlineList" -> sink.onOnlineList(getStringArray(obj, "users"), get(obj, "color"));
-				case "aspectsPendingReply" -> sink.onAspectsPending(parsePendingEntries(obj), get(obj, "error"), get(obj, "color"));
+				case "aspectsPendingReply" -> sink.onAspectsPending(parsePendingEntries(obj, "aspects"), get(obj, "error"), get(obj, "color"));
+				case "emeraldsPendingReply" -> sink.onEmeraldsPending(parsePendingEntries(obj, "emeralds"), get(obj, "error"), get(obj, "color"));
 				case "aspectGiveawayReply" -> sink.onAspectGiveaway(parseGiveawayCandidates(obj), getInt(obj, "storageAspects", 0), get(obj, "error"), get(obj, "color"));
 				case "rewardDeductReply" -> sink.onRewardDeductReply(get(obj, "target"), get(obj, "rewardKind"), getInt(obj, "amount", 0), getInt(obj, "remaining", 0), get(obj, "error"), get(obj, "color"));
 				case "giftLockReply" -> sink.onGiftLockReply(getBool(obj, "granted"), get(obj, "error"), get(obj, "holder"), getInt(obj, "retryAfterSeconds", 0));
@@ -890,7 +1022,7 @@ public final class BridgeWebSocketClient {
 				case "partyListReply" -> sink.onPartyList(parsePartyList(obj), get(obj, "color"));
 				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"), get(obj, "color"));
 				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
-				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"));
+				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"));
 				case "warCountsReply" -> sink.onWarCounts(getInt(obj, "days", 7), parseWarCounts(obj), get(obj, "requester"), get(obj, "color"));
 				case "warBoard" -> sink.onWarBoard(parseWarBoard(obj));
 				case "authChallenge" -> handleAuthChallenge(get(obj, "serverId"));
@@ -964,6 +1096,18 @@ public final class BridgeWebSocketClient {
 				JsonObject obj = new JsonObject();
 				obj.addProperty("type", "authResponse");
 				obj.addProperty("username", username);
+				// Capability self-declaration — a flat, static list of whatever this
+				// jar was compiled with, regardless of what the server does with it —
+				// rides on this, the very first message the mod ever sends, so the
+				// server can log it in the same "Mod connected" line instead of a
+				// separately-timed one from its own message. The server never
+				// announces anything back; it alone decides which declared names it
+				// actually trusts and acts on.
+				JsonArray supported = new JsonArray();
+				for (String feature : SUPPORTED_FEATURES) {
+					supported.add(feature);
+				}
+				obj.add("supported", supported);
 				enqueueSend(current, obj.toString());
 			} catch (Exception e) {
 				LOGGER.warn("Mojang session join failed: {}", e.toString());
@@ -1062,13 +1206,13 @@ public final class BridgeWebSocketClient {
 		return out;
 	}
 
-	private static java.util.List<PendingEntry> parsePendingEntries(JsonObject obj) {
+	private static java.util.List<PendingEntry> parsePendingEntries(JsonObject obj, String amountKey) {
 		java.util.List<PendingEntry> out = new java.util.ArrayList<>();
 		if (obj.has("members") && obj.get("members").isJsonArray()) {
 			for (var element : obj.get("members").getAsJsonArray()) {
 				if (element.isJsonObject()) {
 					JsonObject member = element.getAsJsonObject();
-					out.add(new PendingEntry(get(member, "name"), getInt(member, "aspects", 0)));
+					out.add(new PendingEntry(get(member, "name"), getInt(member, amountKey, 0)));
 				}
 			}
 		}

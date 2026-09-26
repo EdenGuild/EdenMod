@@ -16,6 +16,7 @@ import tel.eden.mod.chat.GuildEventParser;
 import tel.eden.mod.chat.GuildLevelUpParser;
 import tel.eden.mod.chat.GuildReward;
 import tel.eden.mod.chat.GuildRewardParser;
+import tel.eden.mod.chat.RewardUnavailableParser;
 import tel.eden.mod.chat.LevelUp;
 import tel.eden.mod.chat.LevelUpParser;
 import tel.eden.mod.chat.OccurrenceSequencer;
@@ -27,6 +28,10 @@ import tel.eden.mod.chat.RankChange;
 import tel.eden.mod.chat.RankChangeParser;
 import tel.eden.mod.chat.ShoutParser;
 import tel.eden.mod.config.BridgeConfig;
+import tel.eden.mod.guild.GuildLogSync;
+import tel.eden.mod.guild.GuildMenuScraper;
+import tel.eden.mod.guild.GuildRewardStorageSnapshot;
+import tel.eden.mod.guild.BackgroundContainerSession;
 import tel.eden.mod.gui.BridgeConfigScreen;
 import tel.eden.mod.gui.CommandAliasScreen;
 import tel.eden.mod.gui.CommandKeybindScreen;
@@ -97,6 +102,9 @@ import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
@@ -149,12 +157,16 @@ public final class EdenModClient implements ClientModInitializer {
 	private final OccurrenceSequencer bankSeq = new OccurrenceSequencer(10_000L);
 	// Rewards are gifted in long runs (one line per item, ~600ms apart), so use a
 	// wider window than bank events to keep a whole run's seqs monotonic for counting.
-	private final OccurrenceSequencer rewardSeq = new OccurrenceSequencer(60_000L);
+	// Reward ticker packets are authoritative individual handouts. Unlike bank lines,
+	// never coalesce two that arrive within 200 ms: rapid legitimate gifts must both count.
+	private final OccurrenceSequencer rewardSeq = new OccurrenceSequencer(60_000L, false);
 	// Guild-chat occurrence index: lets the backend distinguish a line legitimately
 	// repeated (e.g. "d" then "d") from the same line relayed by multiple online
 	// members' clients, which is clock-/arrival-skew independent (order, not time).
 	private final OccurrenceSequencer chatSeq = new OccurrenceSequencer(15_000L);
-	private final GuildRewards guildRewards = new GuildRewards();
+	private final BackgroundContainerSession backgroundContainers = new BackgroundContainerSession();
+	private final GuildRewards guildRewards = new GuildRewards(backgroundContainers);
+	private final GuildLogSync guildLogSync = new GuildLogSync(backgroundContainers);
 	private final List<TrackedCommandKeybind> trackedCommandKeybinds = new ArrayList<>();
 	private KeyMapping openConfigKey;
 	private KeyMapping createPartyKey;
@@ -213,7 +225,7 @@ public final class EdenModClient implements ClientModInitializer {
 	// thread. Each change publishes one immutable snapshot through this volatile field,
 	// so readers cannot observe the remove/add or clear/addAll halves of an update.
 	private volatile java.util.List<PartyInfo> knownParties = java.util.List.of();
-	// Latest aspects-owed list from the backend, read by AspectsPayoutScreen on the
+	// Latest aspects-owed list from the backend, read by PayoutScreen on the
 	// render thread. Each reply replaces the whole list, so publishing an immutable
 	// one through a volatile field keeps readers from ever seeing a half-applied
 	// update. The generation counter lets the screen tell "no reply yet" apart from
@@ -224,6 +236,11 @@ public final class EdenModClient implements ClientModInitializer {
 	// replies would leave a reader's cached generation matching the live one, and
 	// it would sit on a stale list believing it was current.
 	private final java.util.concurrent.atomic.AtomicInteger pendingAspectsGeneration = new java.util.concurrent.atomic.AtomicInteger();
+	// Emerald counterpart of the pending-aspects trio above, same shape, read by the
+	// same PayoutScreen when its mode toggle is on Emeralds.
+	private volatile java.util.List<PendingEntry> knownPendingEmeralds = java.util.List.of();
+	private volatile String pendingEmeraldsError;
+	private final java.util.concurrent.atomic.AtomicInteger pendingEmeraldsGeneration = new java.util.concurrent.atomic.AtomicInteger();
 	// Same shape as the pending-aspects trio above, for AspectGiveawayScreen's member list.
 	private volatile java.util.List<GiveawayCandidate> knownGiveawayCandidates = java.util.List.of();
 	private volatile int giveawayStorageAspects;
@@ -283,6 +300,9 @@ public final class EdenModClient implements ClientModInitializer {
 	// selection screen). False while in queue, on the title screen, or AFK-queued.
 	// Set by welcome-message detection and a periodic tab-list check; cleared on disconnect.
 	private volatile boolean inGameWorld = false;
+	// /class selection has a Wynncraft tab list too, but commands such as /gu log are
+	// unavailable until the selected class has entered an actual game world.
+	private volatile boolean enteredWynnGameWorld;
 	// Tick counters for the periodic tab check and presence heartbeat.
 	private int tabCheckTick = 0;
 	private int presenceTick = 0;
@@ -290,6 +310,16 @@ public final class EdenModClient implements ClientModInitializer {
 	private static final int TAB_CHECK_INTERVAL_TICKS = 60; // 3 s at 20 tps
 	private static final int PRESENCE_INTERVAL_TICKS = 600; // 30 s at 20 tps
 	private static final int STORAGE_CHECK_INTERVAL_TICKS = 10; // 0.5 s at 20 tps
+	// Paused pending Wynncraft moderator confirmation of what's allowed for
+	// unattended background menu reads — GuildLogSync.tick()'s autonomous periodic
+	// pass opens /gu man and /gu log invisibly with no player action behind it.
+	// GiftProgressScreen-protected reads (the pre-gift baseline and post-gift
+	// confirmation, both Chief-triggered and screen-blocked for their whole
+	// duration) are a separate mechanism and are unaffected by this flag. Also
+	// gated on isChief() below — the backend only trusts/acts on a Chief's own
+	// report anyway (no more consensus from any member), so a non-Chief running
+	// this scan would just be wasted background container work.
+	private static final boolean BACKGROUND_SYNC_ENABLED = false;
 	// Last {aspects, tomes, emeralds} relayed, so an unchanged read isn't re-sent.
 	private volatile long[] lastStorageSent = null;
 
@@ -375,6 +405,11 @@ public final class EdenModClient implements ClientModInitializer {
 		return knownPendingAspects;
 	}
 
+	/** Members owed emeralds, highest first, as of the last backend reply. */
+	public java.util.List<PendingEntry> knownPendingEmeralds() {
+		return knownPendingEmeralds;
+	}
+
 	private boolean shouldAllowGameplayEmotePickerOpen() {
 		if (!config.emotePickerOpenFromGameplay) {
 			return false;
@@ -398,6 +433,11 @@ public final class EdenModClient implements ClientModInitializer {
 		return pendingAspectsError;
 	}
 
+	/** Emerald counterpart of {@link #pendingAspectsError()}. */
+	public String pendingEmeraldsError() {
+		return pendingEmeraldsError;
+	}
+
 	/**
 	 * Bumped on every aspects-pending reply; 0 means none has arrived yet.
 	 *
@@ -407,6 +447,11 @@ public final class EdenModClient implements ClientModInitializer {
 	 */
 	public int pendingAspectsGeneration() {
 		return pendingAspectsGeneration.get();
+	}
+
+	/** Emerald counterpart of {@link #pendingAspectsGeneration()}. */
+	public int pendingEmeraldsGeneration() {
+		return pendingEmeraldsGeneration.get();
 	}
 
 	/** The current guild members for the aspect-giveaway screen, as of the last reply. */
@@ -434,26 +479,85 @@ public final class EdenModClient implements ClientModInitializer {
 		return guildRewards;
 	}
 
+	/** The Guild Log/Manage sync session, whose report methods a foreground scraper reuses. */
+	public GuildLogSync guildLogSync() {
+		return guildLogSync;
+	}
+
+	/** Packet hooks for the invisible guild-log query (mirrors Wynntils' query path). */
+	public boolean onGuildLogOpenScreen(ClientboundOpenScreenPacket packet) {
+		return guildLogSync.onOpenScreen(packet);
+	}
+
+	public boolean onGuildLogContent(int containerId, int stateId, List<net.minecraft.world.item.ItemStack> items) {
+		return guildLogSync.onContainerContent(containerId, stateId, items);
+	}
+
+	public boolean onGuildLogSlot(int containerId, int stateId, int slot, net.minecraft.world.item.ItemStack item) {
+		return guildLogSync.onContainerSlot(containerId, stateId, slot, item);
+	}
+
+	public void onGuildLogContainerClosed(int containerId) {
+		guildLogSync.onContainerClosed(containerId);
+	}
+
+	/** Suppress only the packet sound produced by Eden-owned hidden menu clicks. */
+	public boolean shouldMuteBackgroundMenuClick(SoundEvent sound, SoundSource source) {
+		return backgroundContainers.shouldMuteMenuClick(sound, source);
+	}
+
 	@Override
 	public void onInitializeClient() {
 		instance = this;
 		config = BridgeConfig.load();
 		refreshCommandKeybinds();
 
-		// Report the exact count of each completed /eden gift run to the backend, so the
-		// reward log shows the real total instead of a count inferred from chat.
-		guildRewards.setReporter((receiver, type, count) -> {
-			BridgeWebSocketClient current = socket;
-			if (current != null) {
-				current.sendGuildRewardSummary(playerName(), receiver, type.unitReward(), count);
-			}
-		});
 		// Relay the guild's live reward storage to the backend counter: the exact value
 		// after a gift run, and (in onClientTick) whenever a Chief opens the menu.
 		guildRewards.setStorageReporter(this::relayStorage);
-		// Deduct what was just paid out from the backend's pending balance, so a payout
-		// no longer has to be followed by a /manage reset on Discord.
-		guildRewards.setDeductReporter(this::onRewardHandedOut);
+		// The in-game full-storage nudge now lives server-side as a chat warning
+		// (storage_fullness_alert_tick), so this only needs to forward the counts.
+		guildLogSync.setStorageReporter(storage -> relayStorage(storage.aspects(), storage.tomes(), storage.emeralds()));
+		guildLogSync.setManageReporter(snapshot -> {
+			BridgeWebSocketClient current = socket;
+			if (current != null) {
+				current.sendGuildManageStatus(snapshot);
+			}
+		});
+		// The bounded Guild Log menu supplies reconciliation evidence only. Its typed
+		// reward/bank rows are sent without raw lore; immediate chat/ticker reporting
+		// remains the live path until production reconciliation proves itself.
+		guildLogSync.setReporter((category, entries) -> {
+			BridgeWebSocketClient current = socket;
+			if (current == null) {
+				return;
+			}
+			current.sendGuildLogSnapshot(category, entries.stream().map(tel.eden.mod.guild.GuildLogEventParser::parse).flatMap(Optional::stream).toList());
+		});
+		guildRewards.setPostGiftReconciler(guildLogSync::requestSoon);
+		guildRewards.setPreGiftEvidenceSupplier(() -> {
+			try {
+				return guildLogSync.reconcileNow().get(20, TimeUnit.SECONDS);
+			} catch (Exception e) {
+				throw new IllegalStateException("Guild Log baseline unavailable", e);
+			}
+		});
+		guildRewards.setPostGiftEvidenceSupplier(() -> {
+			try {
+				// GuildLogSync itself retries internally for up to 20s (Wynncraft's log
+				// can lag behind a just-completed payout) — this outer bound just needs
+				// margin over that plus per-attempt scan overhead, not to race it.
+				return guildLogSync.reconcileAfterBaseline().get(45, TimeUnit.SECONDS);
+			} catch (Exception e) {
+				throw new IllegalStateException("Guild Log reconciliation unavailable", e);
+			}
+		});
+		guildRewards.setRewardDeductSender((rewardKind, target, amount) -> {
+			BridgeWebSocketClient current = socket;
+			if (current != null) {
+				current.sendRewardDeductRequest(rewardKind, target, amount, false);
+			}
+		});
 		// Exclusive use of the gifting automation, coordinated through the bridge so two
 		// Chiefs' mods can never drive the guild-manage menu at the same time.
 		guildRewards.setGiftLockGateway(new GuildRewards.GiftLockGateway() {
@@ -511,6 +615,8 @@ public final class EdenModClient implements ClientModInitializer {
 		});
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+			enteredWynnGameWorld = false;
+			guildLogSync.onWorldJoin();
 			partyCommandGeneration.incrementAndGet();
 			loginPending = true;
 			// Fresh connection: drop the packet-captured scoreboard and all war-board state
@@ -518,6 +624,7 @@ public final class EdenModClient implements ClientModInitializer {
 			ScoreboardCapture.reset();
 			RaidPartyTracker.reset();
 			AllianceMenuScraper.reset();
+			GuildMenuScraper.reset();
 			AttackTimerMenu.reset();
 			// Connect if applicable; the backend reports link/membership standing via
 			// authOk (handleAuthStatus), which drives any "please link" prompt.
@@ -609,6 +716,7 @@ public final class EdenModClient implements ClientModInitializer {
 			RaidPartyTracker.onTick();
 			AttackMenuScraper.onTick(client);
 			AllianceMenuScraper.onTick(client);
+			GuildMenuScraper.onTick(client);
 			AttackTimerMenu.onTick(socket);
 			tel.eden.mod.emote.EmoteWheel.onTick(client);
 			tel.eden.mod.emote.UnlockedEmoteDetector.onTick(client);
@@ -710,6 +818,7 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 			}
 		}
+		guildLogSync.tick(BACKGROUND_SYNC_ENABLED && onWynncraft && enteredWynnGameWorld && !guildRewards.isGiftInProgress() && guildRewards.isChief());
 	}
 
 	/** Relay a guild reward-storage snapshot over the bridge, skipping unchanged values. */
@@ -772,15 +881,24 @@ public final class EdenModClient implements ClientModInitializer {
 
 				@Override
 				public void onAspectsPending(java.util.List<PendingEntry> entries, String error, String color) {
-					// Rendered by AspectsPayoutScreen rather than chat; sort here so every
+					// Rendered by PayoutScreen rather than chat; sort here so every
 					// reader sees the biggest debts first.
 					java.util.List<PendingEntry> sorted = new ArrayList<>(entries);
-					sorted.sort(java.util.Comparator.comparingInt(PendingEntry::aspects).reversed());
+					sorted.sort(java.util.Comparator.comparingInt(PendingEntry::amount).reversed());
 					// Generation last: it is the reader's signal that the other two
 					// fields are the ones belonging to this reply.
 					knownPendingAspects = java.util.List.copyOf(sorted);
 					pendingAspectsError = (error == null || error.isEmpty()) ? null : error;
 					pendingAspectsGeneration.incrementAndGet();
+				}
+
+				@Override
+				public void onEmeraldsPending(java.util.List<PendingEntry> entries, String error, String color) {
+					java.util.List<PendingEntry> sorted = new ArrayList<>(entries);
+					sorted.sort(java.util.Comparator.comparingInt(PendingEntry::amount).reversed());
+					knownPendingEmeralds = java.util.List.copyOf(sorted);
+					pendingEmeraldsError = (error == null || error.isEmpty()) ? null : error;
+					pendingEmeraldsGeneration.incrementAndGet();
 				}
 
 				@Override
@@ -812,9 +930,14 @@ public final class EdenModClient implements ClientModInitializer {
 					}
 					// Claim by target rather than by position: a reply that goes missing
 					// then costs one stale entry instead of shifting every later reply onto
-					// the wrong player.
-					claimPendingDeduct(target, rewardKind);
-					displayColoredDirect(color, () -> DiscordChatFormatter.systemLine("Confirmed " + amount + " " + rewardKind + " deduction for " + target + " — " + remaining + " remaining.", ChatFormatting.GREEN));
+					// the wrong player. Only a manual /rewardDeduct queues an entry here, so
+					// this also tells us whether to confirm in chat: an automatic payout
+					// already gets one summary line from the batch itself, so a
+					// "Confirmed ... remaining" line per member on top of that is just noise.
+					boolean wasManualRequest = claimPendingDeduct(target, rewardKind);
+					if (wasManualRequest) {
+						displayColoredDirect(color, () -> DiscordChatFormatter.systemLine("Confirmed " + amount + " " + rewardKind + " deduction for " + target + " — " + remaining + " remaining.", ChatFormatting.GREEN));
+					}
 				}
 
 				@Override
@@ -887,7 +1010,7 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onPillMessage(String label, String content, String colorHex) {
+				public void onPillMessage(String label, String content, String colorHex, boolean bold) {
 					if (GAMES_PILL_LABEL.equals(label) && config.gameDisplayMode != BridgeConfig.GameDisplayMode.ALL) {
 						// React Only still shows your own coinflip/diceroll result; every
 						// other "eden"-labelled message (streaks, gambit resets, reward
@@ -909,7 +1032,7 @@ public final class EdenModClient implements ClientModInitializer {
 						}
 					}
 					Integer finalColorRgb = colorRgb;
-					display(() -> DiscordChatFormatter.pill(label, content, finalColorRgb));
+					display(() -> DiscordChatFormatter.pill(label, content, finalColorRgb, bold));
 				}
 
 				@Override
@@ -1083,7 +1206,7 @@ public final class EdenModClient implements ClientModInitializer {
 		// screen itself issues the backend request from its init().
 		guildRewards.ensureFresh(playerName());
 		Minecraft mc = Minecraft.getInstance();
-		mc.execute(() -> mc.setScreen(new tel.eden.mod.gui.AspectsPayoutScreen(mc.screen, this)));
+		mc.execute(() -> mc.setScreen(new tel.eden.mod.gui.PayoutScreen(mc.screen, this)));
 	}
 
 	/** Build {@code /eden gift <member> <aspect|emerald|tome> <amount>} (Chiefs only). */
@@ -1138,6 +1261,7 @@ public final class EdenModClient implements ClientModInitializer {
 		if (!ensureRewardsReady(source)) {
 			return 0;
 		}
+		showGiftProgress(type.name().charAt(0) + type.name().substring(1).toLowerCase(java.util.Locale.ROOT) + " Gift");
 		guildRewards.gift(member, type, amount);
 		return 1;
 	}
@@ -1146,32 +1270,31 @@ public final class EdenModClient implements ClientModInitializer {
 		if (!ensureRewardsReady(source)) {
 			return 0;
 		}
+		showGiftProgress("Emerald Dump");
 		guildRewards.dumpEmeralds(member);
 		return 1;
 	}
 
-	/**
-	 * A reward with a pending balance was just handed out in-game. Batch payouts deduct
-	 * it straight away; single gifts offer the deduction as a clickable command, since a
-	 * gift isn't necessarily paying off what the member is owed.
-	 *
-	 * <p>Runs on the GuildRewards worker thread.
-	 */
-	private void onRewardHandedOut(String receiver, String rewardKind, int displayUnits, boolean autoDeduct) {
-		if (displayUnits <= 0) {
-			// An emerald handout that doesn't fill whole display units; the backend can't
-			// take a fraction of one, so this still has to be settled by hand.
-			displayDirect(() -> GuildRewards.manageResetFallbackLine(rewardKind, receiver, displayUnits));
-			return;
-		}
-		if (autoDeduct) {
-			sendDeduct(rewardKind, receiver, displayUnits);
-		} else {
-			displayDirect(() -> DiscordChatFormatter.deductOffer(rewardKind, receiver, displayUnits));
-		}
+	/** Show the blocking gift-progress screen and attach it as the run's listener, before submitting the run. */
+	private void showGiftProgress(String title) {
+		Minecraft mc = Minecraft.getInstance();
+		tel.eden.mod.gui.GiftProgressScreen progress = new tel.eden.mod.gui.GiftProgressScreen(title, guildRewards);
+		guildRewards.setProgressListener(progress);
+		// Deferred, not immediate: this runs from inside chat command dispatch, which
+		// itself is inside ChatScreen's own send-and-close handling — a same-tick
+		// setScreen() here loses the race against that close and gets silently
+		// overwritten back to null (see requestAspectsPending for the same pattern).
+		// isDone() guards the (unlikely but possible) case of an extremely fast run
+		// already finishing before this deferred call runs — see GiftProgressScreen's
+		// own isDone() doc for why that would otherwise leave the screen stuck open.
+		mc.execute(() -> {
+			if (!progress.isDone()) {
+				mc.setScreen(progress);
+			}
+		});
 	}
 
-	/** Send one deduct request, falling back to the manual command when offline. */
+	/** Send one deliberate manual deduction request, falling back to chat guidance when offline. */
 	private void sendDeduct(String rewardKind, String target, int displayUnits) {
 		BridgeWebSocketClient current = socket;
 		PendingDeduct entry = new PendingDeduct(rewardKind, target, displayUnits);
@@ -1181,7 +1304,7 @@ public final class EdenModClient implements ClientModInitializer {
 		// A live client whose socket is mid-reconnect drops the send silently, so an
 		// unsent request must not be left outstanding — it would be answered by some
 		// later request's reply.
-		if (current == null || !current.sendRewardDeductRequest(rewardKind, target, displayUnits)) {
+		if (current == null || !current.sendRewardDeductRequest(rewardKind, target, displayUnits, true)) {
 			pendingDeducts.remove(entry);
 			displayDirect(() -> DiscordChatFormatter.systemLine("Not connected to the bridge — deduct " + target + "'s " + displayUnits + " pending " + rewardKind + " by hand:", ChatFormatting.RED));
 			displayDirect(() -> GuildRewards.manageResetFallbackLine(rewardKind, target, displayUnits));
@@ -1193,14 +1316,19 @@ public final class EdenModClient implements ClientModInitializer {
 		displayDirect(() -> DiscordChatFormatter.systemLine("Sent deduction of " + displayUnits + " " + rewardKind + " for " + target + "...", ChatFormatting.GOLD));
 	}
 
-	/** Remove the outstanding request a successful reply answers, if still queued. */
-	private void claimPendingDeduct(String target, String rewardKind) {
+	/**
+	 * Remove the outstanding request a successful reply answers, if still queued.
+	 * Returns whether one was found — only a manual /rewardDeduct ever queues an
+	 * entry (see sendDeduct), so this doubles as "was this reply to a manual request".
+	 */
+	private boolean claimPendingDeduct(String target, String rewardKind) {
 		for (PendingDeduct entry : pendingDeducts) {
 			if (entry.target().equalsIgnoreCase(target) && entry.rewardKind().equals(rewardKind)) {
 				pendingDeducts.remove(entry);
-				return;
+				return true;
 			}
 		}
+		return false;
 	}
 
 	/** Gate the reward commands to Wynncraft and ensure the member list is loaded. */
@@ -1521,6 +1649,35 @@ public final class EdenModClient implements ClientModInitializer {
 			changed = true;
 		}
 		return changed ? resolved : null;
+	}
+
+	/** Observe the player's /class aliases before their server command is sent. */
+	public void onOutgoingCommand(String commandLine) {
+		String normalized = normalizeCommandInput(commandLine);
+		if (normalized == null) {
+			return;
+		}
+		String command = normalized.split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
+		if (command.equals("class") || command.equals("char") || command.equals("characters")) {
+			onCharacterSelection();
+		}
+	}
+
+	/** Wynncraft's character-selection action bar is present with or without Wynntils. */
+	public void handleWynncraftActionBar(Component actionBar) {
+		if (!onWynncraft || actionBar == null) {
+			return;
+		}
+		String text = actionBar.getString();
+		if (text.contains("Left-Click to play") && text.contains("Right-Click to switch")) {
+			onCharacterSelection();
+		}
+	}
+
+	private void onCharacterSelection() {
+		enteredWynnGameWorld = false;
+		guildLogSync.onWorldTransition();
+		setInGameWorld(false);
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> raidLiteral(String alias, String raid) {
@@ -2044,6 +2201,7 @@ public final class EdenModClient implements ClientModInitializer {
 		liveGuildRank = "";
 		liveDiscordRank = "";
 		inGameWorld = false;
+		enteredWynnGameWorld = false;
 		tabCheckTick = 0;
 		presenceTick = 0;
 		pendingConnectionCode = null;
@@ -2064,12 +2222,29 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 	}
 
-	/** Called from the chat-capture mixin for every system-chat component. */
+	/**
+	 * Feed reward success/rejection packets into the gift driver. Called for both normal
+	 * system chat and overlay/ticker packets, independently of bridge connectivity.
+	 */
+	public void handleRewardFeedback(Component message) {
+		if (!onWynncraft) {
+			return;
+		}
+		if (RewardUnavailableParser.matches(message)) {
+			guildRewards.onRewardUnavailable();
+			return;
+		}
+		if (RewardUnavailableParser.isOutOfStock(message)) {
+			guildRewards.onRewardOutOfStock();
+			return;
+		}
+		GuildRewardParser.parse(message).ifPresent(guildRewards::onConfirmedReward);
+	}
+
 	/**
 	 * Run Wynncraft's {@code /stream} for the auto-stream option.
 	 *
-	 * <p>Must be called on the client thread: the connection is owned there, while the
-	 * greeting that triggers this arrives on the netty thread.
+	 * <p>Must be called on the client thread, where the connection is owned.
 	 */
 	private static void sendStreamCommand() {
 		var connection = Minecraft.getInstance().getConnection();
@@ -2078,16 +2253,16 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 	}
 
+	/** Called from the chat-capture mixin for every non-overlay system-chat component. */
 	public void handleSystemChat(Component message) {
+		handleRewardFeedback(message);
 		// A real chat line breaks any in-progress Discord emblem block, so the next
 		// relayed Discord message starts with a fresh shield (like guild chat).
 		DiscordChatFormatter.onServerChatLine();
 		if (onWynncraft) {
 			// War chat cues (start countdown → attendance capture; end → HUD summary)
-			// work even while the bridge socket is down. handleSystemChat runs on the netty
-			// network thread (see ClientPacketListenerMixin), but the war subsystem's state
-			// is otherwise only touched on the client thread (tick + render), so marshal
-			// these onto it to avoid racing that state.
+			// work even while the bridge socket is down. Keep these deferred until after
+			// this packet handler returns, alongside the rest of the client-tick state.
 			String warLine = message.getString();
 			Minecraft.getInstance().execute(() -> {
 				WarTracker.onChat(warLine);
@@ -2100,20 +2275,22 @@ public final class EdenModClient implements ClientModInitializer {
 				Minecraft.getInstance().execute(EdenModClient::sendStreamCommand);
 			}
 		}
-		BridgeWebSocketClient current = socket;
-		// Reward confirmations feed the /eden gift automation directly (the only proof a
-		// swap-click actually produced a real handout — see GuildRewards' class doc), so
-		// this must not depend on the bridge being connected like the relay below does.
-		if (onWynncraft) {
-			GuildRewardParser.parse(message).ifPresent(guildRewards::onConfirmedReward);
+		// Entering a Wynncraft game world always sends this greeting. Use it for
+		// immediate active-state detection and to keep /gu log out of class selection.
+		if (onWynncraft && message.getString().contains("Welcome to Wynncraft!")) {
+			enteredWynnGameWorld = true;
+			// /class returns to a new world without a Fabric connection-JOIN event. Treat
+			// its welcome exactly like a fresh query lifecycle: WynnExtras/Wynntils can
+			// leave a packet-only character-selection container behind, and GuildLogSync
+			// needs a new bounded startup-recovery window for it.
+			guildLogSync.onWorldJoin();
+			setInGameWorld(true);
 		}
+		BridgeWebSocketClient current = socket;
 		if (!onWynncraft || current == null) {
 			return;
 		}
-		// Entering a Wynncraft game world always sends this greeting. Use it for
-		// immediate active-state detection, faster than the next tab-list check.
 		if (message.getString().contains("Welcome to Wynncraft!")) {
-			setInGameWorld(true);
 			return;
 		}
 		// Guild raid completions are aqua announcements (not player chat); handle

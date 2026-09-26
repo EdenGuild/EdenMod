@@ -28,6 +28,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.ChatFormatting;
@@ -45,6 +46,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemLore;
 import tel.eden.mod.EdenLogger;
 import tel.eden.mod.chat.GuildReward;
+import tel.eden.mod.chat.PlayerNameResolver;
+import tel.eden.mod.guild.BackgroundContainerSession;
+import tel.eden.mod.guild.GuildLogEvent;
 
 /**
  * Gifts guild reward items (aspects/tomes/emeralds) to members by driving the
@@ -72,14 +76,14 @@ import tel.eden.mod.chat.GuildReward;
  * {@code level.getGameTime()} advances (Wynncraft publishes no TPS value, but this
  * doesn't need one).
  *
- * <p>An ack also isn't proof the reward was granted — only Wynncraft's own guild-chat
- * line ({@code "<giver> rewarded <reward> to <receiver>"}, fed in via {@link
+	 * <p>An ack also isn't proof the reward was granted — only Wynncraft's own guild
+	 * ticker/chat line ({@code "<giver> rewarded <reward> to <receiver>"}, fed in via {@link
  * #onConfirmedReward}) is authoritative. {@link #giveUnits} bursts sends first
- * ({@link #burstSend}), reconciles against the confirmation queue ({@link
- * #drainConfirmations}), and pays the full per-click wait ({@link #giveUnitsSequential})
- * only for the shortfall. A match also requires the confirmation to have arrived at or
- * after the gift operation started, so a leftover confirmation from an earlier gift to
- * the same player can't get claimed here instead.
+ * ({@link #burstSend}), reconciles success tickers and explicit busy rejections ({@link
+ * #drainRewardOutcomes}), and pays the full per-click wait ({@link
+ * #giveUnitsSequential}) only for the shortfall. A match also requires the outcome to
+ * have arrived at or after the gift operation started, so leftovers from an earlier
+ * gift can't get claimed here instead.
  *
  * <p>A slow confirmation isn't proof a click failed — {@link #giveUnitsSequential}
  * still resends on timeout, which can occasionally produce a genuine duplicate grant.
@@ -167,6 +171,9 @@ public final class GuildRewards {
 	// MAX_CONFIRM_TIMEOUT_MS so an active wait can never have its confirmation pruned
 	// out from under it.
 	private static final long CONFIRMATION_MEMORY_MS = 20_000L;
+	// A busy response is authoritative for one missed unit. Retry it immediately; if the
+	// service keeps rejecting the same unit, back off by 0.5s, 1s, 2s, ... (capped).
+	private static final int MAX_UNAVAILABLE_RETRIES = 8;
 	// Ceiling on stressLevel — how many consecutive-failure "notches" widen every
 	// adaptive wait above (see adaptiveTimeoutMs()). Ping alone doesn't reflect a
 	// backlog we caused ourselves (e.g. a burst of clicks queueing up server-side),
@@ -180,9 +187,6 @@ public final class GuildRewards {
 	private static final double BASELINE_TICK_MS = 50.0; // vanilla's 20 TPS
 	private static final double MAX_TICK_FACTOR = 3.0; // cap how far a measured tick length can widen waits
 	private static final int EMERALDS_PER_ITEM = 1024;
-	// The backend tracks pending emeralds in 4096-emerald display units (one liquid
-	// emerald), but the guild menu hands them out one 1024-emerald item at a time, so
-	// four handouts make up one deductible unit.
 	private static final int ITEMS_PER_DISPLAY_UNIT = 4096 / EMERALDS_PER_ITEM;
 	private static final Pattern COUNT = Pattern.compile("(\\d+)\\s*/\\s*\\d+");
 
@@ -193,7 +197,6 @@ public final class GuildRewards {
 		private final int hotbar;
 		private final String loreKey;
 		private final String label;
-		// The /manage reset kind for this reward (null = no reward-balance reset, e.g. tomes).
 		private final String resetKind;
 
 		RewardType(int hotbar, String loreKey, String label, String resetKind) {
@@ -220,11 +223,11 @@ public final class GuildRewards {
 	public record MemberInfo(long joinedEpochMillis, String rank, long contributedXp) {
 	}
 
-	/** One member's share of a batch payout. */
-	public record PayoutTarget(String name, int aspects) {
+	/** One member's share of a batch payout, in the batch's own reward type. */
+	public record PayoutTarget(String name, int amount) {
 	}
 
-	/** Notified once per completed gift run with the exact number of handouts. */
+	/** Notified once per completed gift run with its confirmed handout count. */
 	public interface RewardReporter {
 		void report(String receiver, RewardType type, int count);
 	}
@@ -235,20 +238,25 @@ public final class GuildRewards {
 	}
 
 	/**
-	 * Notified after each handout of a reward kind that has a pending balance on the
-	 * backend ("aspects"/"emeralds"), so the payout can be deducted there instead of
-	 * being reset by hand on Discord.
-	 *
-	 * <p>{@code displayUnits} is the handout in the backend's display units, or -1 when
-	 * the amount handed out doesn't convert to a whole number of them.
-	 *
-	 * <p>{@code autoDeduct} asks for the deduction to happen straight away — a payout
-	 * with the screen's auto-update option on, where the Chief picked the amounts off
-	 * the pending list itself. Otherwise it is only offered as a clickable command,
-	 * which is what single gifts do, since a gift needn't be settling what is owed.
+	 * Request a real-unit deduction for one member's reward kind, once this class
+	 * has confirmed the amount locally against its own Guild Log read — the mod
+	 * is the source of truth for "did this really happen," not the backend; see
+	 * {@link #sendConfirmedDeduction}.
 	 */
-	public interface DeductReporter {
-		void report(String receiver, String rewardKind, int displayUnits, boolean autoDeduct);
+	public interface RewardDeductSender {
+		void request(String rewardKind, String target, int amount);
+	}
+
+	/**
+	 * Live updates for whatever screen is showing a gift run's progress. {@code total}
+	 * of 0 or less means indeterminate (no meaningful bar, just a status line).
+	 * {@link #onDone} always fires exactly once per run, however it ended (success,
+	 * error, or cancellation), so a listener can reliably use it to close its screen.
+	 */
+	public interface GiftProgressListener {
+		void onProgress(String status, int completed, int total);
+
+		void onDone();
 	}
 
 	/**
@@ -270,19 +278,33 @@ public final class GuildRewards {
 		void release();
 	}
 
+	private final BackgroundContainerSession backgroundSession;
 	private volatile RewardReporter reporter;
 	private volatile StorageReporter storageReporter;
-	private volatile DeductReporter deductReporter;
 	private volatile GiftLockGateway giftLockGateway;
+	private volatile GiftProgressListener progressListener;
 	// True while a gift run is driving the menu, so the passive tick-time reader in
 	// EdenModClient doesn't relay a mid-gift (pre-swap) count; the run relays the exact
 	// post-gift value itself.
 	private volatile boolean giftInProgress;
+	// Set by requestCancel() (the progress screen's Cancel button); checked between
+	// units/members so a run stops promptly rather than running to completion. Reset
+	// at the start of every run() / batchRun() call. A cancelled run still reconciles
+	// whatever it already sent — the loops just stop asking for more, they don't skip
+	// the existing post-gift settlement/reporting that already runs unconditionally.
+	private volatile boolean cancelRequested;
 	// 0..MAX_STRESS — widens every adaptive wait when recent clicks/confirmations have
 	// been timing out, narrows again on success. Reset at the start of each run.
 	private volatile int stressLevel;
 
 	private record TimedReward(long atMs, GuildReward reward) {
+	}
+
+	private record RewardOutcomes(int confirmed, int unavailable, boolean outOfStock) {
+	}
+
+	private enum RewardOutcome {
+		CONFIRMED, REJECTED, OUT_OF_STOCK, TIMED_OUT
 	}
 
 	private record TickSample(long worldTick, long realTimeNanos) {
@@ -294,15 +316,31 @@ public final class GuildRewards {
 	// Estimated ms per real server tick (50.0 == a healthy 20 TPS), read from any thread.
 	private volatile double currentServerTickMs = BASELINE_TICK_MS;
 
-	// Confirmed "<giver> rewarded <reward> to <receiver>" chat lines not yet claimed.
-	// Fed by onConfirmedReward() (chat pipeline, network thread); drained by
+	// Confirmed "<giver> rewarded <reward> to <receiver>" chat/ticker lines not yet claimed.
+	// Fed by onConfirmedReward() on the client thread; drained by
 	// consumeConfirmation() on the worker thread.
 	private final Queue<TimedReward> confirmedRewards = new ConcurrentLinkedQueue<>();
+	// Explicit "Rewards are not available..." responses. Gifting is serialized, so an
+	// event during a run belongs to its one in-flight member/type operation.
+	private final Queue<Long> unavailableRewards = new ConcurrentLinkedQueue<>();
+	// Terminal "guild does not have enough" responses, kept separate so they stop a
+	// correction immediately instead of causing repeated close+reopen recoveries.
+	private final Queue<Long> outOfStockRewards = new ConcurrentLinkedQueue<>();
 	// Own account name, so a confirmation can be matched to a gift this class actually
 	// sent, not another Chief's simultaneous one. Set from ensureFresh().
 	private volatile String selfName;
 
-	/** Attach the reporter used to send authoritative reward counts to the backend. */
+	public GuildRewards(BackgroundContainerSession backgroundSession) {
+		this.backgroundSession = backgroundSession;
+	}
+	// Called after a completed/aborted run has released its menu. The Guild Log is a
+	// reconciliation source for the ticker confirmations, not part of the timing-
+	// sensitive gifting loop itself.
+	private volatile Runnable postGiftReconciler;
+	private volatile Supplier<List<GuildLogEvent>> preGiftEvidenceSupplier;
+	private volatile Supplier<List<GuildLogEvent>> postGiftEvidenceSupplier;
+	private volatile RewardDeductSender rewardDeductSender;
+
 	public void setReporter(RewardReporter reporter) {
 		this.reporter = reporter;
 	}
@@ -312,14 +350,56 @@ public final class GuildRewards {
 		this.storageReporter = storageReporter;
 	}
 
-	/** Attach the reporter that deducts a handout from the backend's pending balance. */
-	public void setDeductReporter(DeductReporter deductReporter) {
-		this.deductReporter = deductReporter;
-	}
-
 	/** Attach the gateway that coordinates exclusive use of the gifting automation with the bridge. */
 	public void setGiftLockGateway(GiftLockGateway giftLockGateway) {
 		this.giftLockGateway = giftLockGateway;
+	}
+
+	/**
+	 * Attach the listener for the currently showing progress screen, or {@code null}
+	 * once it's gone. The caller is expected to set this right before starting a run
+	 * (before {@link #gift}/{@link #payoutAspects}/{@link #giveaway}/{@link
+	 * #dumpEmeralds}) — runs are already serialized onto one worker thread, so there is
+	 * never more than one live listener to worry about.
+	 */
+	public void setProgressListener(GiftProgressListener progressListener) {
+		this.progressListener = progressListener;
+	}
+
+	/**
+	 * Ask the currently running gift/payout to stop as soon as it safely can. Already-
+	 * sent units are still reconciled normally — this only stops further ones from
+	 * being sent. A no-op if nothing is running.
+	 */
+	public void requestCancel() {
+		cancelRequested = true;
+	}
+
+	private void progress(String status, int completed, int total) {
+		GiftProgressListener listener = progressListener;
+		if (listener != null) {
+			listener.onProgress(status, completed, total);
+		}
+	}
+
+	/** Schedule a non-blocking reconciliation after every gifting pass. */
+	public void setPostGiftReconciler(Runnable postGiftReconciler) {
+		this.postGiftReconciler = postGiftReconciler;
+	}
+
+	/** Supply a fresh Guild Log read before a gift, establishing the server-side baseline. */
+	public void setPreGiftEvidenceSupplier(Supplier<List<GuildLogEvent>> preGiftEvidenceSupplier) {
+		this.preGiftEvidenceSupplier = preGiftEvidenceSupplier;
+	}
+
+	/** Supply one fresh, bounded Guild Log read for end-of-batch reconciliation. */
+	public void setPostGiftEvidenceSupplier(Supplier<List<GuildLogEvent>> postGiftEvidenceSupplier) {
+		this.postGiftEvidenceSupplier = postGiftEvidenceSupplier;
+	}
+
+	/** Attach the sender used to request a confirmed reward deduction (see {@link RewardDeductSender}). */
+	public void setRewardDeductSender(RewardDeductSender rewardDeductSender) {
+		this.rewardDeductSender = rewardDeductSender;
 	}
 
 	/** Whether a gift run is currently driving the guild-manage menu. */
@@ -332,6 +412,14 @@ public final class GuildRewards {
 	 * lore). Cheap enough to poll each client tick. Must run on the client thread.
 	 */
 	public boolean isRewardsMenuOpen() {
+		if (backgroundSession.isOwnedBy("guild rewards")) {
+			// Settling is needed while *opening* a menu or changing pages, but not to
+			// read an already received reward summary.  A successful handout causes
+			// SET_SLOT updates for a short while; treating that debounce interval as
+			// an absent menu turned a perfectly valid non-zero balance into zero and
+			// skipped the next recipient.
+			return backgroundSession.isOpen() && hasRewardLore(backgroundSession.items());
+		}
 		AbstractContainerMenu menu = menu();
 		if (menu == null || REWARDS_SLOT >= menu.slots.size()) {
 			return false;
@@ -346,6 +434,15 @@ public final class GuildRewards {
 			}
 		}
 		return false;
+	}
+
+	private static boolean hasRewardLore(List<ItemStack> items) {
+		if (items.size() <= REWARDS_SLOT)
+			return false;
+		ItemLore lore = items.get(REWARDS_SLOT).get(DataComponents.LORE);
+		if (lore == null)
+			return false;
+		return lore.lines().stream().anyMatch(line -> line.getString().contains(RewardType.EMERALD.loreKey));
 	}
 
 	/**
@@ -372,6 +469,17 @@ public final class GuildRewards {
 
 	/** Dump slot 27's raw item name + lore lines to the log — see {@link #readAllCounts} for why. */
 	private void logRewardsSlotDiagnostics(String reason) {
+		if (backgroundSession.isOwnedBy("guild rewards")) {
+			List<ItemStack> items = backgroundSession.items();
+			if (items.size() <= REWARDS_SLOT) {
+				LOGGER.info("Gift: rewards-slot diagnostic ({}) — no background snapshot", reason);
+				return;
+			}
+			ItemStack stack = items.get(REWARDS_SLOT);
+			ItemLore lore = stack.get(DataComponents.LORE);
+			LOGGER.info("Gift: rewards-slot diagnostic ({}) — item='{}' empty={} lore={}", reason, stack.getHoverName().getString(), stack.isEmpty(), lore == null ? List.of() : lore.lines().stream().map(Component::getString).toList());
+			return;
+		}
 		AbstractContainerMenu menu = menu();
 		if (menu == null || REWARDS_SLOT >= menu.slots.size()) {
 			LOGGER.info("Gift: rewards-slot diagnostic ({}) — no container, or slot {} out of range", reason, REWARDS_SLOT);
@@ -400,6 +508,15 @@ public final class GuildRewards {
 		return rank.equalsIgnoreCase("chief") || rank.equalsIgnoreCase("owner");
 	}
 
+	/**
+	 * Whether the linked player is a Chief, Owner, or Strategist — the broader tier
+	 * trusted to opportunistically relay less-sensitive menu reads (reward storage,
+	 * allies) that Strategists can see and, for allies, can edit themselves.
+	 */
+	public boolean isChiefOwnerOrStrategist() {
+		return isChief() || rank.equalsIgnoreCase("strategist");
+	}
+
 	/** Current known member usernames (for command tab-completion). */
 	public List<String> memberNames() {
 		return new ArrayList<>(members.keySet());
@@ -407,15 +524,7 @@ public final class GuildRewards {
 
 	/** Whether {@code name} is a current member of the player's guild (case-insensitive). */
 	public boolean isMember(String name) {
-		if (name == null || name.isBlank()) {
-			return false;
-		}
-		for (String member : members.keySet()) {
-			if (member.equalsIgnoreCase(name)) {
-				return true;
-			}
-		}
-		return false;
+		return memberInfo(name) != null;
 	}
 
 	/** A member map keyed case-insensitively, while preserving each member's original spelling. */
@@ -428,7 +537,21 @@ public final class GuildRewards {
 		if (name == null || name.isBlank()) {
 			return null;
 		}
-		return members.get(name);
+		return members.get(canonicalMemberName(name));
+	}
+
+	/** Resolve a learned nickname and preserve the exact username casing from the guild API. */
+	private String canonicalMemberName(String name) {
+		String resolved = PlayerNameResolver.canonicalize(name);
+		if (resolved == null) {
+			return "";
+		}
+		for (String member : members.keySet()) {
+			if (member.equalsIgnoreCase(resolved)) {
+				return member;
+			}
+		}
+		return resolved;
 	}
 
 	/** Display rank ("Chief", "Recruit", ...) for a member, or {@code null} if unknown. */
@@ -537,17 +660,22 @@ public final class GuildRewards {
 
 	/** Gift {@code amount} of {@code type} to {@code name} (one menu run, off-thread). */
 	public void gift(String name, RewardType type, int amount) {
-		worker.submit(() -> run(name, type, amount, false));
+		String username = canonicalMemberName(name);
+		worker.submit(() -> run(username, type, amount, false));
 	}
 
 	/** Gift all available emeralds to {@code name}. */
 	public void dumpEmeralds(String name) {
-		worker.submit(() -> run(name, RewardType.EMERALD, 0, true));
+		String username = canonicalMemberName(name);
+		worker.submit(() -> run(username, RewardType.EMERALD, 0, true));
 	}
 
 	private void run(String name, RewardType type, int requested, boolean dump) {
 		giftInProgress = true;
 		stressLevel = 0;
+		cancelRequested = false;
+		progress("Starting...", 0, 0);
+		SingleGiftResult result = new SingleGiftResult(0, 0);
 		try {
 			if (!isChief()) {
 				chat("Only guild Chiefs can gift rewards.", ChatFormatting.RED);
@@ -566,14 +694,36 @@ public final class GuildRewards {
 				return;
 			}
 			try {
+				if (!establishGiftLogBaseline()) {
+					return;
+				}
+				progress("Opening guild manage menu...", 0, 0);
 				if (!openRewardsMenu()) {
 					chat("Couldn't open the guild manage menu — try again (this can happen when your connection is slow).", ChatFormatting.RED);
 					return;
 				}
 				try {
-					runSingle(name, type, requested, dump, false, true);
+					result = runSingle(name, type, requested, dump, false);
 				} finally {
 					onClientRun(this::closeMenu);
+					// A single gift can also be pushed off page one in a busy guild.  Use the
+					// same saved-boundary scan as a batch before releasing the gift lock. In a
+					// `finally` (not after the try) so a run that threw partway through still
+					// gets whatever it already handed out reconciled, instead of silently
+					// falling back to the slower, consensus-gated passive path.
+					progress("Confirming with the Guild Log...", 0, 0);
+					int confirmed = reportConfirmedDeduction(name, type, result.given(), collectPostGiftEvidence());
+					// Only report a shortfall now, after ticker AND Guild Log reconciliation —
+					// checking right after runSingle (ticker alone) is a frequent false alarm,
+					// since the Guild Log usually catches exactly the gap the ticker missed.
+					if (confirmed < result.amount()) {
+						int shortTotal = realUnitsFor(type, confirmed);
+						int totalAttempted = realUnitsFor(type, result.amount());
+						// A dump hands out surplus, not a tracked pending balance, so there's
+						// nothing "pending" to settle by hand — just flag it wasn't all confirmed.
+						String note = dump ? "double check they actually received the rest." : "their pending total needs settling by hand.";
+						chat("Only " + shortTotal + " of " + totalAttempted + " " + type.label + " to " + name + " were actually confirmed — " + note, ChatFormatting.YELLOW);
+					}
 				}
 			} finally {
 				releaseGiftLock();
@@ -583,6 +733,12 @@ public final class GuildRewards {
 			chat("Gift failed: " + e.getMessage(), ChatFormatting.RED);
 		} finally {
 			giftInProgress = false;
+			requestPostGiftReconciliation();
+			progress(cancelRequested ? "Cancelled" : "Done", 0, 0);
+			GiftProgressListener listener = progressListener;
+			if (listener != null) {
+				listener.onDone();
+			}
 		}
 	}
 
@@ -619,37 +775,42 @@ public final class GuildRewards {
 		}
 	}
 
+	/** {@code amount} is how many clicks were actually attempted (after availability-capping); {@code given} is how many the ticker confirmed of those. */
+	private record SingleGiftResult(int amount, int given) {
+	}
+
 	/**
 	 * Drive one member's gift through an already-open guild-manage menu (caller has
 	 * already validated chief/membership/eligibility and owns opening/closing it).
-	 * Returns how many units were actually confirmed given, which may be less than
-	 * {@code requested} — any shortfall has already been reported in chat, so callers
-	 * only need the count, not a truthiness check. {@code autoDeduct} takes the handout
-	 * off the member's pending backend total instead of just offering it as a command;
-	 * {@code settlesPending} is false for a surplus giveaway that owes no one anything,
-	 * skipping the deduction step entirely.
+	 * A ticker shortfall ({@code given < amount}) is not reported here — the caller
+	 * still has Guild Log reconciliation to run yet, which usually catches exactly
+	 * this gap, so reporting "needs settling by hand" at this point would frequently
+	 * be a false alarm; the caller reports it only if reconciliation still comes up
+	 * short. Pending balances are updated centrally from the same confirmed ticker
+	 * events, independently of this automation.
 	 */
-	private int runSingle(String name, RewardType type, int requested, boolean dump, boolean autoDeduct, boolean settlesPending) {
+	private SingleGiftResult runSingle(String name, RewardType type, int requested, boolean dump, boolean settlesPending) {
 		// Index == RewardType.hotbar; the trio also becomes the post-gift snapshot below.
 		long[] counts = readAllCountsSettled();
 		if (counts == null) {
 			counts = new long[]{0, 0, 0};
 		}
 		int available = (int) counts[type.hotbar];
-		int availableItems = type == RewardType.EMERALD ? available / EMERALDS_PER_ITEM : available;
+		int availableItems = menuClicksFor(type, available);
 		// Never gift more than the guild actually has.
 		int amount = dump ? availableItems : Math.min(requested, availableItems);
 		if (amount <= 0) {
 			chat("There aren't any " + type.label + " to gift!", ChatFormatting.YELLOW);
-			return 0;
+			return new SingleGiftResult(0, 0);
 		}
 		int slot = findMemberSlot(name);
 		if (slot < 0) {
 			chat("Couldn't find " + name + "'s item in the menu.", ChatFormatting.RED);
-			return 0;
+			return new SingleGiftResult(0, 0);
 		}
-		int total = type == RewardType.EMERALD ? amount * EMERALDS_PER_ITEM : amount;
+		int total = realUnitsFor(type, amount);
 		chat("Gifting " + name + " " + total + " " + type.label + "...", ChatFormatting.GREEN);
+		progress("Gifting " + name + "...", 0, amount);
 		if (!dump && amount < requested) {
 			// Guild ran short — neither the deduction below nor /manage reset settles this right.
 			chat("Only " + total + " of " + requested + " " + type.label + " were available for " + name + " — their pending total needs settling by hand.", ChatFormatting.YELLOW);
@@ -657,44 +818,54 @@ public final class GuildRewards {
 		int given = giveUnits(name, slot, type, amount);
 		if (given <= 0) {
 			chat("Couldn't gift " + name + " — never got a confirmed handout back.", ChatFormatting.RED);
-			return 0;
+			return new SingleGiftResult(amount, 0);
 		}
-		if (given < amount) {
-			int shortTotal = type == RewardType.EMERALD ? given * EMERALDS_PER_ITEM : given;
-			chat("Only " + shortTotal + " of " + total + " " + type.label + " to " + name + " were actually confirmed — their pending total needs settling by hand.", ChatFormatting.YELLOW);
-		}
-		// Report the exact count in case the server bunched reward announcements together.
-		RewardReporter currentReporter = reporter;
-		if (currentReporter != null) {
-			currentReporter.report(name, type, given);
-		}
+		// Do not emit an automation-owned total. The individual guild ticker rows,
+		// corroborated by the Guild Log, are the authoritative record across clients.
 		// Relay the authoritative storage left after this run.
 		long[] finalCounts = counts.clone();
-		finalCounts[type.hotbar] -= type == RewardType.EMERALD ? (long) given * EMERALDS_PER_ITEM : given;
+		finalCounts[type.hotbar] -= realUnitsFor(type, given);
 		StorageReporter currentStorageReporter = storageReporter;
 		if (currentStorageReporter != null) {
 			currentStorageReporter.report((int) finalCounts[0], (int) finalCounts[1], finalCounts[2]);
 		}
-		// A dump isn't settling anyone's balance, so it never offers a deduction.
-		if (type.resetKind != null && !dump && settlesPending && given == amount) {
-			DeductReporter currentDeductReporter = deductReporter;
-			if (currentDeductReporter != null) {
-				currentDeductReporter.report(name, type.resetKind, displayUnits(type, given), autoDeduct);
-			} else {
-				chatComponent(manageResetFallbackLine(type.resetKind, name, displayUnits(type, given)));
-			}
-		} else if (given == amount) {
+		if (given == requested || (dump && given == amount)) {
 			chat("Done — gifted " + name + " " + total + " " + type.label + ".", ChatFormatting.GREEN);
 		}
-		return given;
+		return new SingleGiftResult(amount, given);
+	}
+
+	/** Convert a menu handout to the backend's displayed pending-balance unit. */
+	public static int displayUnits(RewardType type, int menuAmount) {
+		if (type != RewardType.EMERALD) {
+			return menuAmount;
+		}
+		return menuAmount % ITEMS_PER_DISPLAY_UNIT == 0 ? menuAmount / ITEMS_PER_DISPLAY_UNIT : -1;
+	}
+
+	/**
+	 * Real reward units (what a Chief reads as "N emeralds owed", and what the pending
+	 * balance is tracked in — see eden.display_unit's backend docstring) to menu-click
+	 * count (how many times {@link #swapHotbar} needs pressing; one emerald click is
+	 * worth {@link #EMERALDS_PER_ITEM} real emeralds, but exactly 1 real aspect/tome).
+	 * Not the same conversion as {@link #displayUnits}, which is Liquid Emeralds — a
+	 * third, larger unit specific to the manual /rewardDeduct path.
+	 */
+	static int menuClicksFor(RewardType type, int realAmount) {
+		return type == RewardType.EMERALD ? realAmount / EMERALDS_PER_ITEM : realAmount;
+	}
+
+	/** Inverse of {@link #menuClicksFor}: menu-click count to real reward units. */
+	static int realUnitsFor(RewardType type, int menuClicks) {
+		return type == RewardType.EMERALD ? menuClicks * EMERALDS_PER_ITEM : menuClicks;
 	}
 
 	/**
 	 * Give {@code amount} units of {@code type} to {@code name}'s item at {@code slot} in
 	 * two phases: {@link #burstSend} fires every click paced but not confirmation-gated
 	 * (much faster than waiting out each confirmation in turn), then {@link
-	 * #drainConfirmations} finds out how many actually landed. Any shortfall falls back
-	 * to {@link #giveUnitsSequential} — bursting it again would likely just lose the
+	 * #drainRewardOutcomes} finds out how many landed or were explicitly rejected. Any
+	 * shortfall falls back to {@link #giveUnitsSequential} — bursting it again would likely just lose the
 	 * same fraction a second time, and by now it's a small enough count to afford the
 	 * slow, fully confirmation-gated path.
 	 *
@@ -713,35 +884,72 @@ public final class GuildRewards {
 				return 0;
 			}
 		}
-		int sent = burstSend(slot, type, amount);
-		int confirmed = drainConfirmations(name, type, sent, since);
-		if (confirmed >= amount) {
+		// Optimistic (sent, not yet confirmed) during the burst — good enough for a
+		// live status bar, and cheap since the alternative is no feedback at all for
+		// however long the burst takes. drainRewardOutcomes() below is what actually
+		// decides the real confirmed count.
+		int sent = burstSend(slot, type, amount, s -> progress("Gifting " + name + "...", s, amount));
+		RewardOutcomes outcomes = drainRewardOutcomes(name, type, sent, since);
+		RewardRetryPolicy.Correction correction = RewardRetryPolicy.correction(amount, sent, outcomes.confirmed(), outcomes.unavailable());
+		int confirmed = outcomes.confirmed();
+		progress("Gifting " + name + "...", confirmed, amount);
+		if (outcomes.outOfStock()) {
+			LOGGER.warn("Gift: guild ran out of {} after {}/{} confirmed units for {}; not retrying", type.label, confirmed, amount, name);
 			return confirmed;
 		}
-		int shortfall = amount - confirmed;
-		LOGGER.info("Gift: burst only confirmed {}/{} {} for {}; retrying the remaining {} one at a time", confirmed, amount, type.label, name, shortfall);
-		return confirmed + giveUnitsSequential(name, slot, type, shortfall, since);
+		int unavailableShortfall = correction.unavailableUnits();
+		if (unavailableShortfall > 0) {
+			LOGGER.info("Gift: server rejected {}/{} sent {} clicks for {}; retrying those units immediately", unavailableShortfall, sent, type.label, name);
+			// Seed the streak with the rejection that caused this immediate correction.
+			// Another rejection advances to the first 0.5s backoff.
+			int confirmedBeforeRetry = confirmed;
+			confirmed += giveUnitsSequential(name, slot, type, unavailableShortfall, 1, extra -> progress("Gifting " + name + "...", confirmedBeforeRetry + extra, amount));
+		}
+		if (correction.silentUnits() > 0) {
+			// A missing local ticker is ambiguous: this exact run showed that such
+			// clicks can already have granted their reward. Leave it for the final
+			// ticker/log reconciliation; never resend it blindly.
+			LOGGER.warn("Gift: {}/{} {} click(s) for {} had no observed outcome; not resending without reconciliation", correction.silentUnits(), amount, type.label, name);
+		}
+		return confirmed;
 	}
 
 	/**
-	 * Fire up to {@code amount} swap clicks at {@code slot}, paced by {@link #paceSend}
+	 * Fire up to {@code amount} swap clicks at {@code slot}, paced by {@link #paceRewardSend}
 	 * but not confirmation-gated. A single unacknowledged click just raises
 	 * {@link #stressLevel} and slows the next one down — under a big burst the server
-	 * can genuinely fall behind acking without being dead — so this only stops early
-	 * once the container itself is confirmed closed. Returns how many were sent, not how
-	 * many landed — that's for {@link #drainConfirmations} to find out.
+	 * can genuinely fall behind acking without being dead. An explicit unavailable
+	 * response stops the burst immediately so correction can take over; a silent issue
+	 * only stops it once the container is confirmed closed. Returns how many were sent,
+	 * not how many landed — that's for {@link #drainRewardOutcomes} to find out.
+	 * {@code onSent} (nullable) is notified with the running sent count after each
+	 * click, purely for a live progress display — batch callers pass {@code null}
+	 * since their progress is reported per-member instead, one level up.
 	 */
-	private int burstSend(int slot, RewardType type, int amount) {
+	private int burstSend(int slot, RewardType type, int amount, IntConsumer onSent) {
 		int sent = 0;
 		while (sent < amount) {
+			if (cancelRequested) {
+				break;
+			}
 			if (!Boolean.TRUE.equals(onClient(this::containerOpen))) {
 				break;
 			}
 			int beforeState = onClient(this::currentStateId);
+			long attemptSince = System.currentTimeMillis();
 			final int target = slot;
 			onClientRun(() -> swapHotbar(target, type.hotbar));
 			sent++;
-			if (!paceSend(beforeState) && !Boolean.TRUE.equals(onClient(this::containerOpen))) {
+			if (onSent != null) {
+				onSent.accept(sent);
+			}
+			boolean acked = paceRewardSend(beforeState, attemptSince);
+			// Stop the burst as soon as an explicit rejection appears. drainRewardOutcomes()
+			// will consume it, retry that unit, and send the unsent remainder one-by-one.
+			if (hasRewardFailureSince(attemptSince)) {
+				break;
+			}
+			if (!acked && !Boolean.TRUE.equals(onClient(this::containerOpen))) {
 				break;
 			}
 		}
@@ -750,25 +958,39 @@ public final class GuildRewards {
 
 	/**
 	 * The slow, reliable fallback: swap-hotbar {@code amount} units one at a time, each
-	 * gated on both the container ack and Wynncraft's reward-confirmation chat line
-	 * ({@link #waitForRewardConfirmation}) before the next is sent. A timeout on either
-	 * calls {@link #recoverSession} and resends — a slow confirmation isn't proof the
+	 * gated on Wynncraft's authoritative reward-confirmation ticker before the next is
+	 * sent. A silent timeout calls {@link #recoverSession} and resends — a slow
+	 * confirmation isn't proof the
 	 * swap failed, so this can occasionally land a genuine duplicate grant. That risk is
 	 * accepted rather than eliminated: {@link #openRewardsMenu} already refuses to start
 	 * a session on a degraded connection ({@link #MENU_OPEN_TIMEOUT_MS}), which is what
 	 * keeps duplicates rare instead of compounding on a sustained-bad one.
 	 * {@link #MAX_RECOVERIES} bounds <em>consecutive</em> no-progress recoveries;
 	 * {@link #MAX_TOTAL_RECOVERIES} bounds the whole call regardless of how progress is
-	 * spread out (see {@link #findMemberSlot}'s doc). {@code since} excludes any
-	 * confirmation from before this member's gift started (see {@link #giveUnits}).
-	 * Returns how many units were actually confirmed given.
+	 * spread out (see {@link #findMemberSlot}'s doc). An explicit unavailable response
+	 * takes a separate immediate retry path; further consecutive rejections back off from
+	 * 0.5s exponentially, and every resend still needs its own ticker confirmation.
+	 * Returns how many units were actually confirmed given. {@code onConfirmed}
+	 * (nullable) is notified with the running given count after each confirmed unit,
+	 * purely for a live progress display — batch callers pass {@code null} since their
+	 * progress is reported per-member instead, one level up.
 	 */
-	private int giveUnitsSequential(String name, int slot, RewardType type, int amount, long since) {
+	private int giveUnitsSequential(String name, int slot, RewardType type, int amount, int initialUnavailable, IntConsumer onConfirmed) {
 		int given = 0;
+		int consecutiveUnavailable = initialUnavailable;
 		int consecutiveRecoveries = 0;
 		int totalRecoveries = 0;
 		while (given < amount) {
+			if (cancelRequested) {
+				break;
+			}
 			if (!Boolean.TRUE.equals(onClient(this::containerOpen))) {
+				// No click was issued while closed, so reopening is safe. Conversely, a
+				// timeout after a click is never retried: it may already have landed.
+				// Bounded the same way as findMemberSlot: MAX_RECOVERIES caps consecutive
+				// no-progress recoveries, MAX_TOTAL_RECOVERIES caps the whole call — a
+				// flapping-but-technically-recovering connection must not loop unboundedly
+				// while holding the gift lock.
 				if (consecutiveRecoveries >= MAX_RECOVERIES || totalRecoveries >= MAX_TOTAL_RECOVERIES || !recoverSession()) {
 					break;
 				}
@@ -780,39 +1002,46 @@ public final class GuildRewards {
 				}
 				continue;
 			}
-			int beforeState = onClient(this::currentStateId);
+			long attemptSince = System.currentTimeMillis();
 			final int target = slot;
 			onClientRun(() -> swapHotbar(target, type.hotbar));
-			if (waitForStateChange(beforeState) && waitForRewardConfirmation(name, type, since)) {
+			RewardOutcome outcome = waitForRewardOutcome(name, type, attemptSince);
+			if (outcome == RewardOutcome.CONFIRMED) {
 				given++;
+				if (onConfirmed != null) {
+					onConfirmed.accept(given);
+				}
 				consecutiveRecoveries = 0;
+				// If more units in this call each represent an earlier explicit rejection,
+				// seed their first resend the same way. Silent-shortfall calls pass zero.
+				consecutiveUnavailable = given < amount ? initialUnavailable : 0;
 				continue;
 			}
-			// Unacknowledged or never-confirmed — either way, don't assume it landed.
-			if (consecutiveRecoveries >= MAX_RECOVERIES || totalRecoveries >= MAX_TOTAL_RECOVERIES || !recoverSession()) {
+			if (outcome == RewardOutcome.REJECTED) {
+				consecutiveUnavailable++;
+				if (consecutiveUnavailable > MAX_UNAVAILABLE_RETRIES) {
+					LOGGER.warn("Gift: giving up one {} unit to {} after {} consecutive unavailable responses", type.label, name, consecutiveUnavailable);
+					break;
+				}
+				long backoff = RewardRetryPolicy.backoffMs(consecutiveUnavailable);
+				LOGGER.info("Gift: {} unavailable response {}/{} for {}; retrying{}", type.label, consecutiveUnavailable, MAX_UNAVAILABLE_RETRIES, name, backoff == 0 ? " immediately" : " in " + backoff + "ms");
+				if (backoff > 0) {
+					sleep(backoff);
+				}
+				continue;
+			}
+			if (outcome == RewardOutcome.OUT_OF_STOCK) {
+				LOGGER.warn("Gift: guild ran out of {} while correcting {} — stopping without reopening", type.label, name);
 				break;
 			}
-			consecutiveRecoveries++;
-			totalRecoveries++;
-			slot = findMemberSlot(name);
-			if (slot < 0) {
-				break;
-			}
+			// A delayed/missed ticker is not proof that the click failed. Retrying here
+			// caused duplicate grants; the end-of-batch ticker + Guild Log pass decides
+			// whether a correction is safe.
+			consecutiveUnavailable = 0;
+			LOGGER.warn("Gift: {} retry click for {} had no confirmed outcome; not resending it", type.label, name);
+			break;
 		}
 		return given;
-	}
-
-	/**
-	 * How many of the backend's display units a handout of {@code menuAmount} items is
-	 * worth, or -1 when it doesn't divide into whole units. Aspects map one-to-one;
-	 * emeralds only line up every {@link #ITEMS_PER_DISPLAY_UNIT} items, and the backend
-	 * has no way to take a fraction of a unit.
-	 */
-	public static int displayUnits(RewardType type, int menuAmount) {
-		if (type != RewardType.EMERALD) {
-			return menuAmount;
-		}
-		return menuAmount % ITEMS_PER_DISPLAY_UNIT == 0 ? menuAmount / ITEMS_PER_DISPLAY_UNIT : -1;
 	}
 
 	/**
@@ -840,14 +1069,21 @@ public final class GuildRewards {
 	private boolean openRewardsMenu() {
 		Minecraft mc = Minecraft.getInstance();
 		onClientRun(() -> {
-			if (mc.getConnection() != null) {
+			if (mc.getConnection() != null && backgroundSession.begin("guild rewards", title -> title.contains("Manage") || title.contains("Members"), 27)) {
 				mc.getConnection().sendCommand("gu man");
 			}
 		});
 		long t0 = System.currentTimeMillis();
-		boolean opened = waitUntil(this::containerOpen, MENU_OPEN_TIMEOUT_MS);
+		boolean opened = waitUntil(() -> Boolean.TRUE.equals(onClient(() -> backgroundSession.isOpen() && backgroundSession.isSettled())), MENU_OPEN_TIMEOUT_MS);
 		LOGGER.info("Gift: openRewardsMenu — containerOpen={} after {}ms", opened, System.currentTimeMillis() - t0);
-		onClientRun(() -> click(OPEN_MEMBERS_SLOT));
+		if (!opened) {
+			return false;
+		}
+		onClientRun(() -> {
+			if (!backgroundSession.prepareInPlaceTransition(title -> title.contains("Manage") || title.contains("Members"), MENU_SLOT_COUNT) || !backgroundSession.click(OPEN_MEMBERS_SLOT, 0, ClickType.PICKUP)) {
+				backgroundSession.close();
+			}
+		});
 		long t1 = System.currentTimeMillis();
 		boolean ready = waitUntil(this::isRewardsMenuOpen, MENU_OPEN_TIMEOUT_MS);
 		LOGGER.info("Gift: openRewardsMenu — isRewardsMenuOpen={} after {}ms", ready, System.currentTimeMillis() - t1);
@@ -871,32 +1107,49 @@ public final class GuildRewards {
 	 * Pay out aspects to several members in one go (off-thread). Checked against the
 	 * guild's available aspects first — if it doesn't fit, nothing is distributed. A
 	 * member short on the first pass gets one retry at just the missing amount before
-	 * being reported as short (see {@link #batchRun}). With {@code autoDeduct}, each
-	 * payout is also deducted from the member's pending backend total; otherwise the
-	 * deduction is only offered.
+	 * being reported as short (see {@link #batchRun}). Pending totals are updated from
+	 * newly observed Guild Log rewards after the payout has completed.
 	 */
-	public void payoutAspects(List<PayoutTarget> targets, boolean autoDeduct) {
+	public void payoutAspects(List<PayoutTarget> targets) {
 		List<PayoutTarget> copy = List.copyOf(targets);
 		if (!copy.isEmpty()) {
-			worker.submit(() -> batchRun(copy, autoDeduct, true));
+			worker.submit(() -> batchRun(copy, RewardType.ASPECT, true));
+		}
+	}
+
+	/**
+	 * Pay out emeralds to several members in one go (off-thread) — mirrors
+	 * {@link #payoutAspects} exactly, against each member's pending emerald balance
+	 * instead of aspects. There is deliberately no emerald giveaway counterpart:
+	 * emeralds aren't tracked per-member the way aspects are, so a Chief with surplus
+	 * emeralds to distribute just dumps them to one player (see {@link #dumpEmeralds})
+	 * who redistributes manually, rather than needing a filter-driven bulk flow.
+	 */
+	public void payoutEmeralds(List<PayoutTarget> targets) {
+		List<PayoutTarget> copy = List.copyOf(targets);
+		if (!copy.isEmpty()) {
+			worker.submit(() -> batchRun(copy, RewardType.EMERALD, true));
 		}
 	}
 
 	/**
 	 * Flat-gift aspects to several members in one go (off-thread) — a bonus handout from
-	 * bank surplus, not settling anyone's owed balance. Shares every safety check
-	 * {@link #payoutAspects} has, but never touches the pending-balance bookkeeping.
+	 * bank surplus. Shares every safety check {@link #payoutAspects} has. A recipient's
+	 * positive pending balance still decreases because confirmed gifts are reconciled
+	 * centrally regardless of which UI initiated them.
 	 */
 	public void giveaway(List<PayoutTarget> targets) {
 		List<PayoutTarget> copy = List.copyOf(targets);
 		if (!copy.isEmpty()) {
-			worker.submit(() -> batchRun(copy, false, false));
+			worker.submit(() -> batchRun(copy, RewardType.ASPECT, false));
 		}
 	}
 
-	private void batchRun(List<PayoutTarget> requested, boolean autoDeduct, boolean settlesPending) {
+	private void batchRun(List<PayoutTarget> requested, RewardType type, boolean settlesPending) {
 		giftInProgress = true;
 		stressLevel = 0;
+		cancelRequested = false;
+		progress("Starting...", 0, 0);
 		try {
 			if (!isChief()) {
 				chat("Only guild Chiefs can pay out rewards.", ChatFormatting.RED);
@@ -916,7 +1169,8 @@ public final class GuildRewards {
 			List<PayoutTarget> targets = new ArrayList<>();
 			int total = 0;
 			for (PayoutTarget target : requested) {
-				MemberInfo info = memberInfo(target.name());
+				String username = canonicalMemberName(target.name());
+				MemberInfo info = memberInfo(username);
 				if (info == null) {
 					unknown.add(target.name());
 					continue;
@@ -925,8 +1179,8 @@ public final class GuildRewards {
 					tooNew.add(target.name());
 					continue;
 				}
-				targets.add(target);
-				total += Math.max(0, target.aspects());
+				targets.add(new PayoutTarget(username, target.amount()));
+				total += Math.max(0, target.amount());
 			}
 			if (!tooNew.isEmpty()) {
 				chat("Nothing was distributed — these members joined less than a week ago: " + String.join(", ", tooNew), ChatFormatting.RED);
@@ -946,6 +1200,9 @@ public final class GuildRewards {
 				return;
 			}
 			try {
+				if (!establishGiftLogBaseline()) {
+					return;
+				}
 				if (!openRewardsMenu()) {
 					chat("Couldn't open the guild manage menu — try again (this can happen when your connection is slow).", ChatFormatting.RED);
 					return;
@@ -953,64 +1210,126 @@ public final class GuildRewards {
 				// The whole batch shares this one menu session.
 				try {
 					long[] counts = readAllCountsSettled();
-					int available = counts == null ? 0 : (int) counts[RewardType.ASPECT.hotbar];
+					int available = counts == null ? 0 : (int) counts[type.hotbar];
 					if (total > available) {
-						chat("Not enough aspects: selected " + total + " but the guild only has " + available + " — nothing was distributed.", ChatFormatting.RED);
+						chat("Not enough " + type.label + ": selected " + total + " but the guild only has " + available + " — nothing was distributed.", ChatFormatting.RED);
 						return;
 					}
 
 					String verb = settlesPending ? "Paying out" : "Gifting";
-					chat(verb + " " + total + " aspects to " + targets.size() + " members...", ChatFormatting.GREEN);
-					List<String> skipped = new ArrayList<>();
-					List<String> stillShort = new ArrayList<>();
-					// Members runSingle() gave less than requested to get one more full attempt
-					// (fresh recovery budget and confirmation cutoff) before being reported short.
-					Map<String, Integer> shortfalls = new LinkedHashMap<>();
-					int paidInFull = 0;
+					chat(verb + " " + total + " " + type.label + " to " + targets.size() + " members...", ChatFormatting.GREEN);
+					// Send the first pass exactly once. Ticker messages can be delayed or
+					// dropped locally, so never infer a failed click per recipient and resend
+					// it here — that is how this path doubled real handouts.
+					long batchSince = System.currentTimeMillis();
+					Map<String, Integer> attempted = new LinkedHashMap<>();
 					int done = 0;
+					// Aspects sent so far across the whole batch — the progress bar's total is
+					// the batch's total aspects (batchTotal, a final capture of `total` above
+					// for the per-member lambda below), not the member count, so it fills
+					// smoothly across the whole run instead of jumping once per member.
+					int cumulativeSent = 0;
+					final int batchTotal = total;
 					try {
 						for (PayoutTarget target : targets) {
-							done++;
-							int given = runSingle(target.name(), RewardType.ASPECT, target.aspects(), false, autoDeduct, settlesPending);
-							if (given >= target.aspects()) {
-								paidInFull++;
-							} else if (given > 0) {
-								shortfalls.put(target.name(), target.aspects() - given);
-							} else {
-								skipped.add(target.name());
+							if (cancelRequested) {
+								chat("Payout cancelled after " + done + " of " + targets.size() + " members.", ChatFormatting.YELLOW);
+								break;
 							}
+							done++;
+							// attempted (and everything derived from it below — ticker/log/missing)
+							// tracks menu-click counts, not real units: that's what a confirmed
+							// ticker/Guild-Log row is actually counted in for emeralds, where one
+							// click is worth EMERALDS_PER_ITEM real units, not 1. Mixing the two
+							// units here previously meant a batch tried to click ~1024x too many
+							// times for an emerald payout — see menuClicksFor's doc.
+							int clickAmount = menuClicksFor(type, target.amount());
+							attempted.merge(target.name(), clickAmount, Integer::sum);
+							int slot = findMemberSlot(target.name());
+							if (slot < 0) {
+								chat("Couldn't find " + target.name() + "'s item in the menu.", ChatFormatting.RED);
+								continue;
+							}
+							chat("Gifting " + target.name() + " " + target.amount() + " " + type.label + "...", ChatFormatting.GREEN);
+							String memberLabel = verb + " " + target.name() + "...";
+							int base = cumulativeSent;
+							progress(memberLabel, base, batchTotal);
+							int sentClicks = sendBatchUnits(target.name(), slot, type, clickAmount, n -> progress(memberLabel, base + realUnitsFor(type, n), batchTotal));
+							if (sentClicks < clickAmount) {
+								// Cancelled (or otherwise cut short) mid-send: no more clicks are
+								// coming for this member, so cap the wait target down to what was
+								// actually sent. Left at the full clickAmount, awaitBatchConfirmations
+								// below would burn its whole timeout waiting for confirmations that
+								// can never arrive for clicks that were never sent.
+								attempted.merge(target.name(), sentClicks - clickAmount, Integer::sum);
+							}
+							cumulativeSent += target.amount();
 							// Renewed once per member (simpler than a timer, and guarantees a fresh
 							// hold going into every member's swaps). A denial stops the batch
 							// immediately rather than continuing without exclusive access.
 							if (!acquireGiftLock()) {
 								chat("Lost the gift lock mid-batch — stopping after " + done + " of " + targets.size() + " members.", ChatFormatting.RED);
+								// Whatever was already handed out before the lock was lost still
+								// needs reconciling, rather than silently falling back to the
+								// slower, consensus-gated passive path for a partial run.
+								onClientRun(this::closeMenu);
+								reconcileAndSendConfirmedDeductions(attempted, type, batchSince, settlesPending);
 								return;
-							}
-						}
-						if (!shortfalls.isEmpty()) {
-							chat("Retrying " + shortfalls.size() + " member(s) that came up short...", ChatFormatting.YELLOW);
-							for (var entry : shortfalls.entrySet()) {
-								int given = runSingle(entry.getKey(), RewardType.ASPECT, entry.getValue(), false, autoDeduct, settlesPending);
-								int stillMissing = entry.getValue() - given;
-								if (stillMissing <= 0) {
-									paidInFull++;
-								} else {
-									stillShort.add(entry.getKey() + " (" + stillMissing + " short)");
-								}
 							}
 						}
 					} catch (Exception e) {
 						LOGGER.warn("Batch payout interrupted", e);
 						chat("Stopped after " + done + " of " + targets.size() + " members: " + e.getMessage(), ChatFormatting.RED);
+						onClientRun(this::closeMenu);
+						reconcileAndSendConfirmedDeductions(attempted, type, batchSince, settlesPending);
 						return;
 					}
-					chat((settlesPending ? "Payout" : "Giveaway") + " complete: " + paidInFull + "/" + targets.size() + " members paid in full.", ChatFormatting.GREEN);
-					if (!stillShort.isEmpty()) {
-						chat("Still short after retry: " + String.join(", ", stillShort), ChatFormatting.RED);
+					// Close before querying /gu log. The query owns the same server-side
+					// container channel, and the delayed ticker keeps arriving after close.
+					onClientRun(this::closeMenu);
+					progress("Confirming with the Guild Log...", done, targets.size());
+					Map<String, Integer> ticker = awaitBatchConfirmations(attempted, type, batchSince);
+					List<GuildLogEvent> evidence = collectPostGiftEvidence();
+					Map<String, Integer> log = evidence == null ? Map.of() : guildLogCounts(attempted, type, evidence);
+					Map<String, Integer> missing = evidence == null ? Map.of() : missingBatchUnits(attempted, ticker, log);
+					if (evidence == null) {
+						chat("Guild Log reconciliation was unavailable; not resending ticker-unconfirmed rewards automatically.", ChatFormatting.YELLOW);
+					} else if (cancelRequested && !missing.isEmpty()) {
+						// The main pass was cancelled — don't send more clicks to make up a
+						// shortfall the Chief just asked to stop. finishBatchPayout still reports
+						// these members honestly as unconfirmed.
+						chat("Skipping reconciliation for " + missing.size() + " member(s) — payout was cancelled.", ChatFormatting.YELLOW);
+					} else if (!missing.isEmpty()) {
+						chat("Reconciling " + missing.size() + " member(s) still missing from both ticker and Guild Log...", ChatFormatting.YELLOW);
+						if (openRewardsMenu()) {
+							long correctionSince = System.currentTimeMillis();
+							for (var entry : missing.entrySet()) {
+								int slot = findMemberSlot(entry.getKey());
+								if (slot >= 0) {
+									sendBatchUnits(entry.getKey(), slot, type, entry.getValue(), null);
+								}
+								// Renewed per member, same as the main pass — a long correction
+								// phase must not outlast the lock and reopen the two-Chiefs race.
+								if (!acquireGiftLock()) {
+									chat("Lost the gift lock during reconciliation — stopping early.", ChatFormatting.RED);
+									break;
+								}
+							}
+							onClientRun(this::closeMenu);
+							Map<String, Integer> correctionTicker = awaitBatchConfirmations(missing, type, correctionSince);
+							for (var entry : correctionTicker.entrySet()) {
+								ticker.merge(entry.getKey(), entry.getValue(), Integer::sum);
+							}
+							// The correction itself is another real handout. Re-read from the
+							// original boundary so finishBatchPayout below (which sends the
+							// actual deduction requests) sees the correction's rows too.
+							List<GuildLogEvent> correctionEvidence = collectPostGiftEvidence();
+							if (correctionEvidence != null) {
+								log = guildLogCounts(attempted, type, correctionEvidence);
+							}
+						}
 					}
-					if (!skipped.isEmpty()) {
-						chat("Skipped: " + String.join(", ", skipped), ChatFormatting.RED);
-					}
+					finishBatchPayout(attempted, ticker, log, type, settlesPending, counts);
 				} finally {
 					onClientRun(this::closeMenu);
 				}
@@ -1022,6 +1341,264 @@ public final class GuildRewards {
 			chat("Payout failed: " + e.getMessage(), ChatFormatting.RED);
 		} finally {
 			giftInProgress = false;
+			requestPostGiftReconciliation();
+			progress(cancelRequested ? "Cancelled" : "Done", 0, 0);
+			GiftProgressListener listener = progressListener;
+			if (listener != null) {
+				listener.onDone();
+			}
+		}
+	}
+
+	/**
+	 * Send a batch member once; only an explicit unavailable response earns a resend.
+	 * {@code onProgress} (nullable) is notified with this member's own running count,
+	 * 0..{@code amount}, monotonically across all three send phases below — each
+	 * phase's contribution is added on top of wherever the previous one left off,
+	 * rather than each reporting its own count from zero (which would make the bar
+	 * jump backwards when a later phase starts).
+	 */
+	private int sendBatchUnits(String name, int slot, RewardType type, int amount, IntConsumer onProgress) {
+		long since = System.currentTimeMillis();
+		int[] reportedSoFar = {0};
+		IntConsumer phase1 = onProgress == null ? null : s -> {
+			reportedSoFar[0] = s;
+			onProgress.accept(s);
+		};
+		int sent = burstSend(slot, type, amount, phase1);
+		int unavailable = drainImmediateUnavailable(since);
+		if (unavailable > 0) {
+			LOGGER.info("Gift: {} explicit unavailable response(s) for {}; correcting only those units", unavailable, name);
+			int base = reportedSoFar[0];
+			IntConsumer phase2 = onProgress == null ? null : extra -> {
+				reportedSoFar[0] = base + extra;
+				onProgress.accept(base + extra);
+			};
+			int confirmedRetry = giveUnitsSequential(name, slot, type, unavailable, 1, phase2);
+			for (int i = 0; i < confirmedRetry; i++) {
+				// The retry waited for a real ticker. Put that already-established result
+				// back into the batch tally so the one end-of-batch reconciliation sees it.
+				confirmedRewards.add(new TimedReward(System.currentTimeMillis(), new GuildReward(selfName == null ? "" : selfName, type.unitReward(), name)));
+			}
+		}
+		// A burst stops at an explicit rejection. Its unsent tail has not been tried,
+		// so it is safe to resume immediately after correcting the rejected unit.
+		if (sent < amount && Boolean.TRUE.equals(onClient(this::containerOpen))) {
+			int base = reportedSoFar[0];
+			IntConsumer phase3 = onProgress == null ? null : s -> onProgress.accept(base + s);
+			sent += burstSend(slot, type, amount - sent, phase3);
+		}
+		return sent;
+	}
+
+	private int drainImmediateUnavailable(long since) {
+		int unavailable = 0;
+		while (consumeUnavailable(since)) {
+			unavailable++;
+		}
+		return unavailable;
+	}
+
+	/** Wait once, after the whole first pass, for the authoritative ticker rows. */
+	private Map<String, Integer> awaitBatchConfirmations(Map<String, Integer> attempted, RewardType type, long since) {
+		Map<String, Integer> confirmed = new LinkedHashMap<>();
+		long deadline = System.currentTimeMillis() + adaptiveTimeoutMs(MIN_CONFIRM_TIMEOUT_MS, MAX_CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_MULTIPLIER);
+		while (true) {
+			boolean progressed = false;
+			for (var entry : attempted.entrySet()) {
+				int current = confirmed.getOrDefault(entry.getKey(), 0);
+				while (current < entry.getValue() && consumeConfirmation(entry.getKey(), type.unitReward(), since)) {
+					current++;
+					progressed = true;
+				}
+				confirmed.put(entry.getKey(), current);
+			}
+			if (confirmed.entrySet().stream().allMatch(entry -> entry.getValue() >= attempted.getOrDefault(entry.getKey(), 0)) || System.currentTimeMillis() >= deadline) {
+				return confirmed;
+			}
+			if (!progressed) {
+				sleep(POLL_INTERVAL_MS);
+			}
+		}
+	}
+
+	private List<GuildLogEvent> collectPostGiftEvidence() {
+		Supplier<List<GuildLogEvent>> supplier = postGiftEvidenceSupplier;
+		if (supplier == null) {
+			return null;
+		}
+		try {
+			return supplier.get();
+		} catch (Exception e) {
+			LOGGER.warn("Gift: Guild Log reconciliation failed", e);
+			return null;
+		}
+	}
+
+	/**
+	 * Confirm one member's real landed amount for a single (non-batch) gift against
+	 * its own Guild Log evidence — whichever is higher, the ticker-confirmed click
+	 * count or what the log shows for this receiver — and request its deduction
+	 * directly. Replaces uploading raw evidence for the server to reconcile: the
+	 * mod already holds the ticker, the baseline, and the log rows synchronously
+	 * in one place, so there's no server-side state needed to keep in sync with it.
+	 */
+	private int reportConfirmedDeduction(String name, RewardType type, int tickerClicks, List<GuildLogEvent> evidence) {
+		int logClicks = evidence == null ? 0 : guildLogCounts(Map.of(name, tickerClicks), type, evidence).getOrDefault(name, 0);
+		int confirmed = Math.max(tickerClicks, logClicks);
+		sendConfirmedDeduction(name, type, confirmed);
+		return confirmed;
+	}
+
+	/**
+	 * Request a deduction for one member's confirmed real amount (see
+	 * {@link #reportConfirmedDeduction}/{@link #finishBatchPayout}), unless the
+	 * kind has no pending balance (tomes) or nothing was actually confirmed.
+	 * Package-private (not private) so its guard/conversion logic is directly
+	 * unit-testable, matching {@link #menuClicksFor}/{@link #realUnitsFor}.
+	 */
+	void sendConfirmedDeduction(String name, RewardType type, int confirmedClicks) {
+		if (type == RewardType.TOME || confirmedClicks <= 0) {
+			return;
+		}
+		RewardDeductSender sender = rewardDeductSender;
+		if (sender != null) {
+			sender.request(type.label, name, realUnitsFor(type, confirmedClicks));
+		}
+	}
+
+	/**
+	 * {@link #sendConfirmedDeduction} for every member in a batch's attempted map —
+	 * only when {@code settlesPending}. A giveaway hands out surplus rewards that
+	 * were never anyone's tracked pending balance in the first place, so there is
+	 * nothing to deduct; requesting one anyway just errors on the backend.
+	 */
+	void sendConfirmedDeductions(Map<String, Integer> attempted, Map<String, Integer> ticker, Map<String, Integer> log, RewardType type, boolean settlesPending) {
+		if (!settlesPending) {
+			return;
+		}
+		for (var entry : attempted.entrySet()) {
+			int observed = Math.max(ticker.getOrDefault(entry.getKey(), 0), log.getOrDefault(entry.getKey(), 0));
+			sendConfirmedDeduction(entry.getKey(), type, Math.min(entry.getValue(), observed));
+		}
+	}
+
+	/**
+	 * Confirm and request deduction for whatever a batch already handed out before
+	 * being cut short (lock lost, or an exception) — ticker plus Guild Log, exactly
+	 * like a full batch's own reconciliation, just without the "complete" summary
+	 * a normal run shows.
+	 */
+	private void reconcileAndSendConfirmedDeductions(Map<String, Integer> attempted, RewardType type, long since, boolean settlesPending) {
+		Map<String, Integer> ticker = awaitBatchConfirmations(attempted, type, since);
+		List<GuildLogEvent> evidence = collectPostGiftEvidence();
+		Map<String, Integer> log = evidence == null ? Map.of() : guildLogCounts(attempted, type, evidence);
+		sendConfirmedDeductions(attempted, ticker, log, type, settlesPending);
+	}
+
+	/**
+	 * Read and report the current log before a gift. The same websocket send queue
+	 * carries the following lock renewal, so the backend sees this baseline before
+	 * any reward action can be sent.
+	 */
+	private boolean establishGiftLogBaseline() {
+		Supplier<List<GuildLogEvent>> supplier = preGiftEvidenceSupplier;
+		if (supplier == null) {
+			chat("Can't gift safely — Guild Log synchronization is unavailable.", ChatFormatting.RED);
+			return false;
+		}
+		try {
+			supplier.get();
+			return true;
+		} catch (Exception e) {
+			LOGGER.warn("Gift: couldn't establish Guild Log baseline", e);
+			chat("Can't gift safely — couldn't read the Guild Log. Try again in a moment.", ChatFormatting.RED);
+			return false;
+		}
+	}
+
+	/**
+	 * Menu-click counts confirmed via the Guild Log, matching {@code attempted}'s and
+	 * {@code awaitBatchConfirmations}' own unit — {@code reward.amount()} is a real
+	 * unit count per row (e.g. one emerald click's row reads "1024 Emeralds"), so it's
+	 * converted the same way {@code attempted} was built, not summed as-is.
+	 */
+	Map<String, Integer> guildLogCounts(Map<String, Integer> attempted, RewardType type, List<GuildLogEvent> events) {
+		Map<String, Integer> counts = new LinkedHashMap<>();
+		String giver = selfName;
+		for (GuildLogEvent event : events) {
+			if (!(event instanceof GuildLogEvent.Reward reward) || !reward.kind().equals(type.label)) {
+				continue;
+			}
+			if (giver != null && !PlayerNameResolver.canonicalize(reward.giver()).equalsIgnoreCase(giver)) {
+				continue;
+			}
+			// Canonicalize the receiver too, not just the giver above: Wynncraft's Guild
+			// Log can show a nicknamed member's nickname instead of their account name
+			// (e.g. "buddy jingu" for "Asthae"), which never equals the attempted map's
+			// account-name key otherwise, silently losing that row's confirmation.
+			String receiverAccount = PlayerNameResolver.canonicalize(reward.receiver());
+			for (String receiver : attempted.keySet()) {
+				if (receiverAccount.equalsIgnoreCase(receiver)) {
+					counts.merge(receiver, menuClicksFor(type, reward.amount()), Integer::sum);
+					break;
+				}
+			}
+		}
+		return counts;
+	}
+
+	static Map<String, Integer> missingBatchUnits(Map<String, Integer> attempted, Map<String, Integer> ticker, Map<String, Integer> log) {
+		Map<String, Integer> missing = new LinkedHashMap<>();
+		for (var entry : attempted.entrySet()) {
+			int observed = Math.max(ticker.getOrDefault(entry.getKey(), 0), log.getOrDefault(entry.getKey(), 0));
+			if (observed < entry.getValue()) {
+				missing.put(entry.getKey(), entry.getValue() - observed);
+			}
+		}
+		return missing;
+	}
+
+	private void finishBatchPayout(Map<String, Integer> attempted, Map<String, Integer> ticker, Map<String, Integer> log, RewardType type, boolean settlesPending, long[] startingCounts) {
+		int paidInFull = 0;
+		// attempted/ticker/log are all menu-click counts (see guildLogCounts' doc), so
+		// confirmedTotal is too — convert with realUnitsFor before it touches anything
+		// expressed in real units (the storage subtraction, the chat text below).
+		int confirmedTotal = 0;
+		List<String> stillShort = new ArrayList<>();
+		for (var entry : attempted.entrySet()) {
+			// Match missingBatchUnits' own definition of "confirmed" — a member the
+			// Guild Log alone confirmed must not still show up as unconfirmed here.
+			int observed = Math.max(ticker.getOrDefault(entry.getKey(), 0), log.getOrDefault(entry.getKey(), 0));
+			int confirmed = Math.min(entry.getValue(), observed);
+			confirmedTotal += confirmed;
+			if (settlesPending) {
+				sendConfirmedDeduction(entry.getKey(), type, confirmed);
+			}
+			if (confirmed >= entry.getValue()) {
+				paidInFull++;
+			} else {
+				stillShort.add(entry.getKey() + " (" + realUnitsFor(type, entry.getValue() - confirmed) + " " + type.label + " unconfirmed)");
+			}
+		}
+		StorageReporter currentStorageReporter = storageReporter;
+		if (currentStorageReporter != null) {
+			// Only type's own slot moves — startingCounts[0..2] is aspects/tomes/emeralds
+			// regardless of which one this batch actually gifted.
+			long[] finalCounts = startingCounts.clone();
+			finalCounts[type.hotbar] = Math.max(0, startingCounts[type.hotbar] - realUnitsFor(type, confirmedTotal));
+			currentStorageReporter.report((int) finalCounts[0], (int) finalCounts[1], finalCounts[2]);
+		}
+		chat((settlesPending ? "Payout" : "Giveaway") + " complete: " + paidInFull + "/" + attempted.size() + " members confirmed (ticker or Guild Log).", ChatFormatting.GREEN);
+		if (!stillShort.isEmpty()) {
+			chat("Still unconfirmed after ticker and Guild Log reconciliation: " + String.join(", ", stillShort), ChatFormatting.RED);
+		}
+	}
+
+	private void requestPostGiftReconciliation() {
+		Runnable reconciler = postGiftReconciler;
+		if (reconciler != null) {
+			reconciler.run();
 		}
 	}
 
@@ -1091,12 +1668,17 @@ public final class GuildRewards {
 	// -- client-thread operations (must run on the render thread) ---------------
 
 	private boolean containerOpen() {
+		if (backgroundSession.isOwnedBy("guild rewards"))
+			return backgroundSession.isOpen() && !backgroundSession.isAborted();
 		Minecraft mc = Minecraft.getInstance();
 		return mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu;
 	}
 
 	/** {@code seenByPosition} is filled slot-index → raw hover name, for {@link #staleOverlapDetails}. */
 	private int findSlotByName(String name, Map<Integer, String> seenByPosition) {
+		if (backgroundSession.isOwnedBy("guild rewards")) {
+			return findSlotByName(backgroundSession.items(), name, seenByPosition);
+		}
 		AbstractContainerMenu menu = menu();
 		if (menu == null) {
 			return -1;
@@ -1114,6 +1696,20 @@ public final class GuildRewards {
 			if (normalizeName(raw).equals(wanted)) {
 				return i;
 			}
+		}
+		return -1;
+	}
+
+	private static int findSlotByName(List<ItemStack> items, String name, Map<Integer, String> seenByPosition) {
+		String wanted = normalizeName(name);
+		for (int i = 0; i < Math.min(items.size(), MENU_SLOT_COUNT); i++) {
+			ItemStack stack = items.get(i);
+			if (stack.isEmpty())
+				continue;
+			String raw = stack.getHoverName().getString();
+			seenByPosition.put(i, raw);
+			if (normalizeName(raw).equals(wanted))
+				return i;
 		}
 		return -1;
 	}
@@ -1166,6 +1762,8 @@ public final class GuildRewards {
 	}
 
 	private int readRewardCount(String loreKey) {
+		if (backgroundSession.isOwnedBy("guild rewards"))
+			return readRewardCount(backgroundSession.items(), loreKey);
 		AbstractContainerMenu menu = menu();
 		if (menu == null || REWARDS_SLOT >= menu.slots.size()) {
 			return 0;
@@ -1187,7 +1785,27 @@ public final class GuildRewards {
 		return 0;
 	}
 
+	private static int readRewardCount(List<ItemStack> items, String loreKey) {
+		if (items.size() <= REWARDS_SLOT)
+			return 0;
+		ItemLore lore = items.get(REWARDS_SLOT).get(DataComponents.LORE);
+		if (lore == null)
+			return 0;
+		for (Component line : lore.lines()) {
+			if (line.getString().contains(loreKey)) {
+				Matcher matcher = COUNT.matcher(line.getString());
+				if (matcher.find())
+					return Integer.parseInt(matcher.group(1));
+			}
+		}
+		return 0;
+	}
+
 	private void click(int slot) {
+		if (backgroundSession.isOwnedBy("guild rewards")) {
+			backgroundSession.click(slot, 0, ClickType.PICKUP);
+			return;
+		}
 		Minecraft mc = Minecraft.getInstance();
 		AbstractContainerMenu menu = menu();
 		if (mc.gameMode != null && mc.player != null && menu != null) {
@@ -1196,6 +1814,10 @@ public final class GuildRewards {
 	}
 
 	private void swapHotbar(int slot, int hotbar) {
+		if (backgroundSession.isOwnedBy("guild rewards")) {
+			backgroundSession.click(slot, hotbar, ClickType.SWAP);
+			return;
+		}
 		Minecraft mc = Minecraft.getInstance();
 		AbstractContainerMenu menu = menu();
 		if (mc.gameMode != null && mc.player != null && menu != null) {
@@ -1204,6 +1826,10 @@ public final class GuildRewards {
 	}
 
 	private void closeMenu() {
+		if (backgroundSession.isOwnedBy("guild rewards")) {
+			backgroundSession.close();
+			return;
+		}
 		LocalPlayer player = Minecraft.getInstance().player;
 		if (player != null) {
 			player.closeContainer();
@@ -1220,12 +1846,16 @@ public final class GuildRewards {
 
 	/** The open container's ack counter, or -1 with nothing open — a snapshot to diff against after a click. */
 	private int currentStateId() {
+		if (backgroundSession.isOwnedBy("guild rewards"))
+			return backgroundSession.stateId();
 		AbstractContainerMenu menu = menu();
 		return menu == null ? -1 : menu.getStateId();
 	}
 
 	/** Whether the container's state id has moved past {@code previous} — the server has acknowledged something since. */
 	private boolean stateChanged(int previous) {
+		if (backgroundSession.isOwnedBy("guild rewards"))
+			return backgroundSession.isOpen() && backgroundSession.stateId() != previous;
 		AbstractContainerMenu menu = menu();
 		return menu != null && menu.getStateId() != previous;
 	}
@@ -1384,11 +2014,6 @@ public final class GuildRewards {
 		}
 	}
 
-	/** Whether a click made after snapshotting {@code previousStateId} was acknowledged before the adaptive timeout. */
-	private boolean waitForStateChange(int previousStateId) {
-		return waitUntil(() -> stateChanged(previousStateId));
-	}
-
 	/**
 	 * Pace the next click after one made at {@code previousStateId}: wait for its ack
 	 * (so a dead connection is still detected), but never move on sooner than
@@ -1398,6 +2023,45 @@ public final class GuildRewards {
 	 */
 	private boolean paceSend(int previousStateId) {
 		return paceSend(previousStateId, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS, LATENCY_TIMEOUT_MULTIPLIER);
+	}
+
+	/**
+	 * Reward-click pacing that stops early when the server explicitly rejects the click.
+	 * Unlike an ack timeout, that rejection is conclusive, so making the correction path
+	 * wait out the normal timeout/floor would only delay a safe retry.
+	 */
+	private boolean paceRewardSend(int previousStateId, long since) {
+		long start = System.currentTimeMillis();
+		long ackDeadline = start + adaptiveTimeoutMs(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS, LATENCY_TIMEOUT_MULTIPLIER);
+		boolean acked = false;
+		while (true) {
+			if (hasRewardFailureSince(since)) {
+				recordStress(false);
+				return false;
+			}
+			if (Boolean.TRUE.equals(onClient(() -> stateChanged(previousStateId)))) {
+				acked = true;
+				break;
+			}
+			if (System.currentTimeMillis() >= ackDeadline) {
+				break;
+			}
+			sleep(POLL_INTERVAL_MS);
+		}
+		recordStress(acked);
+		long floorDeadline = start + adaptiveTimeoutMs(PACE_FLOOR_MS, PACE_MAX_MS, PACE_MULTIPLIER);
+		while (true) {
+			if (hasRewardFailureSince(since)) {
+				recordStress(false);
+				return false;
+			}
+			long remaining = floorDeadline - System.currentTimeMillis();
+			if (remaining <= 0) {
+				break;
+			}
+			sleep(Math.min(POLL_INTERVAL_MS, remaining));
+		}
+		return acked;
 	}
 
 	/** Same as {@link #paceSend(int)}, but with its own ack-wait bounds/multiplier for a costlier click (e.g. a page turn). */
@@ -1413,53 +2077,92 @@ public final class GuildRewards {
 		return acked;
 	}
 
-	/** Record a confirmed handout from the chat pipeline, for {@link #waitForRewardConfirmation} to claim. */
+	/** Record a confirmed handout from the chat/ticker pipeline for the gift worker to claim. */
 	public void onConfirmedReward(GuildReward reward) {
-		confirmedRewards.add(new TimedReward(System.currentTimeMillis(), reward));
-		long cutoff = System.currentTimeMillis() - CONFIRMATION_MEMORY_MS;
+		long now = System.currentTimeMillis();
+		confirmedRewards.add(new TimedReward(now, reward));
+		long cutoff = now - CONFIRMATION_MEMORY_MS;
 		confirmedRewards.removeIf(t -> t.atMs() < cutoff);
 	}
 
 	/**
-	 * Wait for Wynncraft's own "{@code <giver> rewarded <reward> to <receiver>}" chat
-	 * line to confirm this handout — the authoritative signal, since a container click
-	 * can ack without anything actually being granted. Consumes the matching
-	 * confirmation so it can't be reused for a later unit or member; {@code since}
-	 * excludes anything that arrived before this gift started (see {@link #giveUnits}).
-	 * Not dispatched via {@link #onClient}: {@link #confirmedRewards} is plain
-	 * thread-safe Java state, so polling it directly isn't bounded by render-tick timing.
+	 * Record Wynncraft's explicit transient rejection. Ignore it outside a gift run so a
+	 * stale manual-click error can never be claimed by the next automated gift.
 	 */
-	private boolean waitForRewardConfirmation(String receiver, RewardType type, long since) {
+	public void onRewardUnavailable() {
+		if (!giftInProgress) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		unavailableRewards.add(now);
+		long cutoff = now - CONFIRMATION_MEMORY_MS;
+		unavailableRewards.removeIf(atMs -> atMs < cutoff);
+	}
+
+	/** Record a terminal insufficient-storage response for the active automated gift. */
+	public void onRewardOutOfStock() {
+		if (!giftInProgress) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		outOfStockRewards.add(now);
+		long cutoff = now - CONFIRMATION_MEMORY_MS;
+		outOfStockRewards.removeIf(atMs -> atMs < cutoff);
+	}
+
+	/**
+	 * Wait for the authoritative outcome of one click: its success ticker, the explicit
+	 * unavailable rejection, or a timeout. This deliberately does not require a container
+	 * state-id change; either server message is stronger evidence than a generic menu ack.
+	 */
+	private RewardOutcome waitForRewardOutcome(String receiver, RewardType type, long since) {
 		String wantedReward = type.unitReward();
 		long deadline = System.currentTimeMillis() + adaptiveTimeoutMs(MIN_CONFIRM_TIMEOUT_MS, MAX_CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_MULTIPLIER);
 		while (true) {
+			// Failures win over a same-window ticker: the observed incident included one
+			// duplicated reward line for a click the server explicitly rejected.
+			if (consumeOutOfStock(since)) {
+				recordStress(false);
+				return RewardOutcome.OUT_OF_STOCK;
+			}
+			if (consumeUnavailable(since)) {
+				recordStress(false);
+				return RewardOutcome.REJECTED;
+			}
 			if (consumeConfirmation(receiver, wantedReward, since)) {
 				recordStress(true);
-				return true;
+				return RewardOutcome.CONFIRMED;
 			}
 			if (System.currentTimeMillis() >= deadline) {
 				recordStress(false);
-				return false;
+				return RewardOutcome.TIMED_OUT;
 			}
 			sleep(POLL_INTERVAL_MS);
 		}
 	}
 
 	/**
-	 * After a burst of unconfirmed sends, wait a bit for straggler confirmations and
-	 * claim up to {@code maxToClaim} of them for {@code receiver}/{@code type} that
-	 * arrived at or after {@code since} (see {@link #waitForRewardConfirmation}). One
-	 * confirm-timeout window is enough even for several units, since sends are already
-	 * paced {@link #PACE_FLOOR_MS} apart. Returns how many were actually claimed, which
-	 * may be less than {@code maxToClaim}.
+	 * Reconcile a burst against both success tickers and explicit rejections. Once those
+	 * two totals cover every click, correction can begin without waiting out the normal
+	 * confirmation timeout.
 	 */
-	private int drainConfirmations(String receiver, RewardType type, int maxToClaim, long since) {
+	private RewardOutcomes drainRewardOutcomes(String receiver, RewardType type, int maxToClaim, long since) {
 		String wantedReward = type.unitReward();
 		long deadline = System.currentTimeMillis() + adaptiveTimeoutMs(MIN_CONFIRM_TIMEOUT_MS, MAX_CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_MULTIPLIER);
-		int claimed = 0;
-		while (claimed < maxToClaim) {
+		int confirmed = 0;
+		int unavailable = 0;
+		boolean outOfStock = false;
+		while (confirmed + unavailable < maxToClaim) {
+			if (consumeOutOfStock(since)) {
+				outOfStock = true;
+				break;
+			}
+			if (consumeUnavailable(since)) {
+				unavailable++;
+				continue;
+			}
 			if (consumeConfirmation(receiver, wantedReward, since)) {
-				claimed++;
+				confirmed++;
 				continue;
 			}
 			if (System.currentTimeMillis() >= deadline) {
@@ -1467,7 +2170,48 @@ public final class GuildRewards {
 			}
 			sleep(POLL_INTERVAL_MS);
 		}
-		return claimed;
+		return new RewardOutcomes(confirmed, unavailable, outOfStock);
+	}
+
+	/** Consume one unavailable response belonging to an attempt at or after {@code since}. */
+	private boolean consumeUnavailable(long since) {
+		for (Iterator<Long> it = unavailableRewards.iterator(); it.hasNext();) {
+			long atMs = it.next();
+			if (atMs < since) {
+				continue;
+			}
+			it.remove();
+			return true;
+		}
+		return false;
+	}
+
+	/** Consume one terminal out-of-stock response belonging to this gift operation. */
+	private boolean consumeOutOfStock(long since) {
+		for (Iterator<Long> it = outOfStockRewards.iterator(); it.hasNext();) {
+			long atMs = it.next();
+			if (atMs < since) {
+				continue;
+			}
+			it.remove();
+			return true;
+		}
+		return false;
+	}
+
+	/** Non-consuming check used to break a paced burst as soon as a failure arrives. */
+	private boolean hasRewardFailureSince(long since) {
+		for (long atMs : unavailableRewards) {
+			if (atMs >= since) {
+				return true;
+			}
+		}
+		for (long atMs : outOfStockRewards) {
+			if (atMs >= since) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
