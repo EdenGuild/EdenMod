@@ -75,6 +75,11 @@ public final class AllianceMenuScraper {
 			disconnectedWarningLogged = false;
 			return;
 		}
+		// Strategists can edit the alliance menu themselves, so let them keep it synced
+		// too, not just Chiefs/Owners — see GuildRewards.isChiefOwnerOrStrategist's doc.
+		if (!EdenModClient.instance().guildRewards().isChiefOwnerOrStrategist()) {
+			return;
+		}
 		AbstractContainerMenu menu = screen.getMenu();
 		// Every alliance slot has to fall inside the container's own slots, i.e. before the
 		// player inventory appended after them. Anything smaller isn't the menu we parse,
@@ -104,6 +109,16 @@ public final class AllianceMenuScraper {
 			return;
 		}
 		menuOpen = true;
+		if (allies.isEmpty()) {
+			// A guild having zero allies is implausible, and in production the ally
+			// banners reliably take longer to arrive than everything else in this menu
+			// — this read empty on every single open, well past hasContents's own
+			// guard. Treat an empty reading here as "not loaded yet", never as a
+			// genuine drop to zero; real revocations still reach the backend
+			// individually via chat (see _apply_alliance_change), so this snapshot
+			// path never needs to be the one to report a guild going allyless.
+			return;
+		}
 		// Wynncraft fills the alliance slots over more than one packet, and re-pushes them
 		// while an ally is being added or removed. A slot that has not arrived yet reads
 		// exactly like one whose ally was just removed, so a reading taken mid-update is a
