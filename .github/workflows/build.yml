@@ -28,6 +28,9 @@ jobs:
       - name: Check formatting
         run: ./gradlew spotlessCheck --no-daemon
 
+      - name: Run tests
+        run: ./gradlew test --no-daemon --stacktrace
+
       - name: Check Fulcio cert freshness
         env:
           GH_TOKEN: ${{ github.token }}
