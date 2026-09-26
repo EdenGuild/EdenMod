@@ -20,6 +20,7 @@ public abstract class ClientPacketListenerCommandAliasMixin {
 		if (mod == null) {
 			return;
 		}
+		mod.onOutgoingCommand(command);
 		String rewritten = mod.rewriteOutgoingCommand(command);
 		if (rewritten == null || rewritten.equals(command)) {
 			return;
