@@ -189,6 +189,12 @@ public final class BridgeConfig {
 	/** Whether players are rendered at the unlocked baby-player size. */
 	public boolean babyPlayers = false;
 
+	/** Unique party member outline highlights in raids/dungeons (requires Wynntils). */
+	public boolean partyHighlightEnabled = true;
+
+	/** Custom palette for the 10 party slots. Defaults to PartyHighlightManager.DEFAULT_PALETTE. */
+	public List<Integer> partyColors = new ArrayList<>(tel.eden.mod.party.PartyHighlightManager.DEFAULT_PALETTE);
+
 	/**
 	 * Saved HUD element positions as {@code name -> [xFraction, yFraction]} (0-1 of
 	 * the screen). Absent elements fall back to their built-in default anchor.
@@ -324,6 +330,9 @@ public final class BridgeConfig {
 					}
 					if (config.hudScales == null) {
 						config.hudScales = new HashMap<>();
+					}
+					if (config.partyColors == null || config.partyColors.isEmpty()) {
+						config.partyColors = new ArrayList<>(tel.eden.mod.party.PartyHighlightManager.DEFAULT_PALETTE);
 					}
 					if (config.emoteWheelFavorites == null) {
 						config.emoteWheelFavorites = new ArrayList<>();

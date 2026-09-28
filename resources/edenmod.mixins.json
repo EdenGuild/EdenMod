@@ -17,6 +17,7 @@
     "ClientCommonPacketListenerMixin",
     "ClientPacketListenerMixin",
     "ConnectionScoreboardMixin",
+    "EntityOutlineMixin",
     "GroundItemVisibilityMixin",
     "GuiGraphicsMixin",
     "ItemDecorationMixin",

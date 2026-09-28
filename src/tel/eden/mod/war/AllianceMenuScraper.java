@@ -73,6 +73,8 @@ public final class AllianceMenuScraper {
 		if (!(mc.screen instanceof AbstractContainerScreen<?> screen) || !isDiplomacyTitle(screen)) {
 			menuOpen = false;
 			disconnectedWarningLogged = false;
+			pendingAllies = List.of();
+			pendingSince = 0;
 			return;
 		}
 		// Strategists can edit the alliance menu themselves, so let them keep it synced
