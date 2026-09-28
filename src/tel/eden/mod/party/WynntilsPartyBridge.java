@@ -37,7 +37,6 @@ public final class WynntilsPartyBridge {
 		}
 	}
 
-	@SuppressWarnings("unchecked")
 	public static List<String> getPartyMembers() {
 		if (!isAvailable() || partyModelInstance == null || getPartyMembersMethod == null) {
 			return Collections.emptyList();
@@ -45,7 +44,24 @@ public final class WynntilsPartyBridge {
 		try {
 			Object res = getPartyMembersMethod.invoke(partyModelInstance);
 			if (res instanceof List<?> list) {
-				return (List<String>) list;
+				if (list.isEmpty()) {
+					return Collections.emptyList();
+				}
+				Object first = list.get(0);
+				if (first instanceof String) {
+					@SuppressWarnings("unchecked")
+					List<String> typed = (List<String>) res;
+					return typed;
+				}
+				// Wynntils may return List<PartyMember> or similar — extract via toString.
+				LOGGER.warn("Wynntils party members returned non-String type: {}; falling back to toString()", first.getClass().getName());
+				List<String> names = new java.util.ArrayList<>(list.size());
+				for (Object obj : list) {
+					if (obj != null) {
+						names.add(obj.toString());
+					}
+				}
+				return names;
 			}
 		} catch (Exception ignored) {
 		}
