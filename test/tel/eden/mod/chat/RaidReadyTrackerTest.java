@@ -2,8 +2,11 @@ package tel.eden.mod.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,18 +48,90 @@ class RaidReadyTrackerTest {
 		RaidReadyTracker.onSystemChat(Component.literal("Tawnyy/20 is ready!"));
 		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("tawnyy"));
 
+		RaidReadyTracker.onSystemChat(Component.literal("Zasper0W/riptide guy is ready!"));
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("zasper0w"));
+
 		RaidReadyTracker.onSystemChat(Component.literal("Tawnyy/20 is no longer ready!"));
 		assertFalse(RaidReadyTracker.readyPlayersForTesting().contains("tawnyy"));
 		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("youremomgood"));
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("zasper0w"));
 	}
 
 	@Test
-	void resetsOnNewRaidPrompt() {
+	void resetsOnNewRaidPromptAndMarksStarterReady() {
 		RaidReadyTracker.onSystemChat(Component.literal("YoureMomGood is ready!"));
 		RaidReadyTracker.onSystemChat(Component.literal("Tawnyy/20 is ready!"));
 		assertEquals(2, RaidReadyTracker.readyPlayersForTesting().size());
 
 		RaidReadyTracker.onSystemChat(Component.literal("Bynt would like to start Orphion's Nexus of Light!"));
-		assertEquals(0, RaidReadyTracker.readyPlayersForTesting().size());
+		assertEquals(1, RaidReadyTracker.readyPlayersForTesting().size());
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("bynt"));
+
+		// Wynncraft starter with nickname: Cartiye/kyousuke
+		RaidReadyTracker.onSystemChat(Component.literal("  Cartiye/kyousuke would like to start The Nameless Anomaly!"));
+		assertEquals(1, RaidReadyTracker.readyPlayersForTesting().size());
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("cartiye"));
+	}
+
+	@Test
+	void parsesPawnComponentColorsCorrectly() {
+		// 2 ready (green), 1 unready (gray), 1 empty (dark gray)
+		Component component = Component.empty().append(Component.literal("- Players: ")).append(Component.literal("♙").withStyle(ChatFormatting.GREEN)).append(Component.literal("♙").withStyle(ChatFormatting.GREEN)).append(Component.literal("♙").withStyle(ChatFormatting.GRAY)).append(Component.literal("♙").withStyle(ChatFormatting.DARK_GRAY));
+
+		RaidReadyTracker.PawnStatus status = RaidReadyTracker.parsePawnComponent(component);
+		assertNotNull(status);
+		assertEquals(2, status.ready());
+		assertEquals(1, status.unready());
+		assertEquals(1, status.empty());
+		assertEquals(3, status.partySize());
+		assertEquals(4, status.totalPieces());
+	}
+
+	@Test
+	void parsesPawnComponentLegacyColorsCorrectly() {
+		// 3 ready (green), 1 unready (gray) via legacy formatting codes
+		Component component = Component.literal("- Players: §a♙§a♙§a♙§7♙");
+
+		RaidReadyTracker.PawnStatus status = RaidReadyTracker.parsePawnComponent(component);
+		assertNotNull(status);
+		assertEquals(3, status.ready());
+		assertEquals(1, status.unready());
+		assertEquals(0, status.empty());
+		assertEquals(4, status.partySize());
+	}
+
+	@Test
+	void parsesWynncraftPawnGlyphComponent() {
+		// Exact Wynncraft format: 1 ready, 1 unready, 2 empty using \uE085
+		Component component = Component.empty().append(Component.literal("- Players: ")).append(Component.literal("\uE085").withStyle(ChatFormatting.GREEN)).append(Component.literal("\uE085").withStyle(ChatFormatting.GRAY)).append(Component.literal("\uE085").withStyle(ChatFormatting.DARK_GRAY)).append(Component.literal("\uE085").withStyle(ChatFormatting.DARK_GRAY));
+
+		RaidReadyTracker.PawnStatus status = RaidReadyTracker.parsePawnComponent(component);
+		assertNotNull(status);
+		assertEquals(1, status.ready());
+		assertEquals(1, status.unready());
+		assertEquals(2, status.empty());
+		assertEquals(2, status.partySize());
+		assertEquals(4, status.totalPieces());
+	}
+
+	@Test
+	void parsesWynncraftRawScoreboardLine() {
+		// Exact Wynncraft line from user logs: 1 ready (§a), 1 unready (§7), 2 empty (§8)
+		Component component = Component.literal("§e- §7Players: §a\uE085§7\uE085§8\uE085\uE085");
+
+		RaidReadyTracker.PawnStatus status = RaidReadyTracker.parsePawnComponent(component);
+		assertNotNull(status);
+		assertEquals(1, status.ready());
+		assertEquals(1, status.unready());
+		assertEquals(2, status.empty());
+		assertEquals(2, status.partySize());
+		assertEquals(4, status.totalPieces());
+	}
+
+	@Test
+	void debugStateReturnsUsefulDiagnostics() {
+		List<String> lines = RaidReadyTracker.debugState();
+		assertFalse(lines.isEmpty());
+		assertTrue(lines.get(0).contains("Raid Ready Tracker"));
 	}
 }

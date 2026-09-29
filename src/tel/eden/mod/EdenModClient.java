@@ -673,12 +673,15 @@ public final class EdenModClient implements ClientModInitializer {
 			}))).then(ClientCommandManager.literal("congratulate").then(ClientCommandManager.argument("name", StringArgumentType.word()).executes(ctx -> {
 				congratulate(ctx.getSource(), StringArgumentType.getString(ctx, "name"));
 				return 1;
-			}))).then(ClientCommandManager.literal("wartest").executes(ctx -> {
+			}))).then(ClientCommandManager.literal("debug").executes(ctx -> {
 				for (String line : AttackTimerMenu.debugSidebarLines()) {
-					ctx.getSource().sendFeedback(Component.literal("[wartest] " + line).withStyle(ChatFormatting.AQUA));
+					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.AQUA));
 				}
 				for (String line : RaidPartyTracker.debugState()) {
-					ctx.getSource().sendFeedback(Component.literal("[wartest] " + line).withStyle(ChatFormatting.AQUA));
+					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.AQUA));
+				}
+				for (String line : RaidReadyTracker.debugState()) {
+					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.AQUA));
 				}
 				return 1;
 			})).then(ClientCommandManager.literal("help").executes(ctx -> {
@@ -780,6 +783,7 @@ public final class EdenModClient implements ClientModInitializer {
 			pendingBootAttestationFailed = false;
 			display(() -> Component.empty().append(Component.literal("[EdenMod] ").withStyle(ChatFormatting.RED)).append(Component.literal("WARNING: ").withStyle(Style.EMPTY.withColor(ChatFormatting.RED).withBold(true))).append(Component.literal("This mod jar could not be verified against any official EdenMod release — it may have been tampered with. Try restarting your game, then if the issue persists, reinstall EdenMod from the official releases. If it still remains, contact FadeDave.").withStyle(ChatFormatting.RED)));
 		}
+
 		String connCode = pendingConnectionCode;
 		if (connCode != null && client.player != null) {
 			pendingConnectionCode = null;

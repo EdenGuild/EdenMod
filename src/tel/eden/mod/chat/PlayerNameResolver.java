@@ -88,6 +88,10 @@ public final class PlayerNameResolver {
 			if (hoverResolved != null && ChatText.IGN.matcher(hoverResolved).matches()) {
 				return hoverResolved;
 			}
+			String profileName = info.getProfile().name();
+			if (profileName != null && ChatText.IGN.matcher(profileName).matches()) {
+				return profileName;
+			}
 			if (visible.equalsIgnoreCase(displayed) && ChatText.IGN.matcher(visible).matches()) {
 				// No contradicting hover, and this online player's own tab entry shows
 				// exactly this name — not nicknamed right now, so it's already the real one.
