@@ -20,12 +20,14 @@ import tel.eden.mod.chat.RewardUnavailableParser;
 import tel.eden.mod.chat.LevelUp;
 import tel.eden.mod.chat.LevelUpParser;
 import tel.eden.mod.chat.OccurrenceSequencer;
+import tel.eden.mod.chat.PlayerNameResolver;
 import tel.eden.mod.chat.ChatReplyManager;
 import tel.eden.mod.chat.PartyFormatter;
 import tel.eden.mod.chat.RaidCompletion;
 import tel.eden.mod.chat.RaidCompletionParser;
 import tel.eden.mod.chat.RaidPartyTracker;
 import tel.eden.mod.chat.RaidReadyTracker;
+import tel.eden.mod.party.PartyHealthTracker;
 import tel.eden.mod.chat.RankChange;
 import tel.eden.mod.chat.RankChangeParser;
 import tel.eden.mod.chat.ShoutParser;
@@ -720,6 +722,7 @@ public final class EdenModClient implements ClientModInitializer {
 			WarTracker.onTick();
 			RaidPartyTracker.onTick();
 			RaidReadyTracker.onClientTick();
+			PartyHealthTracker.tick();
 			AttackMenuScraper.onTick(client);
 			AllianceMenuScraper.onTick(client);
 			GuildMenuScraper.onTick(client);
@@ -2233,6 +2236,7 @@ public final class EdenModClient implements ClientModInitializer {
 		// after an account switch could attribute them to another guild's raid.
 		RaidPartyTracker.reset();
 		RaidReadyTracker.reset();
+		PartyHealthTracker.reset();
 		ChatReplyManager.reset();
 		// Before the socket goes: an outstanding deduct must not outlive the session that
 		// made it, or it resurfaces at the next connect naming a player from another
@@ -2277,6 +2281,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/** Called from the chat-capture mixin for every non-overlay system-chat component. */
 	public void handleSystemChat(Component message) {
+		PlayerNameResolver.learnFromText(message.getString());
 		handleRewardFeedback(message);
 		// A real chat line breaks any in-progress Discord emblem block, so the next
 		// relayed Discord message starts with a fresh shield (like guild chat).

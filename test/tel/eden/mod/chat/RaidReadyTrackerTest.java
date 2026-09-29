@@ -67,10 +67,10 @@ class RaidReadyTrackerTest {
 		assertEquals(1, RaidReadyTracker.readyPlayersForTesting().size());
 		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("bynt"));
 
-		// Wynncraft starter with nickname: Cartiye/kyousuke
-		RaidReadyTracker.onSystemChat(Component.literal("  Cartiye/kyousuke would like to start The Nameless Anomaly!"));
+		// Wynncraft starter with nickname: PlayerLeader/PlayerNick
+		RaidReadyTracker.onSystemChat(Component.literal("  PlayerLeader/PlayerNick would like to start The Nameless Anomaly!"));
 		assertEquals(1, RaidReadyTracker.readyPlayersForTesting().size());
-		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("cartiye"));
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("playerleader"));
 	}
 
 	@Test
@@ -133,5 +133,15 @@ class RaidReadyTrackerTest {
 		List<String> lines = RaidReadyTracker.debugState();
 		assertFalse(lines.isEmpty());
 		assertTrue(lines.get(0).contains("Raid Ready Tracker"));
+	}
+
+	@Test
+	void formatsWaitDurationCorrectly() {
+		assertEquals("30 seconds", RaidReadyTracker.formatWaitDuration(30));
+		assertEquals("1 minute", RaidReadyTracker.formatWaitDuration(60));
+		assertEquals("2 minutes", RaidReadyTracker.formatWaitDuration(120));
+		assertEquals("1 minute 30 seconds", RaidReadyTracker.formatWaitDuration(90));
+		assertEquals("2 minutes 15 seconds", RaidReadyTracker.formatWaitDuration(135));
+		assertEquals("1 second", RaidReadyTracker.formatWaitDuration(1));
 	}
 }

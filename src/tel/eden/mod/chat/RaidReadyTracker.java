@@ -124,9 +124,12 @@ public final class RaidReadyTracker {
 		}
 
 		if (waitingSince > 0L && !alertSent) {
-			if (System.currentTimeMillis() - waitingSince >= 60_000L) {
+			EdenModClient client = EdenModClient.instance();
+			BridgeConfig config = client != null ? client.config() : null;
+			int waitSec = (config != null) ? Math.max(5, config.raidReadyReminderSeconds) : 60;
+			if (System.currentTimeMillis() - waitingSince >= waitSec * 1000L) {
 				alertSent = true;
-				triggerOneMinuteAlert();
+				triggerWaitingReminderAlert(waitSec);
 			}
 		}
 	}
@@ -351,18 +354,47 @@ public final class RaidReadyTracker {
 		}
 	}
 
-	private static void triggerOneMinuteAlert() {
+	private static void triggerWaitingReminderAlert(int waitSeconds) {
 		EdenModClient client = EdenModClient.instance();
 		BridgeConfig config = client != null ? client.config() : null;
 		if (config == null || config.raidReadyPing) {
-			playPingSound(0.9f);
+			playAnvilDropSound();
 		}
 
 		try {
 			Minecraft mc = Minecraft.getInstance();
 			if (mc != null && mc.player != null) {
-				Component alert = Component.empty().append(Component.literal("[EdenMod] ").withStyle(ChatFormatting.DARK_GREEN)).append(Component.literal("Ready up! ").withStyle(Style.EMPTY.withColor(ChatFormatting.RED).withBold(true))).append(Component.literal("The other 3 party members have been ready for 1 minute.").withStyle(ChatFormatting.YELLOW));
+				String durationStr = formatWaitDuration(waitSeconds);
+				Component alert = Component.empty().append(Component.literal("[EdenMod] ").withStyle(ChatFormatting.DARK_GREEN)).append(Component.literal("Ready up! ").withStyle(Style.EMPTY.withColor(ChatFormatting.RED).withBold(true))).append(Component.literal("The other 3 party members have been ready for " + durationStr + ".").withStyle(ChatFormatting.YELLOW));
 				mc.player.displayClientMessage(alert, false);
+			}
+		} catch (Throwable ignored) {
+		}
+	}
+
+	public static String formatWaitDuration(int seconds) {
+		if (seconds <= 0) {
+			return "0 seconds";
+		}
+		if (seconds == 60) {
+			return "1 minute";
+		}
+		if (seconds % 60 == 0) {
+			return (seconds / 60) + " minutes";
+		}
+		if (seconds < 60) {
+			return seconds + (seconds == 1 ? " second" : " seconds");
+		}
+		int mins = seconds / 60;
+		int secs = seconds % 60;
+		return mins + (mins == 1 ? " minute " : " minutes ") + secs + (secs == 1 ? " second" : " seconds");
+	}
+
+	private static void playAnvilDropSound() {
+		try {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc != null && mc.getSoundManager() != null) {
+				mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.ANVIL_LAND, 1.0f));
 			}
 		} catch (Throwable ignored) {
 		}
@@ -432,13 +464,16 @@ public final class RaidReadyTracker {
 		int othersReady = pawns != null ? Math.max(chatOthersReady, sbOthersReady) : 0;
 		lines.add("effective others ready: " + othersReady + " (chat=" + chatOthersReady + ", scoreboard=" + sbOthersReady + ")");
 
+		BridgeConfig config = client != null ? client.config() : null;
+		int waitSec = (config != null) ? Math.max(5, config.raidReadyReminderSeconds) : 60;
+
 		if (pawns == null) {
-			lines.add("1-min waiting alert: inactive (no raid ready prompt on scoreboard)");
+			lines.add("waiting alert: inactive (no raid ready prompt on scoreboard)");
 		} else if (waitingSince > 0L) {
 			long elapsedSec = (System.currentTimeMillis() - waitingSince) / 1000L;
-			lines.add("1-min waiting alert: ACTIVE (" + elapsedSec + "s elapsed, alertSent=" + alertSent + ")");
+			lines.add("waiting alert: ACTIVE (" + elapsedSec + "s / " + waitSec + "s elapsed, alertSent=" + alertSent + ")");
 		} else {
-			lines.add("1-min waiting alert: inactive" + (othersReady >= 3 && selfReady ? " (you are already ready)" : (othersReady < 3 ? " (need 3 others ready)" : "")));
+			lines.add("waiting alert: inactive" + (othersReady >= 3 && selfReady ? " (you are already ready)" : (othersReady < 3 ? " (need 3 others ready)" : "")));
 		}
 		return lines;
 	}

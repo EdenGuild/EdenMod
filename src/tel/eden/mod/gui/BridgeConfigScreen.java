@@ -129,7 +129,12 @@ public final class BridgeConfigScreen extends Screen {
 		addButtonRow("Emote wheel favorites", () -> Component.literal("Edit..."), () -> this.minecraft.setScreen(new tel.eden.mod.emote.EmoteConfigScreen(this, config)), () -> {
 		});
 		addToggleRow("Party member outlines", () -> config.partyHighlightEnabled, v -> config.partyHighlightEnabled = v, "On", "Off", true);
+		addToggleRow("Party health bars", () -> config.partyHealthBarEnabled, v -> config.partyHealthBarEnabled = v, "On", "Off", true);
+		HealthBarScaleSlider scaleSlider = new HealthBarScaleSlider(CONTROL_W, 20);
+		addSliderRow("Party health bar size", scaleSlider, scaleSlider::syncFromConfig, () -> config.partyHealthBarScale = 100);
 		addToggleRow("Raid ready-up ping", () -> config.raidReadyPing, v -> config.raidReadyPing = v, "On", "Off", true);
+		RaidReminderSlider reminderSlider = new RaidReminderSlider(CONTROL_W, 20);
+		addSliderRow("Ready reminder delay", reminderSlider, reminderSlider::syncFromConfig, () -> config.raidReadyReminderSeconds = 60);
 		// ------------------------------------------------------------------------
 
 		this.addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose()).bounds(cx, this.height - 30, cw, 20).build());
@@ -506,6 +511,81 @@ public final class BridgeConfigScreen extends Screen {
 			int snapped = MIN + (int) Math.round(this.value * (MAX - MIN));
 			if (snapped != config.warAttackTimerMaxRows) {
 				config.warAttackTimerMaxRows = snapped;
+				config.save();
+			}
+			updateMessage();
+		}
+	}
+
+	private final class RaidReminderSlider extends AbstractSliderButton {
+		private static final int MIN = 10;
+		private static final int MAX = 300;
+
+		private RaidReminderSlider(int width, int height) {
+			super(0, 0, width, height, Component.empty(), 0.0d);
+			syncFromConfig();
+		}
+
+		private void syncFromConfig() {
+			int current = Math.max(MIN, Math.min(MAX, config.raidReadyReminderSeconds));
+			this.value = (current - MIN) / (double) (MAX - MIN);
+			updateMessage();
+		}
+
+		@Override
+		protected void updateMessage() {
+			int sec = config.raidReadyReminderSeconds;
+			if (sec == 60) {
+				setMessage(Component.literal("1 min"));
+			} else if (sec % 60 == 0) {
+				setMessage(Component.literal((sec / 60) + " mins"));
+			} else if (sec < 60) {
+				setMessage(Component.literal(sec + "s"));
+			} else {
+				setMessage(Component.literal((sec / 60) + "m " + (sec % 60) + "s"));
+			}
+		}
+
+		@Override
+		protected void applyValue() {
+			int snapped = MIN + (int) Math.round(this.value * (MAX - MIN));
+			snapped = Math.round(snapped / 5.0f) * 5;
+			snapped = Math.max(MIN, Math.min(MAX, snapped));
+			if (snapped != config.raidReadyReminderSeconds) {
+				config.raidReadyReminderSeconds = snapped;
+				config.save();
+			}
+			updateMessage();
+		}
+	}
+
+	private final class HealthBarScaleSlider extends AbstractSliderButton {
+		private static final int MIN = 50;
+		private static final int MAX = 200;
+
+		private HealthBarScaleSlider(int width, int height) {
+			super(0, 0, width, height, Component.empty(), 0.0d);
+			syncFromConfig();
+		}
+
+		private void syncFromConfig() {
+			int current = Math.max(MIN, Math.min(MAX, config.partyHealthBarScale));
+			this.value = (current - MIN) / (double) (MAX - MIN);
+			updateMessage();
+		}
+
+		@Override
+		protected void updateMessage() {
+			setMessage(Component.literal(config.partyHealthBarScale + "%"));
+		}
+
+		@Override
+		protected void applyValue() {
+			int snapped = MIN + (int) Math.round(this.value * (MAX - MIN));
+			snapped = Math.round(snapped / 5.0f) * 5;
+			snapped = Math.max(MIN, Math.min(MAX, snapped));
+			if (snapped != config.partyHealthBarScale) {
+				config.partyHealthBarScale = snapped;
 				config.save();
 			}
 			updateMessage();

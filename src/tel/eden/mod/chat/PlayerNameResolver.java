@@ -110,6 +110,29 @@ public final class PlayerNameResolver {
 		USERNAME_BY_DISPLAY.put(key(username), username);
 	}
 
+	private static final java.util.regex.Pattern SLASH_ALIAS_PATTERN = java.util.regex.Pattern.compile("(?<![a-zA-Z0-9_./])([a-zA-Z0-9_]{3,16})/([a-zA-Z0-9_]{3,16})(?![a-zA-Z0-9_./])");
+
+	/** Learn any explicit real/nickname pairs embedded in text (e.g. "Username/Nickname"). */
+	public static void learnFromText(String text) {
+		if (text == null || !text.contains("/")) {
+			return;
+		}
+		java.util.regex.Matcher matcher = SLASH_ALIAS_PATTERN.matcher(text);
+		while (matcher.find()) {
+			String real = matcher.group(1);
+			String nick = matcher.group(2);
+			if (isUrlToken(real) || isUrlToken(nick)) {
+				continue;
+			}
+			recordAlias(nick, real);
+		}
+	}
+
+	private static boolean isUrlToken(String token) {
+		String lower = token.toLowerCase(Locale.ROOT);
+		return lower.equals("http") || lower.equals("https") || lower.equals("com") || lower.equals("org") || lower.equals("net") || lower.equals("io") || lower.equals("gg");
+	}
+
 	private static String key(String name) {
 		return name.trim().toLowerCase(Locale.ROOT);
 	}

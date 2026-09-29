@@ -192,8 +192,17 @@ public final class BridgeConfig {
 	/** Unique party member outline highlights in raids/dungeons (requires Wynntils). */
 	public boolean partyHighlightEnabled = true;
 
-	/** Send a ping sound when party members ready up, and alert if waiting 1 minute. */
+	/** Dynamic overhead health bars for party members in raids and dungeons. */
+	public boolean partyHealthBarEnabled = true;
+
+	/** Overhead health bar size scale percentage (range 50-200, default 100). */
+	public int partyHealthBarScale = 100;
+
+	/** Send a sound when party members ready up, and alert if waiting for you. */
 	public boolean raidReadyPing = true;
+
+	/** Delay in seconds before alerting that teammates are waiting (range 10-300, default 60). */
+	public int raidReadyReminderSeconds = 60;
 
 	/** Custom palette for the 10 party slots. Defaults to PartyHighlightManager.DEFAULT_PALETTE. */
 	public List<Integer> partyColors = new ArrayList<>(tel.eden.mod.party.PartyHighlightManager.DEFAULT_PALETTE);
