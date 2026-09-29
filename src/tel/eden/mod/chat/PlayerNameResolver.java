@@ -71,7 +71,7 @@ public final class PlayerNameResolver {
 
 	private static String resolveFromTabList(String displayed) {
 		Minecraft mc = Minecraft.getInstance();
-		if (mc.getConnection() == null) {
+		if (mc == null || mc.getConnection() == null) {
 			return null;
 		}
 		for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {

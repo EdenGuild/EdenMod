@@ -23,6 +23,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.chat.ChatEmoteFormatter;
+import tel.eden.mod.chat.ChatReplyManager;
 import tel.eden.mod.chat.EmoteRegistry;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.war.AttackTimerMenu;
@@ -161,10 +162,38 @@ public abstract class ChatScreenMixin {
 			EdenModClient.instance().requestCenteredEmotePicker();
 		}
 		edenmod$openCenteredPickerIfRequested();
+		ChatReplyManager.registerInputHolder(() -> {
+			if (input != null) {
+				String val = input.getValue();
+				if (val.isEmpty()) {
+					input.setValue("/g ");
+				} else if (!val.startsWith("/")) {
+					input.setValue("/g " + val);
+				}
+			}
+		});
+	}
+
+	@Inject(method = "removed", at = @At("TAIL"))
+	private void edenmod$onChatScreenRemoved(CallbackInfo ci) {
+		ChatReplyManager.clearActiveReply();
+		ChatReplyManager.unregisterInputHolder();
+	}
+
+	@Inject(method = "handleChatInput", at = @At("HEAD"))
+	private void edenmod$captureReplyOnSend(String message, boolean addToHistory, CallbackInfo ci) {
+		if (ChatReplyManager.hasActiveReply()) {
+			ChatReplyManager.markPendingReply();
+		}
 	}
 
 	@Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
 	private void edenmod$handleChatOverlayKeys(KeyEvent event, CallbackInfoReturnable<Boolean> cir) {
+		if (event.key() == GLFW.GLFW_KEY_ESCAPE && ChatReplyManager.hasActiveReply()) {
+			ChatReplyManager.clearActiveReply();
+			cir.setReturnValue(true);
+			return;
+		}
 		if (!edenmod$isChatEmoteUiVisible() && !edenmod$isChatEmoteAutocompleteEnabled()) {
 			edenmod$resetOverlayState();
 			return;
@@ -226,6 +255,16 @@ public abstract class ChatScreenMixin {
 	}
 
 	@Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
+	private void edenmod$handleReplyBannerClick(MouseButtonEvent event, boolean bl, CallbackInfoReturnable<Boolean> cir) {
+		if (event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT && ChatReplyManager.hasActiveReply()) {
+			if (ChatReplyManager.isCloseButtonClicked(input.getX(), input.getY(), input.getWidth(), event.x(), event.y())) {
+				ChatReplyManager.clearActiveReply();
+				cir.setReturnValue(true);
+			}
+		}
+	}
+
+	@Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
 	private void edenmod$handleAttackTimerClick(MouseButtonEvent event, boolean bl, CallbackInfoReturnable<Boolean> cir) {
 		// Runs regardless of the emote-tool settings: left-clicking an attack-timer row
 		// points Wynncraft's compass at that territory; right-clicking marks you heading
@@ -281,6 +320,9 @@ public abstract class ChatScreenMixin {
 		// Hovering an attack-timer head shows that player's IGN (works regardless of the
 		// emote-tool settings, like the timer click).
 		AttackTimerMenu.renderGoerTooltip(graphics, mouseX, mouseY);
+		if (ChatReplyManager.hasActiveReply()) {
+			ChatReplyManager.renderReplyBanner(graphics, Minecraft.getInstance().font, input.getX(), input.getY(), input.getWidth(), mouseX, mouseY);
+		}
 		if (!edenmod$isChatEmoteUiVisible() && !edenmod$isChatEmoteAutocompleteEnabled()) {
 			edenmod$resetOverlayState();
 			return;

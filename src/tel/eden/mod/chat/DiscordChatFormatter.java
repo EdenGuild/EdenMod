@@ -158,13 +158,36 @@ public final class DiscordChatFormatter {
 	 * message is shown inline (gray) and the full quote appears on hover.
 	 */
 	public static Component format(String author, String content, String replyTo, String replyExcerpt) {
-		MutableComponent body = Component.empty().append(Component.literal(pillLabel("discord")).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(ChatFormatting.GREEN)));
-		if (replyTo != null && !replyTo.isEmpty()) {
-			body.append(Component.literal(" " + author).withStyle(ChatFormatting.GREEN)).append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt)).append(Component.literal(": ").withStyle(ChatFormatting.GREEN));
-		} else {
-			body.append(Component.literal(" " + author + ": ").withStyle(ChatFormatting.GREEN));
+		return format(author, content, replyTo, replyExcerpt, null);
+	}
+
+	/**
+	 * Build the guild-styled chat line for a relayed Discord message with reply context
+	 * and interactive reply click events.
+	 */
+	public static Component format(String author, String content, String replyTo, String replyExcerpt, String messageId) {
+		if (messageId != null && !messageId.isEmpty()) {
+			ChatReplyManager.recordDiscordMessage(messageId, author, content);
 		}
-		body.append(linkify(content));
+		Style replyStyle = (messageId != null && !messageId.isEmpty()) ? Style.EMPTY.withClickEvent(new ClickEvent.RunCommand("/eden reply " + messageId)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to reply to @" + author).withStyle(ChatFormatting.GRAY))) : null;
+
+		Style pillStyle = Style.EMPTY.withFont(PILL_FONT).withColor(ChatFormatting.GREEN);
+		if (replyStyle != null) {
+			pillStyle = pillStyle.withClickEvent(replyStyle.getClickEvent()).withHoverEvent(replyStyle.getHoverEvent());
+		}
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel("discord")).withStyle(pillStyle));
+
+		String authorText = (replyTo != null && !replyTo.isEmpty()) ? " " + author : " " + author + ": ";
+		MutableComponent authorComp = Component.literal(authorText).withStyle(ChatFormatting.GREEN);
+		if (replyStyle != null) {
+			authorComp.setStyle(authorComp.getStyle().withClickEvent(replyStyle.getClickEvent()).withHoverEvent(replyStyle.getHoverEvent()));
+		}
+		body.append(authorComp);
+
+		if (replyTo != null && !replyTo.isEmpty()) {
+			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt)).append(Component.literal(": ").withStyle(ChatFormatting.GREEN));
+		}
+		body.append(linkify(content, replyStyle));
 		return withGuildPrefix(body);
 	}
 
@@ -212,7 +235,6 @@ public final class DiscordChatFormatter {
 		return segment;
 	}
 
-	/** Render text with http(s) URLs as clickable, underlined aqua links. */
 	/**
 	 * Render message text with any http(s) URLs as clickable, underlined aqua links,
 	 * and any {@code :shortcode:} token matching a known emote (see
@@ -221,12 +243,26 @@ public final class DiscordChatFormatter {
 	 * message never loses information just because an emote isn't recognized.
 	 */
 	private static MutableComponent linkify(String content) {
+		return linkify(content, null);
+	}
+
+	private static MutableComponent linkify(String content, Style replyStyle) {
 		MutableComponent out = Component.empty();
 		Matcher matcher = TOKEN_PATTERN.matcher(content);
 		int last = 0;
+		// Click event for the text body (without hover popup so reading isn't obstructed)
+		ClickEvent textClick = replyStyle != null ? replyStyle.getClickEvent() : null;
+		java.util.function.Consumer<String> appendText = text -> {
+			MutableComponent comp = Component.literal(text).withStyle(ChatFormatting.GREEN);
+			if (textClick != null) {
+				comp.setStyle(comp.getStyle().withClickEvent(textClick));
+			}
+			out.append(comp);
+		};
+
 		while (matcher.find()) {
 			if (matcher.start() > last) {
-				out.append(Component.literal(content.substring(last, matcher.start())).withStyle(ChatFormatting.GREEN));
+				appendText.accept(content.substring(last, matcher.start()));
 			}
 			String stickerName = matcher.group("sname");
 			String url = matcher.group("url");
@@ -249,12 +285,16 @@ public final class DiscordChatFormatter {
 			} else {
 				String shortcode = matcher.group("emote");
 				Component emote = emoteComponent(shortcode);
-				out.append(emote != null ? emote : Component.literal(matcher.group()).withStyle(ChatFormatting.GREEN));
+				if (emote != null) {
+					out.append(emote);
+				} else {
+					appendText.accept(matcher.group());
+				}
 			}
 			last = matcher.end();
 		}
 		if (last < content.length()) {
-			out.append(Component.literal(content.substring(last)).withStyle(ChatFormatting.GREEN));
+			appendText.accept(content.substring(last));
 		}
 		return out;
 	}

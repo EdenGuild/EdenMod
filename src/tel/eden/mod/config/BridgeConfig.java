@@ -192,6 +192,9 @@ public final class BridgeConfig {
 	/** Unique party member outline highlights in raids/dungeons (requires Wynntils). */
 	public boolean partyHighlightEnabled = true;
 
+	/** Send a ping sound when party members ready up, and alert if waiting 1 minute. */
+	public boolean raidReadyPing = true;
+
 	/** Custom palette for the 10 party slots. Defaults to PartyHighlightManager.DEFAULT_PALETTE. */
 	public List<Integer> partyColors = new ArrayList<>(tel.eden.mod.party.PartyHighlightManager.DEFAULT_PALETTE);
 

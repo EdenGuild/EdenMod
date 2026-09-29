@@ -51,7 +51,11 @@ public final class BridgeWebSocketClient {
 		 * A relayed Discord message. {@code replyTo}/{@code replyExcerpt} are non-empty
 		 * when the Discord message was a reply (the replied-to author and a short quote).
 		 */
-		void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt, String color);
+		default void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt, String color) {
+			onDiscordMessage(author, content, replyTo, replyExcerpt, color, null);
+		}
+
+		void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt, String color, String messageId);
 
 		/** A bridge user just logged in (presence notice). */
 		void onLoginNotice(String username, String color);
@@ -246,6 +250,11 @@ public final class BridgeWebSocketClient {
 
 	/** Send one captured guild-chat line to the backend. */
 	public void sendGuildChat(String username, String nickname, String message, int seq) {
+		sendGuildChat(username, nickname, message, seq, null);
+	}
+
+	/** Send one captured guild-chat line to the backend, optionally referencing a replied-to Discord message. */
+	public void sendGuildChat(String username, String nickname, String message, int seq, String replyToMessageId) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
@@ -258,6 +267,9 @@ public final class BridgeWebSocketClient {
 		}
 		obj.addProperty("message", message);
 		obj.addProperty("seq", seq);
+		if (replyToMessageId != null && !replyToMessageId.isEmpty()) {
+			obj.addProperty("replyToMessageId", replyToMessageId);
+		}
 		enqueueSend(current, obj.toString());
 	}
 
@@ -1009,7 +1021,7 @@ public final class BridgeWebSocketClient {
 		try {
 			JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
 			switch (get(obj, "type")) {
-				case "discordMessage" -> sink.onDiscordMessage(get(obj, "author"), get(obj, "content"), get(obj, "replyTo"), get(obj, "replyExcerpt"), get(obj, "color"));
+				case "discordMessage" -> sink.onDiscordMessage(get(obj, "author"), get(obj, "content"), get(obj, "replyTo"), get(obj, "replyExcerpt"), get(obj, "color"), get(obj, "messageId"));
 				case "loginNotice" -> sink.onLoginNotice(get(obj, "username"), get(obj, "color"));
 				case "logoutNotice" -> sink.onLogoutNotice(get(obj, "username"), get(obj, "color"));
 				case "onlineList" -> sink.onOnlineList(getStringArray(obj, "users"), get(obj, "color"));
