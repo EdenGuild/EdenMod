@@ -86,6 +86,33 @@ class RaidCompletionParserTest {
 	}
 
 	@Test
+	void rejectsShouts() {
+		Component shout = Component.literal("[WC1] Player shouts: Player1 finished The Wartorn Palace and claimed 2048x Emeralds");
+		assertTrue(RaidCompletionParser.parse(shout).isEmpty());
+	}
+
+	@Test
+	void rejectsPartyChat() {
+		Component party = Component.literal(" Cartiye/pusheen: Player1 finished The Wartorn Palace and claimed 2048x Emeralds");
+		assertTrue(RaidCompletionParser.parse(party).isEmpty());
+	}
+
+	@Test
+	void rejectsPlayerAuthoredChatSpoofsWithColons() {
+		Component guildChat = Component.literal("Troll: Player1 finished The Wartorn Palace and claimed 2048x Emeralds");
+		assertTrue(RaidCompletionParser.parse(guildChat).isEmpty());
+
+		Component dmChat = Component.literal("Troll whispers: Player1 finished The Wartorn Palace and claimed 2048x Emeralds");
+		assertTrue(RaidCompletionParser.parse(dmChat).isEmpty());
+	}
+
+	@Test
+	void rejectsPartiesWithMoreThanFourPlayers() {
+		Component fivePlayer = Component.literal("P1, P2, P3, P4, and P5 finished The Wartorn Palace and claimed 2048x Emeralds");
+		assertTrue(RaidCompletionParser.parse(fivePlayer).isEmpty());
+	}
+
+	@Test
 	void isRaidCandidateGatesOnTheFinishedKeyword() {
 		assertTrue(RaidCompletionParser.isRaidCandidate(Component.literal("X finished Y")));
 		assertFalse(RaidCompletionParser.isRaidCandidate(Component.literal("no keyword here")));
