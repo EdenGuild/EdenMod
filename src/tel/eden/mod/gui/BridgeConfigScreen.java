@@ -50,12 +50,30 @@ public final class BridgeConfigScreen extends Screen {
 	// Fraction of the remaining distance the list glides each frame (smoothness).
 	private static final double SCROLL_EASE = 0.4;
 
+	public enum Category {
+		ALL("All"), GENERAL("General"), PARTY_RAIDS("Party & Raids"), WAR("War & Territory"), VISUALS("Visuals & QoL");
+
+		private final String label;
+
+		Category(String label) {
+			this.label = label;
+		}
+
+		public String label() {
+			return label;
+		}
+	}
+
+	private static Category selectedCategory = Category.ALL;
+
 	private final Screen parent;
 	private final EdenModClient mod;
 	private final BridgeConfig config;
 
-	private final List<SettingRow> rows = new ArrayList<>();
+	private final List<SettingRow> allRows = new ArrayList<>();
+	private final List<SettingRow> visibleRows = new ArrayList<>();
 	private Button linkButton;
+	private EdenDropdown<Category> categoryDropdown;
 	private double scroll;
 	private double scrollTarget;
 	private boolean draggingScrollbar;
@@ -74,37 +92,31 @@ public final class BridgeConfigScreen extends Screen {
 	@Override
 	protected void init() {
 		super.init();
-		rows.clear();
+		allRows.clear();
+		visibleRows.clear();
 		int cx = contentX();
 		int cw = contentWidth();
 
-		linkButton = this.addRenderableWidget(Button.builder(Component.literal("Link account"), button -> startLinkFlow()).bounds(cx, 92, cw, 20).build());
+		int btnW = Math.max(100, Math.min(130, cw / 3));
+		int dropW = cw - btnW - 8;
+
+		linkButton = this.addRenderableWidget(Button.builder(Component.literal("Link account"), button -> startLinkFlow()).bounds(cx, 92, btnW, 20).build());
+
+		EdenDropdown.PopupSettings popupSettings = new EdenDropdown.PopupSettings(HEADER_BOTTOM, this.height - FOOTER_HEIGHT, 20, Category.values().length);
+		categoryDropdown = this.addRenderableWidget(new EdenDropdown<>(cx + btnW + 8, 92, dropW, 20, this.font, List.of(Category.values()), selectedCategory, cat -> "Category: " + cat.label(), newCat -> {
+			selectedCategory = newCat;
+			updateVisibleRows();
+		}, openDrop -> {
+		}, popupSettings));
 
 		// --- One line per setting; the list handles layout + smooth scrolling. ---
-		if (config.isSecretUnlocked(BridgeConfig.SECRET_BABY_PLAYERS)) {
-			addToggleRow("Baby players", EdenMenuScreen::isBabyModeEnabled, EdenMenuScreen::setBabyModeEnabled, "On", "Off", false);
-		}
-		addToggleRow("Bridge", () -> config.enabled, v -> config.enabled = v, "Enabled", "Disabled", true);
-		addToggleRow("My login/logout messages", () -> config.announceSelfPresence, v -> config.announceSelfPresence = v, "On", "Off", true);
-		addToggleRow("Party feed", () -> config.partyAnnounce, v -> config.partyAnnounce = v, "On", "Off", true);
-		addCycleRow("Chat emote tools", () -> config.chatEmoteToolsMode.label(), () -> config.chatEmoteToolsMode = nextChatEmoteToolsMode(config.chatEmoteToolsMode), () -> config.chatEmoteToolsMode = BridgeConfig.ChatEmoteToolsMode.UI_AND_AUTO);
-		addToggleRow("Allow emote picker outside chat", () -> config.emotePickerOpenFromGameplay, v -> config.emotePickerOpenFromGameplay = v, "Allowed", "Chat only", true);
-		addCycleRow("Game messages", () -> shortGameModeLabel(config.gameDisplayMode), () -> config.gameDisplayMode = nextGameMode(config.gameDisplayMode), () -> config.gameDisplayMode = BridgeConfig.GameDisplayMode.ALL);
-		PreviewSizeSlider slider = new PreviewSizeSlider(CONTROL_W, 20);
-		addSliderRow("Image preview size", slider, slider::syncFromConfig, () -> config.imagePreviewSize = 40);
-
-		// --- Territory / war suite ---
-		addToggleRow("Attack timers HUD", () -> config.warAttackTimers, v -> config.warAttackTimers = v, "On", "Off", true);
-		AttackTimerRowsSlider rowsSlider = new AttackTimerRowsSlider(CONTROL_W, 20);
-		addSliderRow("Max attack-timer rows", rowsSlider, rowsSlider::syncFromConfig, () -> config.warAttackTimerMaxRows = 14);
-		addToggleRow("Green beacon at soonest war", () -> config.warGreenBeacon, v -> config.warGreenBeacon = v, "On", "Off", true);
-		addToggleRow("War info overlay (DPS/EHP)", () -> config.warDpsHud, v -> config.warDpsHud = v, "On", "Off", true);
-		addToggleRow("Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
-		addToggleRow("Auto /stream on join", () -> config.autoStream, v -> config.autoStream = v, "On", "Off", false);
-		addToggleRow("Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);
-		addToggleRow("Click-to-congratulate", () -> config.clickToCongratulate, v -> config.clickToCongratulate = v, "On", "Off", false);
-		addButtonRow("HUD layout", () -> Component.literal("Edit..."), () -> this.minecraft.setScreen(new HudLayoutScreen(this, config)), () -> {
-		});
+		// General
+		addToggleRow(Category.GENERAL, "Bridge", () -> config.enabled, v -> config.enabled = v, "Enabled", "Disabled", true);
+		addToggleRow(Category.GENERAL, "My login/logout messages", () -> config.announceSelfPresence, v -> config.announceSelfPresence = v, "On", "Off", true);
+		addToggleRow(Category.GENERAL, "Party feed", () -> config.partyAnnounce, v -> config.partyAnnounce = v, "On", "Off", true);
+		addToggleRow(Category.GENERAL, "Auto /stream on join", () -> config.autoStream, v -> config.autoStream = v, "On", "Off", false);
+		addToggleRow(Category.GENERAL, "Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);
+		addToggleRow(Category.GENERAL, "Click-to-congratulate", () -> config.clickToCongratulate, v -> config.clickToCongratulate = v, "On", "Off", false);
 		EditBox congratsBox = new EditBox(this.font, 0, 0, CONTROL_W, 20, Component.literal("Congrats message"));
 		congratsBox.setMaxLength(80);
 		congratsBox.setValue(config.congratsMessage);
@@ -112,8 +124,7 @@ public final class BridgeConfigScreen extends Screen {
 			config.congratsMessage = value;
 			config.save();
 		});
-		addRow("Congrats message", congratsBox, () -> {
-			// Don't clobber in-progress typing; the responder already saved it.
+		addRow(Category.GENERAL, "Congrats message", congratsBox, () -> {
 			if (!congratsBox.isFocused() && !congratsBox.getValue().equals(config.congratsMessage)) {
 				congratsBox.setValue(config.congratsMessage);
 			}
@@ -121,53 +132,74 @@ public final class BridgeConfigScreen extends Screen {
 			config.congratsMessage = "Congrats!";
 			congratsBox.setValue("Congrats!");
 		});
-		addToggleRow("Custom item textures", () -> config.customItemTextures, v -> config.customItemTextures = v, "On", "Off", true);
-		addToggleRow("Consumable labels", () -> config.consumableLabels, v -> config.consumableLabels = v, "On", "Off", true);
-		addToggleRow("Dropped item scaling", () -> config.groundItemVisibility, v -> config.groundItemVisibility = v, "On", "Off", false);
-		addButtonRow("Dropped item rules", () -> Component.literal("Edit..."), () -> this.minecraft.setScreen(new GroundItemVisibilityScreen(this, config)), () -> config.groundItemVisibilityRules = new ArrayList<>());
-		addToggleRow("Emote wheel", () -> config.emoteWheelEnabled, v -> config.emoteWheelEnabled = v, "On", "Off", true);
-		addButtonRow("Emote wheel favorites", () -> Component.literal("Edit..."), () -> this.minecraft.setScreen(new tel.eden.mod.emote.EmoteConfigScreen(this, config)), () -> {
-		});
-		addToggleRow("Party member outlines", () -> config.partyHighlightEnabled, v -> config.partyHighlightEnabled = v, "On", "Off", true);
-		addToggleRow("Party health bars", () -> config.partyHealthBarEnabled, v -> config.partyHealthBarEnabled = v, "On", "Off", true);
-		addToggleRow("Show own health bar (F5)", () -> config.partyHealthBarShowSelf, v -> config.partyHealthBarShowSelf = v, "On", "Off", true);
+
+		// Party & Raids
+		addToggleRow(Category.PARTY_RAIDS, "Party member outlines", () -> config.partyHighlightEnabled, v -> config.partyHighlightEnabled = v, "On", "Off", true);
+		addToggleRow(Category.PARTY_RAIDS, "Party health bars", () -> config.partyHealthBarEnabled, v -> config.partyHealthBarEnabled = v, "On", "Off", true);
+		addToggleRow(Category.PARTY_RAIDS, "Show own health bar (F5)", () -> config.partyHealthBarShowSelf, v -> config.partyHealthBarShowSelf = v, "On", "Off", true);
 		HealthBarScaleSlider scaleSlider = new HealthBarScaleSlider(CONTROL_W, 20);
-		addSliderRow("Party health bar size", scaleSlider, scaleSlider::syncFromConfig, () -> config.partyHealthBarScale = 100);
+		addSliderRow(Category.PARTY_RAIDS, "Party health bar size", scaleSlider, scaleSlider::syncFromConfig, () -> config.partyHealthBarScale = 100);
 		HealthBarDistanceScaleSlider distanceScaleSlider = new HealthBarDistanceScaleSlider(CONTROL_W, 20);
-		addSliderRow("Distance size boost", distanceScaleSlider, distanceScaleSlider::syncFromConfig, () -> config.partyHealthBarDistanceScale = 0);
-		addToggleRow("Raid ready-up ping", () -> config.raidReadyPing, v -> config.raidReadyPing = v, "On", "Off", true);
+		addSliderRow(Category.PARTY_RAIDS, "Distance size boost", distanceScaleSlider, distanceScaleSlider::syncFromConfig, () -> config.partyHealthBarDistanceScale = 0);
+		addToggleRow(Category.PARTY_RAIDS, "Raid ready-up ping", () -> config.raidReadyPing, v -> config.raidReadyPing = v, "On", "Off", true);
 		RaidReminderSlider reminderSlider = new RaidReminderSlider(CONTROL_W, 20);
-		addSliderRow("Ready reminder delay", reminderSlider, reminderSlider::syncFromConfig, () -> config.raidReadyReminderSeconds = 60);
+		addSliderRow(Category.PARTY_RAIDS, "Ready reminder delay", reminderSlider, reminderSlider::syncFromConfig, () -> config.raidReadyReminderSeconds = 60);
+
+		// War & Territory
+		addToggleRow(Category.WAR, "Attack timers HUD", () -> config.warAttackTimers, v -> config.warAttackTimers = v, "On", "Off", true);
+		AttackTimerRowsSlider rowsSlider = new AttackTimerRowsSlider(CONTROL_W, 20);
+		addSliderRow(Category.WAR, "Max attack-timer rows", rowsSlider, rowsSlider::syncFromConfig, () -> config.warAttackTimerMaxRows = 14);
+		addToggleRow(Category.WAR, "Green beacon at soonest war", () -> config.warGreenBeacon, v -> config.warGreenBeacon = v, "On", "Off", true);
+		addToggleRow(Category.WAR, "War info overlay (DPS/EHP)", () -> config.warDpsHud, v -> config.warDpsHud = v, "On", "Off", true);
+		addToggleRow(Category.WAR, "Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
+
+		// Visuals & QoL
+		if (config.isSecretUnlocked(BridgeConfig.SECRET_BABY_PLAYERS)) {
+			addToggleRow(Category.VISUALS, "Baby players", EdenMenuScreen::isBabyModeEnabled, EdenMenuScreen::setBabyModeEnabled, "On", "Off", false);
+		}
+		addButtonRow(Category.VISUALS, "HUD layout", () -> Component.literal("Edit..."), () -> this.minecraft.setScreen(new HudLayoutScreen(this, config)), () -> {
+		});
+		addCycleRow(Category.VISUALS, "Chat emote tools", () -> config.chatEmoteToolsMode.label(), () -> config.chatEmoteToolsMode = nextChatEmoteToolsMode(config.chatEmoteToolsMode), () -> config.chatEmoteToolsMode = BridgeConfig.ChatEmoteToolsMode.UI_AND_AUTO);
+		addToggleRow(Category.VISUALS, "Allow emote picker outside chat", () -> config.emotePickerOpenFromGameplay, v -> config.emotePickerOpenFromGameplay = v, "Allowed", "Chat only", true);
+		addToggleRow(Category.VISUALS, "Emote wheel", () -> config.emoteWheelEnabled, v -> config.emoteWheelEnabled = v, "On", "Off", true);
+		addButtonRow(Category.VISUALS, "Emote wheel favorites", () -> Component.literal("Edit..."), () -> this.minecraft.setScreen(new tel.eden.mod.emote.EmoteConfigScreen(this, config)), () -> {
+		});
+		addCycleRow(Category.VISUALS, "Game messages", () -> shortGameModeLabel(config.gameDisplayMode), () -> config.gameDisplayMode = nextGameMode(config.gameDisplayMode), () -> config.gameDisplayMode = BridgeConfig.GameDisplayMode.ALL);
+		PreviewSizeSlider slider = new PreviewSizeSlider(CONTROL_W, 20);
+		addSliderRow(Category.VISUALS, "Image preview size", slider, slider::syncFromConfig, () -> config.imagePreviewSize = 40);
+		addToggleRow(Category.VISUALS, "Custom item textures", () -> config.customItemTextures, v -> config.customItemTextures = v, "On", "Off", true);
+		addToggleRow(Category.VISUALS, "Consumable labels", () -> config.consumableLabels, v -> config.consumableLabels = v, "On", "Off", true);
+		addToggleRow(Category.VISUALS, "Dropped item scaling", () -> config.groundItemVisibility, v -> config.groundItemVisibility = v, "On", "Off", false);
+		addButtonRow(Category.VISUALS, "Dropped item rules", () -> Component.literal("Edit..."), () -> this.minecraft.setScreen(new GroundItemVisibilityScreen(this, config)), () -> config.groundItemVisibilityRules = new ArrayList<>());
 		// ------------------------------------------------------------------------
 
 		this.addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose()).bounds(cx, this.height - 30, cw, 20).build());
 
 		refreshRows();
-		scrollTarget = clampScroll(scrollTarget);
-		scroll = scrollTarget;
+		updateVisibleRows();
 	}
 
-	private void addToggleRow(String label, Supplier<Boolean> get, Consumer<Boolean> set, String onText, String offText, boolean resetValue) {
-		addButtonRow(label, () -> Component.literal(get.get() ? onText : offText), () -> set.accept(!get.get()), () -> set.accept(resetValue));
+	private void addToggleRow(Category category, String label, Supplier<Boolean> get, Consumer<Boolean> set, String onText, String offText, boolean resetValue) {
+		addButtonRow(category, label, () -> Component.literal(get.get() ? onText : offText), () -> set.accept(!get.get()), () -> set.accept(resetValue));
 	}
 
-	private void addCycleRow(String label, Supplier<String> valueLabel, Runnable onClick, Runnable onReset) {
-		addButtonRow(label, () -> Component.literal(valueLabel.get()), onClick, onReset);
+	private void addCycleRow(Category category, String label, Supplier<String> valueLabel, Runnable onClick, Runnable onReset) {
+		addButtonRow(category, label, () -> Component.literal(valueLabel.get()), onClick, onReset);
 	}
 
-	private void addButtonRow(String label, Supplier<Component> valueText, Runnable onClick, Runnable onReset) {
+	private void addButtonRow(Category category, String label, Supplier<Component> valueText, Runnable onClick, Runnable onReset) {
 		Button control = Button.builder(Component.empty(), button -> {
 			onClick.run();
 			saveConfig();
 		}).bounds(0, 0, CONTROL_W, 20).build();
-		addRow(label, control, () -> control.setMessage(valueText.get()), onReset);
+		addRow(category, label, control, () -> control.setMessage(valueText.get()), onReset);
 	}
 
-	private void addSliderRow(String label, AbstractSliderButton slider, Runnable sync, Runnable onReset) {
-		addRow(label, slider, sync, onReset);
+	private void addSliderRow(Category category, String label, AbstractSliderButton slider, Runnable sync, Runnable onReset) {
+		addRow(category, label, slider, sync, onReset);
 	}
 
-	private void addRow(String label, AbstractWidget control, Runnable refresh, Runnable onReset) {
+	private void addRow(Category category, String label, AbstractWidget control, Runnable refresh, Runnable onReset) {
 		Button reset = Button.builder(Component.literal("R"), button -> {
 			onReset.run();
 			saveConfig();
@@ -176,7 +208,22 @@ public final class BridgeConfigScreen extends Screen {
 		// them natively — so the slider works — while we draw them inside a scissor.
 		this.addWidget(control);
 		this.addWidget(reset);
-		rows.add(new SettingRow(label, control, reset, refresh));
+		allRows.add(new SettingRow(category, label, control, reset, refresh));
+	}
+
+	private void updateVisibleRows() {
+		visibleRows.clear();
+		for (SettingRow row : allRows) {
+			if (selectedCategory == Category.ALL || row.category == selectedCategory) {
+				visibleRows.add(row);
+			} else {
+				row.control.visible = false;
+				row.reset.visible = false;
+			}
+		}
+		scrollTarget = 0;
+		scroll = 0;
+		layoutRows();
 	}
 
 	private void saveConfig() {
@@ -185,7 +232,7 @@ public final class BridgeConfigScreen extends Screen {
 	}
 
 	private void refreshRows() {
-		for (SettingRow row : rows) {
+		for (SettingRow row : allRows) {
 			row.refresh.run();
 		}
 	}
@@ -256,7 +303,7 @@ public final class BridgeConfigScreen extends Screen {
 	}
 
 	private int contentHeight() {
-		return LIST_TOP_PADDING + rows.size() * ROW_HEIGHT;
+		return LIST_TOP_PADDING + visibleRows.size() * ROW_HEIGHT;
 	}
 
 	private double maxScroll() {
@@ -305,10 +352,10 @@ public final class BridgeConfigScreen extends Screen {
 
 	/** Position each row and hide the ones scrolled outside the viewport. */
 	private void layoutRows() {
-		for (int i = 0; i < rows.size(); i++) {
+		for (int i = 0; i < visibleRows.size(); i++) {
 			int rowY = rowY(i);
 			boolean inView = rowInView(rowY);
-			SettingRow row = rows.get(i);
+			SettingRow row = visibleRows.get(i);
 			row.control.visible = inView;
 			row.reset.visible = inView;
 			if (inView) {
@@ -341,12 +388,12 @@ public final class BridgeConfigScreen extends Screen {
 
 		int labelX = cx + 10;
 		g.enableScissor(cx, top, cx + cw, top + height);
-		for (int i = 0; i < rows.size(); i++) {
+		for (int i = 0; i < visibleRows.size(); i++) {
 			int rowY = rowY(i);
 			if (!rowInView(rowY)) {
 				continue;
 			}
-			SettingRow row = rows.get(i);
+			SettingRow row = visibleRows.get(i);
 			row.control.render(g, mouseX, mouseY, delta);
 			row.reset.render(g, mouseX, mouseY, delta);
 			g.drawString(this.font, row.label, labelX, rowY + 6, 0xFFA0A0A0);
@@ -364,6 +411,10 @@ public final class BridgeConfigScreen extends Screen {
 		String updateText = pendingUpdate != null ? "Update Available: " + pendingUpdate.version() : "Up to date";
 		g.drawString(this.font, versionText, this.width - this.font.width(versionText) - 6, 6, 0xFFAAAAAA);
 		g.drawString(this.font, updateText, this.width - this.font.width(updateText) - 6, 18, pendingUpdate != null ? 0xFF55FF55 : 0xFFAAAAAA);
+
+		if (categoryDropdown != null) {
+			categoryDropdown.renderPopup(g, mouseX, mouseY);
+		}
 	}
 
 	private void drawScrollbar(GuiGraphics g, int x, int y, int width, int height) {
@@ -408,6 +459,15 @@ public final class BridgeConfigScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean bl) {
+		if (categoryDropdown != null && categoryDropdown.isOpen()) {
+			if (categoryDropdown.isOverPopup(event.x(), event.y())) {
+				categoryDropdown.mouseClicked(event, bl);
+				return true;
+			}
+			if (!categoryDropdown.isMouseOver(event.x(), event.y())) {
+				categoryDropdown.close();
+			}
+		}
 		if (event.button() == 0 && isOverScrollbar(event.x(), event.y())) {
 			draggingScrollbar = true;
 			scrollToMouse(event.y());
@@ -433,6 +493,9 @@ public final class BridgeConfigScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double dx, double dy) {
+		if (categoryDropdown != null && categoryDropdown.isOpen() && categoryDropdown.isOverPopup(mouseX, mouseY)) {
+			return categoryDropdown.mouseScrolled(mouseX, mouseY, dx, dy);
+		}
 		if (maxScroll() > 0 && (isOverList(mouseX, mouseY) || isOverScrollbar(mouseX, mouseY))) {
 			scrollTarget = clampScroll(scrollTarget - dy * ROW_HEIGHT * 2);
 			return true;
@@ -447,12 +510,14 @@ public final class BridgeConfigScreen extends Screen {
 	}
 
 	private static final class SettingRow {
+		private final Category category;
 		private final String label;
 		private final AbstractWidget control;
 		private final Button reset;
 		private final Runnable refresh;
 
-		private SettingRow(String label, AbstractWidget control, Button reset, Runnable refresh) {
+		private SettingRow(Category category, String label, AbstractWidget control, Button reset, Runnable refresh) {
+			this.category = category;
 			this.label = label;
 			this.control = control;
 			this.reset = reset;
