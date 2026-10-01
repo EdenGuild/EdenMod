@@ -147,7 +147,7 @@ public final class ChatText {
 		return builder.toString();
 	}
 
-	private static String hoverRealName(Style style) {
+	static String hoverRealName(Style style) {
 		HoverEvent hover = style.getHoverEvent();
 		if (hover instanceof HoverEvent.ShowText showText) {
 			String text = showText.value().getString().replace('’', '\'').replace('‘', '\'');

@@ -198,6 +198,16 @@ public final class BridgeConfig {
 	/** Overhead health bar size scale percentage (range 50-200, default 100). */
 	public int partyHealthBarScale = 100;
 
+	/**
+	 * Distance-based overhead health bar size boost percentage starting at 20 blocks
+	 * (range 0-200, default 0 = off). Farther players have their health bars enlarged
+	 * so they stay clearly legible across raid rooms and arenas.
+	 */
+	public int partyHealthBarDistanceScale = 0;
+
+	/** Show your own overhead health bar in third-person view (F5). */
+	public boolean partyHealthBarShowSelf = true;
+
 	/** Send a sound when party members ready up, and alert if waiting for you. */
 	public boolean raidReadyPing = true;
 
@@ -382,6 +392,8 @@ public final class BridgeConfig {
 					config.consumableLabelScale = Math.max(0.25f, Math.min(2.0f, config.consumableLabelScale));
 					config.consumableLabelOffsetX = Math.max(-64, Math.min(64, config.consumableLabelOffsetX));
 					config.consumableLabelOffsetY = Math.max(-64, Math.min(64, config.consumableLabelOffsetY));
+					config.partyHealthBarScale = Math.max(50, Math.min(200, config.partyHealthBarScale));
+					config.partyHealthBarDistanceScale = Math.max(0, Math.min(200, config.partyHealthBarDistanceScale));
 					return config;
 				}
 			} catch (IOException | RuntimeException e) {

@@ -11,11 +11,23 @@ public final class WynntilsPartyBridge {
 	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final String WYNNTILS_MODELS = "com.wynntils.core.components.Models";
 
+	public record LiveHealth(int current, int max, float percent) {
+	}
+
 	private static boolean initialized = false;
 	private static boolean available = false;
 	private static Object partyModelInstance = null;
 	private static Method isInPartyMethod = null;
 	private static Method getPartyMembersMethod = null;
+
+	private static Object characterStatsModelInstance = null;
+	private static Method characterStatsGetHealthMethod = null;
+	private static Object hadesServiceInstance = null;
+	private static Method hadesGetHadesUserMethod = null;
+	private static Method hadesUserGetHealthMethod = null;
+	private static Method cappedValueCurrentMethod = null;
+	private static Method cappedValueMaxMethod = null;
+	private static Method cappedValueGetProgressMethod = null;
 
 	private WynntilsPartyBridge() {
 	}
@@ -47,18 +59,14 @@ public final class WynntilsPartyBridge {
 				if (list.isEmpty()) {
 					return Collections.emptyList();
 				}
-				Object first = list.get(0);
-				if (first instanceof String) {
-					@SuppressWarnings("unchecked")
-					List<String> typed = (List<String>) res;
-					return typed;
-				}
-				// Wynntils may return List<PartyMember> or similar — extract via toString.
-				LOGGER.warn("Wynntils party members returned non-String type: {}; falling back to toString()", first.getClass().getName());
 				List<String> names = new java.util.ArrayList<>(list.size());
+				java.util.Set<String> seen = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
 				for (Object obj : list) {
 					if (obj != null) {
-						names.add(obj.toString());
+						String s = obj.toString().trim();
+						if (!s.isEmpty() && seen.add(s)) {
+							names.add(s);
+						}
 					}
 				}
 				return names;
@@ -66,6 +74,60 @@ public final class WynntilsPartyBridge {
 		} catch (Exception ignored) {
 		}
 		return Collections.emptyList();
+	}
+
+	public static LiveHealth getLocalPlayerHealth() {
+		if (!isAvailable() || characterStatsModelInstance == null || characterStatsGetHealthMethod == null) {
+			return null;
+		}
+		try {
+			Object opt = characterStatsGetHealthMethod.invoke(characterStatsModelInstance);
+			if (opt instanceof java.util.Optional<?> optional && optional.isPresent()) {
+				return extractFromCappedValue(optional.get());
+			}
+		} catch (Throwable ignored) {
+		}
+		return null;
+	}
+
+	public static LiveHealth getHadesHealth(java.util.UUID uuid) {
+		if (!isAvailable() || hadesServiceInstance == null || hadesGetHadesUserMethod == null || uuid == null) {
+			return null;
+		}
+		try {
+			Object opt = hadesGetHadesUserMethod.invoke(hadesServiceInstance, uuid);
+			if (opt instanceof java.util.Optional<?> optional && optional.isPresent()) {
+				Object hadesUser = optional.get();
+				if (hadesUserGetHealthMethod == null) {
+					hadesUserGetHealthMethod = hadesUser.getClass().getMethod("getHealth");
+				}
+				Object cv = hadesUserGetHealthMethod.invoke(hadesUser);
+				return extractFromCappedValue(cv);
+			}
+		} catch (Throwable ignored) {
+		}
+		return null;
+	}
+
+	private static LiveHealth extractFromCappedValue(Object cappedValue) {
+		if (cappedValue == null) {
+			return null;
+		}
+		try {
+			if (cappedValueCurrentMethod == null) {
+				Class<?> cvClass = cappedValue.getClass();
+				cappedValueCurrentMethod = cvClass.getMethod("current");
+				cappedValueMaxMethod = cvClass.getMethod("max");
+				cappedValueGetProgressMethod = cvClass.getMethod("getProgress");
+			}
+			int current = (int) cappedValueCurrentMethod.invoke(cappedValue);
+			int max = (int) cappedValueMaxMethod.invoke(cappedValue);
+			double progress = (double) cappedValueGetProgressMethod.invoke(cappedValue);
+			float percent = max > 0 ? (float) Math.max(0.0, Math.min(1.0, (progress > 0.001) ? progress : ((double) current / max))) : 1.0f;
+			return new LiveHealth(current, max, percent);
+		} catch (Throwable ignored) {
+			return null;
+		}
 	}
 
 	private static synchronized void ensureLoaded() {
@@ -86,6 +148,25 @@ public final class WynntilsPartyBridge {
 				getPartyMembersMethod = partyModelInstance.getClass().getMethod("getPartyMembers");
 				available = true;
 				LOGGER.info("Wynntils PartyModel integration loaded successfully");
+			}
+
+			try {
+				Field charStatsField = modelsClass.getField("CharacterStats");
+				characterStatsModelInstance = charStatsField.get(null);
+				if (characterStatsModelInstance != null) {
+					characterStatsGetHealthMethod = characterStatsModelInstance.getClass().getMethod("getHealth");
+				}
+			} catch (Throwable ignored) {
+			}
+
+			try {
+				Class<?> servicesClass = Class.forName("com.wynntils.core.components.Services");
+				Field hadesField = servicesClass.getField("Hades");
+				hadesServiceInstance = hadesField.get(null);
+				if (hadesServiceInstance != null) {
+					hadesGetHadesUserMethod = hadesServiceInstance.getClass().getMethod("getHadesUser", java.util.UUID.class);
+				}
+			} catch (Throwable ignored) {
 			}
 		} catch (Throwable t) {
 			available = false;
@@ -108,5 +189,13 @@ public final class WynntilsPartyBridge {
 		partyModelInstance = null;
 		isInPartyMethod = null;
 		getPartyMembersMethod = null;
+		characterStatsModelInstance = null;
+		characterStatsGetHealthMethod = null;
+		hadesServiceInstance = null;
+		hadesGetHadesUserMethod = null;
+		hadesUserGetHealthMethod = null;
+		cappedValueCurrentMethod = null;
+		cappedValueMaxMethod = null;
+		cappedValueGetProgressMethod = null;
 	}
 }

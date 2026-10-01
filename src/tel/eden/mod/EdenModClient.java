@@ -685,6 +685,9 @@ public final class EdenModClient implements ClientModInitializer {
 				for (String line : RaidReadyTracker.debugState()) {
 					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.AQUA));
 				}
+				for (String line : PartyHealthTracker.debugState()) {
+					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.GREEN));
+				}
 				return 1;
 			})).then(ClientCommandManager.literal("help").executes(ctx -> {
 				showHelp(ctx.getSource());
@@ -2281,7 +2284,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/** Called from the chat-capture mixin for every non-overlay system-chat component. */
 	public void handleSystemChat(Component message) {
-		PlayerNameResolver.learnFromText(message.getString());
+		PlayerNameResolver.observeMessage(message);
 		handleRewardFeedback(message);
 		// A real chat line breaks any in-progress Discord emblem block, so the next
 		// relayed Discord message starts with a fresh shield (like guild chat).

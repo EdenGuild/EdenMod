@@ -3,47 +3,63 @@ package tel.eden.mod.party;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.CameraRenderState;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.render.EdenAvatarState;
 
 /**
- * Renders an Eden-themed overhead health bar above party members' nametags.
+ * Renders an overhead health bar above party members' nametags.
  *
- * <p>Theme elements:
+ * <p>Features:
  * <ul>
- *   <li>Obsidian slate border with dark crimson deficit underlay</li>
- *   <li>Dynamic health progression: Emerald Green (>50%) -> Amber (>25%) -> Crimson (<=25%)</li>
- *   <li>Overheal/overMax renders in radiant Eden Gold</li>
- *   <li>Party slot pip on the left border matching the player's party outline color</li>
+ *   <li>Trapezoidal styled bar with sloped sides and dark deficit underlay</li>
+ *   <li>Outer border matches the player's party position outline color</li>
+ *   <li>Inner bezel matches a darker shade of the party position color</li>
+ *   <li>Smooth health bar gliding animation when HP changes</li>
+ *   <li>Dynamic health fill progression: Vibrant Green (>50%) -> Amber (>25%) -> Crimson (<=25%)</li>
  * </ul>
  */
 public final class PartyHealthBarRenderer {
 	private static final float NAMETAG_SCALE = 0.025f;
-	private static final float BAR_WIDTH = 38.0f;
-	private static final float BAR_HEIGHT = 4.0f;
-	private static final float BORDER = 1.0f;
+	private static final float BAR_WIDTH = 40.0f;
+	private static final float BAR_HEIGHT = 4.375f;
 	private static final int FULL_BRIGHT = 0xF000F0;
 
-	private static final int BORDER_COLOR = 0xFF0A0F14;
-	private static final int BG_COLOR = 0xFF141A22;
-	private static final int DEFICIT_COLOR = 0xFF2A1215;
-	private static final int COLOR_EMERALD = 0xFF10B981;
+	private static final int COLOR_PROVI_GREEN = 0xFF00E817;
 	private static final int COLOR_AMBER = 0xFFF59E0B;
 	private static final int COLOR_CRIMSON = 0xFFEF4444;
 	private static final int COLOR_GOLD = 0xFFFBBF24;
-	private static final int DIVIDER_COLOR = 0x66000000;
 	private static final boolean WYNNTILS_LOADED = FabricLoader.getInstance().isModLoaded("wynntils");
+	private static final float DISTANCE_SCALE_START = 20.0f;
+	private static final float DISTANCE_SCALE_PER_BLOCK = 0.025f;
+
+	private static final Identifier BAR_TEXTURE = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/healthbars/party_bar.png");
+
+	private static final class SmoothHealthState {
+		float displayedPercent = 1.0f;
+		float displayedOverPercent = 0.0f;
+		long lastUpdateMs = 0L;
+		boolean initialized = false;
+	}
+
+	private static final Map<UUID, SmoothHealthState> SMOOTH_STATES = new ConcurrentHashMap<>();
 
 	private PartyHealthBarRenderer() {
+	}
+
+	public static void reset() {
+		SMOOTH_STATES.clear();
 	}
 
 	public static void renderIfVisible(AvatarRenderState state, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, CameraRenderState cameraRenderState) {
@@ -64,7 +80,9 @@ public final class PartyHealthBarRenderer {
 
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.player != null && uuid.equals(mc.player.getUUID())) {
-			return;
+			if (config == null || !config.partyHealthBarShowSelf) {
+				return;
+			}
 		}
 
 		PartyHealthTracker.PlayerHealthData health = PartyHealthTracker.getHealth(uuid);
@@ -76,14 +94,31 @@ public final class PartyHealthBarRenderer {
 
 		poseStack.pushPose();
 		float scaleFactor = (config != null ? Math.max(50, Math.min(200, config.partyHealthBarScale)) : 100) / 100.0f;
-		float effectiveScale = NAMETAG_SCALE * scaleFactor;
+		float distanceMultiplier = computeDistanceScale(state, config);
+		float effectiveScale = NAMETAG_SCALE * scaleFactor * distanceMultiplier;
 		float yOffset = computeWorldYOffset(state);
 		poseStack.translate(attachment.x, attachment.y + yOffset, attachment.z);
 		poseStack.mulPose(cameraRenderState.orientation);
 		poseStack.scale(effectiveScale, -effectiveScale, effectiveScale);
 
-		submitEdenBar(submitNodeCollector, poseStack, health, config);
+		submitEdenBar(submitNodeCollector, poseStack, uuid, health, config);
 		poseStack.popPose();
+	}
+
+	static float computeDistanceScale(AvatarRenderState state, BridgeConfig config) {
+		if (state == null || config == null) {
+			return 1.0f;
+		}
+		return computeDistanceScale(state.distanceToCameraSq, config.partyHealthBarDistanceScale);
+	}
+
+	static float computeDistanceScale(double distanceToCameraSq, int distanceScalePercent) {
+		if (distanceScalePercent <= 0 || distanceToCameraSq <= (DISTANCE_SCALE_START * DISTANCE_SCALE_START)) {
+			return 1.0f;
+		}
+		float dist = (float) Math.sqrt(distanceToCameraSq);
+		float intensity = Math.max(0, Math.min(200, distanceScalePercent)) / 100.0f;
+		return 1.0f + Math.min((dist - DISTANCE_SCALE_START) * DISTANCE_SCALE_PER_BLOCK, 2.5f) * intensity;
 	}
 
 	private static float computeWorldYOffset(AvatarRenderState state) {
@@ -108,19 +143,48 @@ public final class PartyHealthBarRenderer {
 		return pixelOffset * NAMETAG_SCALE;
 	}
 
-	private static void submitEdenBar(SubmitNodeCollector collector, PoseStack poseStack, PartyHealthTracker.PlayerHealthData health, BridgeConfig config) {
+	private static void submitEdenBar(SubmitNodeCollector collector, PoseStack poseStack, UUID uuid, PartyHealthTracker.PlayerHealthData health, BridgeConfig config) {
 		float rawPercent = health.percent();
-		float percent = Float.isNaN(rawPercent) ? 1.0f : Math.max(0.0f, Math.min(1.0f, rawPercent));
-		float fillWidth = Math.round(BAR_WIDTH * percent);
+		float targetPercent = Float.isNaN(rawPercent) ? 1.0f : Math.max(0.0f, Math.min(1.0f, rawPercent));
+		float rawOverPercent = health.overPercent();
+		float targetOverPercent = Float.isNaN(rawOverPercent) ? 0.0f : Math.max(0.0f, Math.min(1.0f, rawOverPercent));
+
+		long now = System.currentTimeMillis();
+		SmoothHealthState smooth = SMOOTH_STATES.computeIfAbsent(uuid, k -> new SmoothHealthState());
+		float displayedPercent;
+		float displayedOverPercent;
+		if (!smooth.initialized || (now - smooth.lastUpdateMs) > 1000L) {
+			smooth.displayedPercent = targetPercent;
+			smooth.displayedOverPercent = targetOverPercent;
+			smooth.lastUpdateMs = now;
+			smooth.initialized = true;
+			displayedPercent = targetPercent;
+			displayedOverPercent = targetOverPercent;
+		} else {
+			long dtMs = Math.min(100L, Math.max(1L, now - smooth.lastUpdateMs));
+			smooth.lastUpdateMs = now;
+			float dtSec = dtMs / 1000.0f;
+			// Frame-rate independent exponential approach: glides smoothly to new HP in ~0.35s
+			float blend = 1.0f - (float) Math.exp(-8.0f * dtSec);
+			smooth.displayedPercent += (targetPercent - smooth.displayedPercent) * blend;
+			smooth.displayedOverPercent += (targetOverPercent - smooth.displayedOverPercent) * blend;
+			if (Math.abs(targetPercent - smooth.displayedPercent) < 0.002f) {
+				smooth.displayedPercent = targetPercent;
+			}
+			if (Math.abs(targetOverPercent - smooth.displayedOverPercent) < 0.002f) {
+				smooth.displayedOverPercent = targetOverPercent;
+			}
+			displayedPercent = Math.max(0.0f, Math.min(1.0f, smooth.displayedPercent));
+			displayedOverPercent = Math.max(0.0f, Math.min(1.0f, smooth.displayedOverPercent));
+		}
+
 		float x = -BAR_WIDTH / 2.0f;
 		float y = 0.0f;
 
 		int fillColor;
-		if (health.overMax()) {
-			fillColor = COLOR_GOLD;
-		} else if (percent > 0.50f) {
-			fillColor = COLOR_EMERALD;
-		} else if (percent > 0.25f) {
+		if (displayedPercent > 0.50f) {
+			fillColor = COLOR_PROVI_GREEN;
+		} else if (displayedPercent > 0.25f) {
 			fillColor = COLOR_AMBER;
 		} else {
 			fillColor = COLOR_CRIMSON;
@@ -128,51 +192,52 @@ public final class PartyHealthBarRenderer {
 
 		List<Integer> palette = (config != null && config.partyColors != null && config.partyColors.size() == 10) ? config.partyColors : PartyHighlightManager.DEFAULT_PALETTE;
 		int slotIndex = health.partySlot();
-		int slotColor = (slotIndex >= 0 && slotIndex < palette.size()) ? palette.get(slotIndex) | 0xFF000000 : COLOR_EMERALD;
+		int slotColor = (slotIndex >= 0 && slotIndex < palette.size()) ? palette.get(slotIndex) | 0xFF000000 : COLOR_PROVI_GREEN;
 
-		collector.submitCustomGeometry(poseStack, RenderTypes.textBackground(), (pose, vertices) -> {
-			// 1. Obsidian Outer Border
-			drawQuad(vertices, pose, FULL_BRIGHT, x - BORDER, y - BORDER, BAR_WIDTH + (BORDER * 2.0f), BORDER, 0.01f, BORDER_COLOR);
-			drawQuad(vertices, pose, FULL_BRIGHT, x - BORDER, y + BAR_HEIGHT, BAR_WIDTH + (BORDER * 2.0f), BORDER, 0.01f, BORDER_COLOR);
-			drawQuad(vertices, pose, FULL_BRIGHT, x - BORDER, y, BORDER, BAR_HEIGHT, 0.01f, BORDER_COLOR);
-			drawQuad(vertices, pose, FULL_BRIGHT, x + BAR_WIDTH, y, BORDER, BAR_HEIGHT, 0.01f, BORDER_COLOR);
+		int r = (slotColor >> 16) & 0xFF;
+		int g = (slotColor >> 8) & 0xFF;
+		int b = slotColor & 0xFF;
+		int darkerSlotColor = 0xFF000000 | ((int) (r * 0.38f) << 16) | ((int) (g * 0.38f) << 8) | (int) (b * 0.38f);
 
-			// 2. Party Slot Gem/Pip on the left edge (aligned with bar height)
-			float pipSize = BAR_HEIGHT;
-			float pipX = x - BORDER - pipSize - 2.0f;
-			float pipY = y;
+		collector.submitCustomGeometry(poseStack, RenderTypes.text(BAR_TEXTURE), (pose, vertices) -> {
+			// 1. Dark Deficit Background (V: 24..31 / 64) - back layer
+			drawTexturedQuad(vertices, pose, FULL_BRIGHT, x, y, BAR_WIDTH, BAR_HEIGHT, 0.0f, 0.0f, 24.0f / 64.0f, 1.0f, 31.0f / 64.0f, 0xFFFFFFFF);
 
-			// Pip obsidian border edges
-			drawQuad(vertices, pose, FULL_BRIGHT, pipX - BORDER, pipY - BORDER, pipSize + (BORDER * 2.0f), BORDER, 0.01f, BORDER_COLOR);
-			drawQuad(vertices, pose, FULL_BRIGHT, pipX - BORDER, pipY + pipSize, pipSize + (BORDER * 2.0f), BORDER, 0.01f, BORDER_COLOR);
-			drawQuad(vertices, pose, FULL_BRIGHT, pipX - BORDER, pipY, BORDER, pipSize, 0.01f, BORDER_COLOR);
-			drawQuad(vertices, pose, FULL_BRIGHT, pipX + pipSize, pipY, BORDER, pipSize, 0.01f, BORDER_COLOR);
-
-			// Pip slot color fill
-			drawQuad(vertices, pose, FULL_BRIGHT, pipX, pipY, pipSize, pipSize, 0.002f, slotColor);
-
-			// 3. Dark Deficit Background (missing HP)
-			if (fillWidth < BAR_WIDTH) {
-				drawQuad(vertices, pose, FULL_BRIGHT, x + fillWidth, y, BAR_WIDTH - fillWidth, BAR_HEIGHT, 0.001f, DEFICIT_COLOR);
+			// 2. Smooth Base Health Bar Fill (V: 0..7 / 64) - on top of deficit background
+			if (displayedPercent > 0.0f) {
+				float fillWidth = BAR_WIDTH * displayedPercent;
+				drawTexturedQuad(vertices, pose, FULL_BRIGHT, x, y, fillWidth, BAR_HEIGHT, 0.01f, 0.0f, 0.0f, displayedPercent, 7.0f / 64.0f, fillColor);
 			}
 
-			// 4. Health Fill
-			if (fillWidth > 0.0f) {
-				drawQuad(vertices, pose, FULL_BRIGHT, x, y, fillWidth, BAR_HEIGHT, 0.002f, fillColor);
+			// 3. Smooth Overhealth Fill (V: 0..7 / 64) - gold overlay on top of base health fill
+			if (displayedOverPercent > 0.0f) {
+				float overWidth = BAR_WIDTH * displayedOverPercent;
+				drawTexturedQuad(vertices, pose, FULL_BRIGHT, x, y, overWidth, BAR_HEIGHT, 0.015f, 0.0f, 0.0f, displayedOverPercent, 7.0f / 64.0f, COLOR_GOLD);
 			}
 
-			// 5. Tactical Quarter Dividers (25%, 50%, 75%)
+			// 4. Inner Bezel (V: 16..23 / 64) - on top of fill edge, darker shade of party slot color
+			drawTexturedQuad(vertices, pose, FULL_BRIGHT, x, y, BAR_WIDTH, BAR_HEIGHT, 0.02f, 0.0f, 16.0f / 64.0f, 1.0f, 23.0f / 64.0f, darkerSlotColor);
+
+			// 5. Outer Border (V: 8..15 / 64) - front layer, party slot position color
+			drawTexturedQuad(vertices, pose, FULL_BRIGHT, x, y, BAR_WIDTH, BAR_HEIGHT, 0.03f, 0.0f, 8.0f / 64.0f, 1.0f, 15.0f / 64.0f, slotColor);
+
+			// 5. Quarter Dividers (25%, 50%, 75%)
+			float dividerWidth = BAR_WIDTH / 64.0f;
+			float dividerY = y + (BAR_HEIGHT * (2.0f / 7.0f));
+			float dividerHeight = BAR_HEIGHT * (3.0f / 7.0f);
+			float whiteU = 1.5f / 64.0f;
+			float whiteV = 33.5f / 64.0f;
 			for (float mark = 0.25f; mark < 1.0f; mark += 0.25f) {
-				float markX = x + (BAR_WIDTH * mark);
-				drawQuad(vertices, pose, FULL_BRIGHT, markX, y, 0.5f, BAR_HEIGHT, 0.003f, DIVIDER_COLOR);
+				float markX = x + (BAR_WIDTH * mark) - (dividerWidth / 2.0f);
+				drawTexturedQuad(vertices, pose, FULL_BRIGHT, markX, dividerY, dividerWidth, dividerHeight, 0.04f, whiteU, whiteV, whiteU, whiteV, darkerSlotColor);
 			}
 		});
 	}
 
-	private static void drawQuad(VertexConsumer vertices, PoseStack.Pose pose, int light, float x, float y, float width, float height, float z, int color) {
-		vertices.addVertex(pose, x, y, z).setLight(light).setColor(color);
-		vertices.addVertex(pose, x, y + height, z).setLight(light).setColor(color);
-		vertices.addVertex(pose, x + width, y + height, z).setLight(light).setColor(color);
-		vertices.addVertex(pose, x + width, y, z).setLight(light).setColor(color);
+	private static void drawTexturedQuad(VertexConsumer vertices, PoseStack.Pose pose, int light, float x, float y, float width, float height, float z, float minU, float minV, float maxU, float maxV, int color) {
+		vertices.addVertex(pose, x, y, z).setColor(color).setUv(minU, minV).setLight(light);
+		vertices.addVertex(pose, x, y + height, z).setColor(color).setUv(minU, maxV).setLight(light);
+		vertices.addVertex(pose, x + width, y + height, z).setColor(color).setUv(maxU, maxV).setLight(light);
+		vertices.addVertex(pose, x + width, y, z).setColor(color).setUv(maxU, minV).setLight(light);
 	}
 }

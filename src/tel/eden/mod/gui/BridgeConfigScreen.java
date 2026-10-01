@@ -130,8 +130,11 @@ public final class BridgeConfigScreen extends Screen {
 		});
 		addToggleRow("Party member outlines", () -> config.partyHighlightEnabled, v -> config.partyHighlightEnabled = v, "On", "Off", true);
 		addToggleRow("Party health bars", () -> config.partyHealthBarEnabled, v -> config.partyHealthBarEnabled = v, "On", "Off", true);
+		addToggleRow("Show own health bar (F5)", () -> config.partyHealthBarShowSelf, v -> config.partyHealthBarShowSelf = v, "On", "Off", true);
 		HealthBarScaleSlider scaleSlider = new HealthBarScaleSlider(CONTROL_W, 20);
 		addSliderRow("Party health bar size", scaleSlider, scaleSlider::syncFromConfig, () -> config.partyHealthBarScale = 100);
+		HealthBarDistanceScaleSlider distanceScaleSlider = new HealthBarDistanceScaleSlider(CONTROL_W, 20);
+		addSliderRow("Distance size boost", distanceScaleSlider, distanceScaleSlider::syncFromConfig, () -> config.partyHealthBarDistanceScale = 0);
 		addToggleRow("Raid ready-up ping", () -> config.raidReadyPing, v -> config.raidReadyPing = v, "On", "Off", true);
 		RaidReminderSlider reminderSlider = new RaidReminderSlider(CONTROL_W, 20);
 		addSliderRow("Ready reminder delay", reminderSlider, reminderSlider::syncFromConfig, () -> config.raidReadyReminderSeconds = 60);
@@ -586,6 +589,43 @@ public final class BridgeConfigScreen extends Screen {
 			snapped = Math.max(MIN, Math.min(MAX, snapped));
 			if (snapped != config.partyHealthBarScale) {
 				config.partyHealthBarScale = snapped;
+				config.save();
+			}
+			updateMessage();
+		}
+	}
+
+	private final class HealthBarDistanceScaleSlider extends AbstractSliderButton {
+		private static final int MIN = 0;
+		private static final int MAX = 200;
+
+		private HealthBarDistanceScaleSlider(int width, int height) {
+			super(0, 0, width, height, Component.empty(), 0.0d);
+			syncFromConfig();
+		}
+
+		private void syncFromConfig() {
+			int current = Math.max(MIN, Math.min(MAX, config.partyHealthBarDistanceScale));
+			this.value = (current - MIN) / (double) (MAX - MIN);
+			updateMessage();
+		}
+
+		@Override
+		protected void updateMessage() {
+			if (config.partyHealthBarDistanceScale <= 0) {
+				setMessage(Component.literal("Off"));
+			} else {
+				setMessage(Component.literal(config.partyHealthBarDistanceScale + "%"));
+			}
+		}
+
+		@Override
+		protected void applyValue() {
+			int snapped = MIN + (int) Math.round(this.value * (MAX - MIN));
+			snapped = Math.round(snapped / 5.0f) * 5;
+			snapped = Math.max(MIN, Math.min(MAX, snapped));
+			if (snapped != config.partyHealthBarDistanceScale) {
+				config.partyHealthBarDistanceScale = snapped;
 				config.save();
 			}
 			updateMessage();
