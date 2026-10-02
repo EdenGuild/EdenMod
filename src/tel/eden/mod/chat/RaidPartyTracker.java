@@ -95,6 +95,12 @@ public final class RaidPartyTracker {
 	// Hold the tally this long after the raid ends: the completion message lands just after.
 	private static final long RETENTION_MS = 60_000L;
 
+	// Sampling runs on the client thread; a raid completion arrives on the netty thread
+	// (the chat mixin injects ahead of vanilla's ensureRunningOnSameThread), and that is
+	// what calls extraPlayers and reset. Every field below is therefore touched from both,
+	// and is guarded by LOCK — without it the completion can read a stale "no raid is
+	// running", judge the tally stale, and report no allies at all.
+	private static final Object LOCK = new Object();
 	private static final Map<String, Integer> sightings = new HashMap<>();
 	private static boolean raiding;
 	private static long raidEndedAt;
@@ -107,25 +113,36 @@ public final class RaidPartyTracker {
 	 * at frame rate, against a raid that lasts minutes and a presence threshold in seconds.
 	 */
 	public static void onTick() {
-		tickCounter++;
-		if (tickCounter % SIDEBAR_CHECK_INTERVAL_TICKS == 0) {
-			updateRaidState(sidebarShowsRaid());
+		int tick;
+		boolean sampling;
+		synchronized (LOCK) {
+			tick = ++tickCounter;
+			sampling = raiding;
 		}
-		if (!raiding) {
+		// Read the sidebar outside the lock: it walks the whole scoreboard, and the only
+		// other holder is a raid completion that should never wait on that.
+		if (tick % SIDEBAR_CHECK_INTERVAL_TICKS == 0) {
+			boolean inRaid = sidebarShowsRaid();
+			synchronized (LOCK) {
+				updateRaidState(inRaid);
+				sampling = raiding;
+			}
+		}
+		if (!sampling) {
 			return;
 		}
-		if (tickCounter % SAMPLE_INTERVAL_TICKS == 0) {
+		if (tick % SAMPLE_INTERVAL_TICKS == 0) {
 			sampleNearbyPlayers();
 		}
 	}
 
-	/** Fold the latest sidebar reading into whether a raid is being tracked. */
+	/** Fold the latest sidebar reading into whether a raid is being tracked. Holds LOCK. */
 	private static void updateRaidState(boolean inRaid) {
 		if (inRaid && !raiding) {
 			// A gap long enough to be a different raid drops the previous tally; a short one is
 			// a room transition briefly clearing the sidebar, so the count carries on.
 			if (raidEndedAt != 0 && System.currentTimeMillis() - raidEndedAt > NEW_RAID_GAP_MS) {
-				clear();
+				sightings.clear();
 			}
 			raiding = true;
 			raidEndedAt = 0;
@@ -149,12 +166,15 @@ public final class RaidPartyTracker {
 	 * player.
 	 */
 	public static List<String> extraPlayers(List<String> announcedParty) {
-		if (announcedParty.size() >= RAID_PARTY_SIZE || isStale()) {
+		if (announcedParty.size() >= RAID_PARTY_SIZE) {
 			return List.of();
 		}
 		Set<String> announced = announcedParty.stream().map(name -> name.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
 		List<Map.Entry<String, Integer>> ranked;
-		synchronized (sightings) {
+		synchronized (LOCK) {
+			if (isStale()) {
+				return List.of();
+			}
 			ranked = sightings.entrySet().stream().filter(entry -> entry.getValue() >= MIN_SIGHTINGS).filter(entry -> !announced.contains(entry.getKey().toLowerCase(Locale.ROOT))).sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).limit(MAX_CANDIDATES).collect(Collectors.toList());
 		}
 		return ranked.stream().map(Map.Entry::getKey).collect(Collectors.toUnmodifiableList());
@@ -162,15 +182,17 @@ public final class RaidPartyTracker {
 
 	/** Drop the tally once a completion has consumed it, or on world change. */
 	public static void reset() {
-		raiding = false;
-		raidEndedAt = 0;
-		tickCounter = 0;
-		clear();
+		synchronized (LOCK) {
+			raiding = false;
+			raidEndedAt = 0;
+			tickCounter = 0;
+			sightings.clear();
+		}
 	}
 
 	/**
 	 * Whether the tally can still be trusted: a raid is running, or one ended recently enough
-	 * that this completion is plausibly its own.
+	 * that this completion is plausibly its own. Holds LOCK.
 	 */
 	private static boolean isStale() {
 		if (raiding) {
@@ -238,7 +260,7 @@ public final class RaidPartyTracker {
 		}
 		AABB box = new AABB(self.getX() - SAMPLE_RADIUS, self.getY() - SAMPLE_RADIUS, self.getZ() - SAMPLE_RADIUS, self.getX() + SAMPLE_RADIUS, self.getY() + SAMPLE_RADIUS, self.getZ() + SAMPLE_RADIUS);
 		List<Player> players = mc.level.getEntitiesOfClass(Player.class, box);
-		synchronized (sightings) {
+		synchronized (LOCK) {
 			for (Player player : players) {
 				String name = accountName(player);
 				if (name != null) {
@@ -254,12 +276,6 @@ public final class RaidPartyTracker {
 		return profileName != null && IGN.matcher(profileName).matches() ? profileName : null;
 	}
 
-	private static void clear() {
-		synchronized (sightings) {
-			sightings.clear();
-		}
-	}
-
 	private static String stripCodes(String text) {
 		return COLOR_CODE.matcher(text).replaceAll("");
 	}
@@ -270,8 +286,8 @@ public final class RaidPartyTracker {
 	 */
 	public static List<String> debugState() {
 		List<String> out = new ArrayList<>();
-		out.add("raid sampling: " + raiding + " (need " + MIN_SIGHTINGS + " sightings, " + (MIN_PRESENCE_MS / 1000) + "s)");
-		synchronized (sightings) {
+		synchronized (LOCK) {
+			out.add("raid sampling: " + raiding + " (need " + MIN_SIGHTINGS + " sightings, " + (MIN_PRESENCE_MS / 1000) + "s)");
 			if (sightings.isEmpty()) {
 				out.add("  (nobody sampled)");
 				return out;

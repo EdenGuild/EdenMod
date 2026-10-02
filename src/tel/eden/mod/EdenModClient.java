@@ -20,10 +20,14 @@ import tel.eden.mod.chat.RewardUnavailableParser;
 import tel.eden.mod.chat.LevelUp;
 import tel.eden.mod.chat.LevelUpParser;
 import tel.eden.mod.chat.OccurrenceSequencer;
+import tel.eden.mod.chat.PlayerNameResolver;
+import tel.eden.mod.chat.ChatReplyManager;
 import tel.eden.mod.chat.PartyFormatter;
 import tel.eden.mod.chat.RaidCompletion;
 import tel.eden.mod.chat.RaidCompletionParser;
 import tel.eden.mod.chat.RaidPartyTracker;
+import tel.eden.mod.chat.RaidReadyTracker;
+import tel.eden.mod.party.PartyHealthTracker;
 import tel.eden.mod.chat.RankChange;
 import tel.eden.mod.chat.RankChangeParser;
 import tel.eden.mod.chat.ShoutParser;
@@ -656,7 +660,7 @@ public final class EdenModClient implements ClientModInitializer {
 			})).then(ClientCommandManager.literal("emojis").executes(ctx -> {
 				showEmojis(ctx.getSource());
 				return 1;
-			})).then(buildPartyCommand()).then(buildAnnihilationCommand()).then(buildCommandCommand()).then(ClientCommandManager.literal("update").executes(ctx -> {
+			})).then(buildPartyCommand()).then(buildAnnihilationCommand()).then(buildCommandCommand()).then(ClientCommandManager.literal("reply").then(ClientCommandManager.argument("messageId", StringArgumentType.word()).executes(ctx -> handleReplyCommand(StringArgumentType.getString(ctx, "messageId"))))).then(ClientCommandManager.literal("update").executes(ctx -> {
 				updatePrompt(ctx.getSource());
 				return 1;
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
@@ -671,12 +675,18 @@ public final class EdenModClient implements ClientModInitializer {
 			}))).then(ClientCommandManager.literal("congratulate").then(ClientCommandManager.argument("name", StringArgumentType.word()).executes(ctx -> {
 				congratulate(ctx.getSource(), StringArgumentType.getString(ctx, "name"));
 				return 1;
-			}))).then(ClientCommandManager.literal("wartest").executes(ctx -> {
+			}))).then(ClientCommandManager.literal("debug").executes(ctx -> {
 				for (String line : AttackTimerMenu.debugSidebarLines()) {
-					ctx.getSource().sendFeedback(Component.literal("[wartest] " + line).withStyle(ChatFormatting.AQUA));
+					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.AQUA));
 				}
 				for (String line : RaidPartyTracker.debugState()) {
-					ctx.getSource().sendFeedback(Component.literal("[wartest] " + line).withStyle(ChatFormatting.AQUA));
+					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.AQUA));
+				}
+				for (String line : RaidReadyTracker.debugState()) {
+					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.AQUA));
+				}
+				for (String line : PartyHealthTracker.debugState()) {
+					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.GREEN));
 				}
 				return 1;
 			})).then(ClientCommandManager.literal("help").executes(ctx -> {
@@ -714,6 +724,8 @@ public final class EdenModClient implements ClientModInitializer {
 			WarDPS.onTick(config);
 			WarTracker.onTick();
 			RaidPartyTracker.onTick();
+			RaidReadyTracker.onClientTick();
+			PartyHealthTracker.tick();
 			AttackMenuScraper.onTick(client);
 			AllianceMenuScraper.onTick(client);
 			GuildMenuScraper.onTick(client);
@@ -777,6 +789,7 @@ public final class EdenModClient implements ClientModInitializer {
 			pendingBootAttestationFailed = false;
 			display(() -> Component.empty().append(Component.literal("[EdenMod] ").withStyle(ChatFormatting.RED)).append(Component.literal("WARNING: ").withStyle(Style.EMPTY.withColor(ChatFormatting.RED).withBold(true))).append(Component.literal("This mod jar could not be verified against any official EdenMod release — it may have been tampered with. Try restarting your game, then if the issue persists, reinstall EdenMod from the official releases. If it still remains, contact FadeDave.").withStyle(ChatFormatting.RED)));
 		}
+
 		String connCode = pendingConnectionCode;
 		if (connCode != null && client.player != null) {
 			pendingConnectionCode = null;
@@ -860,8 +873,8 @@ public final class EdenModClient implements ClientModInitializer {
 		try {
 			socket = BridgeWebSocketClient.create(BridgeConfig.DEFAULT_BACKEND_URL, MOD_VERSION, new BridgeWebSocketClient.MessageSink() {
 				@Override
-				public void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt, String color) {
-					displayColored(color, () -> DiscordChatFormatter.format(author, content, replyTo, replyExcerpt));
+				public void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt, String color, String messageId) {
+					displayColored(color, () -> DiscordChatFormatter.format(author, content, replyTo, replyExcerpt, messageId));
 				}
 
 				@Override
@@ -1452,7 +1465,7 @@ public final class EdenModClient implements ClientModInitializer {
 		return ClientCommandManager.literal("party").executes(ctx -> openPartyListGui(ctx.getSource())).then(ClientCommandManager.literal("list").executes(ctx -> openPartyListGui(ctx.getSource()))).then(ClientCommandManager.literal("create").executes(ctx -> openPartyCreateGui(ctx.getSource())).then(raidLiteral("notg", "Nest of the Grootslangs")).then(raidLiteral("nol", "Orphion's Nexus of Light")).then(raidLiteral("tcc", "The Canyon Colossus")).then(raidLiteral("tna", "The Nameless Anomaly")).then(raidLiteral("wtp", "The Wartorn Palace")).then(otherLiteral())).then(ClientCommandManager.literal("join").executes(ctx -> openPartyListGui(ctx.getSource())).then(ClientCommandManager.argument("id", IntegerArgumentType.integer()).executes(ctx -> partyJoin(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "id"))))).then(ClientCommandManager.literal("leave").executes(ctx -> partyLeave(ctx.getSource(), null)).then(ClientCommandManager.argument("id", IntegerArgumentType.integer()).executes(ctx -> partyLeave(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "id")))))
 					// Driven by the "[Create party]" prompt shown when a party fills: runs
 					// /party create then invites each listed member in-game.
-					.then(ClientCommandManager.literal("makeingame").then(ClientCommandManager.argument("members", StringArgumentType.greedyString()).executes(ctx -> makeInGameParty(ctx.getSource(), StringArgumentType.getString(ctx, "members"))))).then(ClientCommandManager.literal("note").executes(ctx -> openPartyManageGui(ctx.getSource())).then(ClientCommandManager.argument("text", StringArgumentType.greedyString()).executes(ctx -> partyManage(ctx.getSource(), "note", StringArgumentType.getString(ctx, "text"), 0, "")))).then(ClientCommandManager.literal("filled").executes(ctx -> openPartyManageGui(ctx.getSource())).then(ClientCommandManager.argument("slots", IntegerArgumentType.integer(0, 8)).executes(ctx -> partyManage(ctx.getSource(), "filled", "", IntegerArgumentType.getInteger(ctx, "slots"), "")))).then(ClientCommandManager.literal("add").executes(ctx -> openPartyManageGui(ctx.getSource())).then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> partyManage(ctx.getSource(), "add", "", 0, StringArgumentType.getString(ctx, "player"))))).then(ClientCommandManager.literal("remove").executes(ctx -> openPartyManageGui(ctx.getSource())).then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> partyManage(ctx.getSource(), "remove", "", 0, StringArgumentType.getString(ctx, "player")))));
+					.then(ClientCommandManager.literal("makeingame").then(ClientCommandManager.argument("members", StringArgumentType.greedyString()).executes(ctx -> makeInGameParty(ctx.getSource(), StringArgumentType.getString(ctx, "members"))))).then(ClientCommandManager.literal("note").executes(ctx -> openPartyManageGui(ctx.getSource())).then(ClientCommandManager.argument("text", StringArgumentType.greedyString()).executes(ctx -> partyManage(ctx.getSource(), "note", StringArgumentType.getString(ctx, "text"), 0, "")))).then(ClientCommandManager.literal("filled").executes(ctx -> openPartyManageGui(ctx.getSource())).then(ClientCommandManager.argument("slots", IntegerArgumentType.integer(0, 8)).executes(ctx -> partyManage(ctx.getSource(), "filled", "", IntegerArgumentType.getInteger(ctx, "slots"), "")))).then(ClientCommandManager.literal("add").executes(ctx -> openPartyManageGui(ctx.getSource())).then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> partyManage(ctx.getSource(), "add", "", 0, StringArgumentType.getString(ctx, "player"))))).then(ClientCommandManager.literal("remove").executes(ctx -> openPartyManageGui(ctx.getSource())).then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> partyManage(ctx.getSource(), "remove", "", 0, StringArgumentType.getString(ctx, "player"))))).then(ClientCommandManager.literal("disband").executes(ctx -> partyManage(ctx.getSource(), "close", "", 0, ""))).then(ClientCommandManager.literal("close").executes(ctx -> partyManage(ctx.getSource(), "close", "", 0, "")));
 	}
 
 	private int partyManage(FabricClientCommandSource source, String action, String text, int value, String ign) {
@@ -2048,10 +2061,23 @@ public final class EdenModClient implements ClientModInitializer {
 		return 1;
 	}
 
+	private int handleReplyCommand(String messageId) {
+		ChatReplyManager.setActiveReply(messageId);
+		Minecraft mc = Minecraft.getInstance();
+		mc.execute(() -> {
+			if (!(mc.screen instanceof net.minecraft.client.gui.screens.ChatScreen)) {
+				mc.setScreen(new net.minecraft.client.gui.screens.ChatScreen("/g ", false));
+			} else {
+				ChatReplyManager.ensureGuildPrefix();
+			}
+		});
+		return 1;
+	}
+
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -2212,6 +2238,9 @@ public final class EdenModClient implements ClientModInitializer {
 		// Likewise the raid tally: it holds players from the session that just ended, and
 		// after an account switch could attribute them to another guild's raid.
 		RaidPartyTracker.reset();
+		RaidReadyTracker.reset();
+		PartyHealthTracker.reset();
+		ChatReplyManager.reset();
 		// Before the socket goes: an outstanding deduct must not outlive the session that
 		// made it, or it resurfaces at the next connect naming a player from another
 		// server — or, after an account switch, another guild.
@@ -2255,11 +2284,13 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/** Called from the chat-capture mixin for every non-overlay system-chat component. */
 	public void handleSystemChat(Component message) {
+		PlayerNameResolver.observeMessage(message);
 		handleRewardFeedback(message);
 		// A real chat line breaks any in-progress Discord emblem block, so the next
 		// relayed Discord message starts with a fresh shield (like guild chat).
 		DiscordChatFormatter.onServerChatLine();
 		if (onWynncraft) {
+			RaidReadyTracker.onSystemChat(message);
 			// War chat cues (start countdown → attendance capture; end → HUD summary)
 			// work even while the bridge socket is down. Keep these deferred until after
 			// this packet handler returns, alongside the rest of the client-tick state.
@@ -2417,7 +2448,8 @@ public final class EdenModClient implements ClientModInitializer {
 			// 0-based: a first occurrence is seq 0, which matches what an old mod (no
 			// seq field) defaults to on the backend, so mixed mod versions still dedup.
 			int seq = chatSeq.next(line.username() + "|" + line.message()) - 1;
-			current.sendGuildChat(line.username(), line.nickname(), line.message(), seq);
+			String replyToId = ChatReplyManager.consumePendingReply(line.username());
+			current.sendGuildChat(line.username(), line.nickname(), line.message(), seq, replyToId);
 		}
 	}
 
@@ -2438,6 +2470,7 @@ public final class EdenModClient implements ClientModInitializer {
 		// arriving within the retention window would inherit this raid's players.
 		if (ownRaid) {
 			RaidPartyTracker.reset();
+			RaidReadyTracker.reset();
 		}
 	}
 

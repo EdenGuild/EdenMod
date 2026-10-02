@@ -67,6 +67,9 @@ public final class RaidCompletionParser {
 		// Flatten color codes/formatting for regex parsing
 		String rawText = message.getString();
 		String cleaned = ChatText.normalize(rawText).replace(",and ", ", and ");
+		if (cleaned.contains("shouts:")) {
+			return Optional.empty();
+		}
 		Matcher detect = RAID_DETECT.matcher(cleaned);
 		if (!detect.find()) {
 			return Optional.empty();
@@ -76,8 +79,12 @@ public final class RaidCompletionParser {
 		if (raidName == null || !names.find()) {
 			return Optional.empty();
 		}
-		List<String> party = resolveParty(splitNames(names.group(1)), message);
-		if (party.isEmpty()) {
+		String namesGroup = names.group(1);
+		if (namesGroup.contains(":") || namesGroup.contains(">")) {
+			return Optional.empty();
+		}
+		List<String> party = resolveParty(splitNames(namesGroup), message);
+		if (party.isEmpty() || party.size() > 4) {
 			return Optional.empty();
 		}
 		// Loot is best-effort: it's frequently a custom-font glyph run, not literal

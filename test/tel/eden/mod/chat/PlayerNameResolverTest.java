@@ -38,4 +38,53 @@ class PlayerNameResolverTest {
 
 		assertEquals(Optional.of("Asthae2"), PlayerNameResolver.resolveKnown("Asthae2"));
 	}
+
+	@Test
+	void observeMessageLearnsFromHoverAndInsertion() {
+		net.minecraft.network.chat.Component hoverMsg = net.minecraft.network.chat.Component.literal("CustomNick").withStyle(s -> s.withHoverEvent(new net.minecraft.network.chat.HoverEvent.ShowText(net.minecraft.network.chat.Component.literal("CustomNick's real username is CustomUser"))));
+		PlayerNameResolver.observeMessage(hoverMsg);
+		assertEquals(Optional.of("CustomUser"), PlayerNameResolver.resolveKnown("CustomNick"));
+
+		net.minecraft.network.chat.Component insertMsg = net.minecraft.network.chat.Component.literal("TestNick").withStyle(s -> s.withInsertion("TestReal"));
+		PlayerNameResolver.observeMessage(insertMsg);
+		assertEquals(Optional.of("TestReal"), PlayerNameResolver.resolveKnown("TestNick"));
+	}
+
+	@Test
+	void observeMessageLearnsFromPartyPatterns() {
+		// Party join message
+		net.minecraft.network.chat.Component joinMsg = net.minecraft.network.chat.Component.empty().append(net.minecraft.network.chat.Component.literal("SoloNick").withStyle(s -> s.withInsertion("SoloReal"))).append(net.minecraft.network.chat.Component.literal(" has joined your party."));
+		PlayerNameResolver.observeMessage(joinMsg);
+		assertEquals(Optional.of("SoloReal"), PlayerNameResolver.resolveKnown("SoloNick"));
+
+		// Parenthesized nickname (real)
+		net.minecraft.network.chat.Component parenMsg = net.minecraft.network.chat.Component.literal("ParenNick (ParenReal): Hello party!");
+		PlayerNameResolver.observeMessage(parenMsg);
+		assertEquals(Optional.of("ParenReal"), PlayerNameResolver.resolveKnown("ParenNick"));
+	}
+
+	@Test
+	void resolveKnownMatchesTruncatedNicknames() {
+		PlayerNameResolver.recordAlias("get it twisted", "TruncatedUser");
+		// Scoreboard truncation cases
+		assertEquals(Optional.of("TruncatedUser"), PlayerNameResolver.resolveKnown("get it t"));
+		assertEquals(Optional.of("TruncatedUser"), PlayerNameResolver.resolveKnown("get it"));
+		assertEquals(Optional.of("TruncatedUser"), PlayerNameResolver.resolveKnown("getitt"));
+		assertEquals("TruncatedUser", PlayerNameResolver.canonicalize("get it t"));
+		assertEquals("TruncatedUser", PlayerNameResolver.canonicalize("get it"));
+	}
+
+	@Test
+	void learnFromTextIgnoresUnknownWordsAndLearnsKnownPlayer() {
+		// Conversational chat phrases after player names must not enter the cache
+		PlayerNameResolver.learnFromText("[Guild] Someone: we need tank/healer for raid or good/evil");
+		assertEquals(Optional.empty(), PlayerNameResolver.resolveKnown("healer"));
+		assertEquals(Optional.empty(), PlayerNameResolver.resolveKnown("tank"));
+		assertEquals(Optional.empty(), PlayerNameResolver.resolveKnown("evil"));
+
+		// When a player is known, the pair is recorded
+		PlayerNameResolver.recordAlias("knownUser", "KnownUser");
+		PlayerNameResolver.learnFromText("KnownUser/NickBuddy joined!");
+		assertEquals(Optional.of("KnownUser"), PlayerNameResolver.resolveKnown("NickBuddy"));
+	}
 }

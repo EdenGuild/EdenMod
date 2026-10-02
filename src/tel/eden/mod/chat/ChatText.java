@@ -17,8 +17,8 @@ import net.minecraft.network.chat.Style;
  * lines with private-use glyphs (rank badges, banners) and control characters
  * that render in-game but get in the way of parsing; these collapse them away.
  */
-final class ChatText {
-	static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
+public final class ChatText {
+	public static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
 	// Wynncraft 2.1 soft-wraps chat as "\n" followed by this private-use marker
 	// and one injected leading space. The marker is invisible in-game but must be
 	// removed before forwarding text, otherwise a URL becomes several tokens.
@@ -73,7 +73,7 @@ final class ChatText {
 	 * is a prefix of, else any candidate that differs from the nickname. Returns null when
 	 * no metadata is present (caller falls back to the displayed name).
 	 */
-	static String resolveRealNameAnywhere(Component message, String displayed) {
+	public static String resolveRealNameAnywhere(Component message, String displayed) {
 		Set<String> candidates = new LinkedHashSet<>();
 		message.visit((style, fragment) -> {
 			String hover = hoverRealName(style);
@@ -147,7 +147,7 @@ final class ChatText {
 		return builder.toString();
 	}
 
-	private static String hoverRealName(Style style) {
+	static String hoverRealName(Style style) {
 		HoverEvent hover = style.getHoverEvent();
 		if (hover instanceof HoverEvent.ShowText showText) {
 			String text = showText.value().getString().replace('’', '\'').replace('‘', '\'');

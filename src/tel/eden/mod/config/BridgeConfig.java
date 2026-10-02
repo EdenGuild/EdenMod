@@ -189,6 +189,34 @@ public final class BridgeConfig {
 	/** Whether players are rendered at the unlocked baby-player size. */
 	public boolean babyPlayers = false;
 
+	/** Unique party member outline highlights in raids/dungeons (requires Wynntils). */
+	public boolean partyHighlightEnabled = true;
+
+	/** Dynamic overhead health bars for party members in raids and dungeons. */
+	public boolean partyHealthBarEnabled = true;
+
+	/** Overhead health bar size scale percentage (range 50-200, default 100). */
+	public int partyHealthBarScale = 100;
+
+	/**
+	 * Distance-based overhead health bar size boost percentage starting at 20 blocks
+	 * (range 0-200, default 0 = off). Farther players have their health bars enlarged
+	 * so they stay clearly legible across raid rooms and arenas.
+	 */
+	public int partyHealthBarDistanceScale = 0;
+
+	/** Show your own overhead health bar in third-person view (F5). */
+	public boolean partyHealthBarShowSelf = true;
+
+	/** Send a sound when party members ready up, and alert if waiting for you. */
+	public boolean raidReadyPing = true;
+
+	/** Delay in seconds before alerting that teammates are waiting (range 10-300, default 60). */
+	public int raidReadyReminderSeconds = 60;
+
+	/** Custom palette for the 10 party slots. Defaults to PartyHighlightManager.DEFAULT_PALETTE. */
+	public List<Integer> partyColors = new ArrayList<>(tel.eden.mod.party.PartyHighlightManager.DEFAULT_PALETTE);
+
 	/**
 	 * Saved HUD element positions as {@code name -> [xFraction, yFraction]} (0-1 of
 	 * the screen). Absent elements fall back to their built-in default anchor.
@@ -325,6 +353,9 @@ public final class BridgeConfig {
 					if (config.hudScales == null) {
 						config.hudScales = new HashMap<>();
 					}
+					if (config.partyColors == null || config.partyColors.isEmpty()) {
+						config.partyColors = new ArrayList<>(tel.eden.mod.party.PartyHighlightManager.DEFAULT_PALETTE);
+					}
 					if (config.emoteWheelFavorites == null) {
 						config.emoteWheelFavorites = new ArrayList<>();
 					}
@@ -361,6 +392,9 @@ public final class BridgeConfig {
 					config.consumableLabelScale = Math.max(0.25f, Math.min(2.0f, config.consumableLabelScale));
 					config.consumableLabelOffsetX = Math.max(-64, Math.min(64, config.consumableLabelOffsetX));
 					config.consumableLabelOffsetY = Math.max(-64, Math.min(64, config.consumableLabelOffsetY));
+					config.partyHealthBarScale = Math.max(50, Math.min(200, config.partyHealthBarScale));
+					config.partyHealthBarDistanceScale = Math.max(0, Math.min(200, config.partyHealthBarDistanceScale));
+					config.raidReadyReminderSeconds = Math.max(10, Math.min(300, config.raidReadyReminderSeconds));
 					return config;
 				}
 			} catch (IOException | RuntimeException e) {
