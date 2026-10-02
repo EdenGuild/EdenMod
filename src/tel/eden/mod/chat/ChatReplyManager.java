@@ -111,7 +111,7 @@ public final class ChatReplyManager {
 	 * Consume and return the pending reply message ID if the echoed guild message
 	 * matches the local player and hasn't timed out.
 	 */
-	public static synchronized String consumePendingReply(String username, String message) {
+	public static synchronized String consumePendingReply(String username) {
 		if (pendingReplyId == null) {
 			return null;
 		}

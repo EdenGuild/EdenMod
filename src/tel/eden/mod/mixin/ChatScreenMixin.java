@@ -183,7 +183,12 @@ public abstract class ChatScreenMixin {
 	@Inject(method = "handleChatInput", at = @At("HEAD"))
 	private void edenmod$captureReplyOnSend(String message, boolean addToHistory, CallbackInfo ci) {
 		if (ChatReplyManager.hasActiveReply()) {
-			ChatReplyManager.markPendingReply();
+			String trimmed = message != null ? message.trim() : "";
+			if (trimmed.startsWith("/g ") && trimmed.length() > 3 && !trimmed.substring(3).isBlank()) {
+				ChatReplyManager.markPendingReply();
+			} else {
+				ChatReplyManager.clearActiveReply();
+			}
 		}
 	}
 

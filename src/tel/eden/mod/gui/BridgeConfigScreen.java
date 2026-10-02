@@ -137,12 +137,12 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow(Category.PARTY_RAIDS, "Party member outlines", () -> config.partyHighlightEnabled, v -> config.partyHighlightEnabled = v, "On", "Off", true);
 		addToggleRow(Category.PARTY_RAIDS, "Party health bars", () -> config.partyHealthBarEnabled, v -> config.partyHealthBarEnabled = v, "On", "Off", true);
 		addToggleRow(Category.PARTY_RAIDS, "Show own health bar (F5)", () -> config.partyHealthBarShowSelf, v -> config.partyHealthBarShowSelf = v, "On", "Off", true);
-		HealthBarScaleSlider scaleSlider = new HealthBarScaleSlider(CONTROL_W, 20);
+		IntConfigSlider scaleSlider = new IntConfigSlider(CONTROL_W, 20, 50, 200, 5, () -> config.partyHealthBarScale, v -> config.partyHealthBarScale = v, v -> Component.literal(v + "%"));
 		addSliderRow(Category.PARTY_RAIDS, "Party health bar size", scaleSlider, scaleSlider::syncFromConfig, () -> config.partyHealthBarScale = 100);
-		HealthBarDistanceScaleSlider distanceScaleSlider = new HealthBarDistanceScaleSlider(CONTROL_W, 20);
+		IntConfigSlider distanceScaleSlider = new IntConfigSlider(CONTROL_W, 20, 0, 200, 5, () -> config.partyHealthBarDistanceScale, v -> config.partyHealthBarDistanceScale = v, v -> Component.literal(v <= 0 ? "Off" : v + "%"));
 		addSliderRow(Category.PARTY_RAIDS, "Distance size boost", distanceScaleSlider, distanceScaleSlider::syncFromConfig, () -> config.partyHealthBarDistanceScale = 0);
 		addToggleRow(Category.PARTY_RAIDS, "Raid ready-up ping", () -> config.raidReadyPing, v -> config.raidReadyPing = v, "On", "Off", true);
-		RaidReminderSlider reminderSlider = new RaidReminderSlider(CONTROL_W, 20);
+		IntConfigSlider reminderSlider = new IntConfigSlider(CONTROL_W, 20, 10, 300, 5, () -> config.raidReadyReminderSeconds, v -> config.raidReadyReminderSeconds = v, v -> Component.literal(formatReminderDuration(v)));
 		addSliderRow(Category.PARTY_RAIDS, "Ready reminder delay", reminderSlider, reminderSlider::syncFromConfig, () -> config.raidReadyReminderSeconds = 60);
 
 		// War & Territory
@@ -585,112 +585,57 @@ public final class BridgeConfigScreen extends Screen {
 		}
 	}
 
-	private final class RaidReminderSlider extends AbstractSliderButton {
-		private static final int MIN = 10;
-		private static final int MAX = 300;
-
-		private RaidReminderSlider(int width, int height) {
-			super(0, 0, width, height, Component.empty(), 0.0d);
-			syncFromConfig();
-		}
-
-		private void syncFromConfig() {
-			int current = Math.max(MIN, Math.min(MAX, config.raidReadyReminderSeconds));
-			this.value = (current - MIN) / (double) (MAX - MIN);
-			updateMessage();
-		}
-
-		@Override
-		protected void updateMessage() {
-			int sec = config.raidReadyReminderSeconds;
-			if (sec == 60) {
-				setMessage(Component.literal("1 min"));
-			} else if (sec % 60 == 0) {
-				setMessage(Component.literal((sec / 60) + " mins"));
-			} else if (sec < 60) {
-				setMessage(Component.literal(sec + "s"));
-			} else {
-				setMessage(Component.literal((sec / 60) + "m " + (sec % 60) + "s"));
-			}
-		}
-
-		@Override
-		protected void applyValue() {
-			int snapped = MIN + (int) Math.round(this.value * (MAX - MIN));
-			snapped = Math.round(snapped / 5.0f) * 5;
-			snapped = Math.max(MIN, Math.min(MAX, snapped));
-			if (snapped != config.raidReadyReminderSeconds) {
-				config.raidReadyReminderSeconds = snapped;
-				config.save();
-			}
-			updateMessage();
+	private static String formatReminderDuration(int sec) {
+		if (sec == 60) {
+			return "1 min";
+		} else if (sec % 60 == 0) {
+			return (sec / 60) + " mins";
+		} else if (sec < 60) {
+			return sec + "s";
+		} else {
+			return (sec / 60) + "m " + (sec % 60) + "s";
 		}
 	}
 
-	private final class HealthBarScaleSlider extends AbstractSliderButton {
-		private static final int MIN = 50;
-		private static final int MAX = 200;
+	private final class IntConfigSlider extends AbstractSliderButton {
+		private final int min;
+		private final int max;
+		private final int step;
+		private final Supplier<Integer> getter;
+		private final Consumer<Integer> setter;
+		private final java.util.function.Function<Integer, Component> labeler;
 
-		private HealthBarScaleSlider(int width, int height) {
+		private IntConfigSlider(int width, int height, int min, int max, int step, Supplier<Integer> getter, Consumer<Integer> setter, java.util.function.Function<Integer, Component> labeler) {
 			super(0, 0, width, height, Component.empty(), 0.0d);
+			this.min = min;
+			this.max = max;
+			this.step = step;
+			this.getter = getter;
+			this.setter = setter;
+			this.labeler = labeler;
 			syncFromConfig();
 		}
 
 		private void syncFromConfig() {
-			int current = Math.max(MIN, Math.min(MAX, config.partyHealthBarScale));
-			this.value = (current - MIN) / (double) (MAX - MIN);
+			int current = Math.max(min, Math.min(max, getter.get()));
+			this.value = (current - min) / (double) (max - min);
 			updateMessage();
 		}
 
 		@Override
 		protected void updateMessage() {
-			setMessage(Component.literal(config.partyHealthBarScale + "%"));
+			setMessage(labeler.apply(getter.get()));
 		}
 
 		@Override
 		protected void applyValue() {
-			int snapped = MIN + (int) Math.round(this.value * (MAX - MIN));
-			snapped = Math.round(snapped / 5.0f) * 5;
-			snapped = Math.max(MIN, Math.min(MAX, snapped));
-			if (snapped != config.partyHealthBarScale) {
-				config.partyHealthBarScale = snapped;
-				config.save();
+			int snapped = min + (int) Math.round(this.value * (max - min));
+			if (step > 1) {
+				snapped = Math.round((float) snapped / step) * step;
 			}
-			updateMessage();
-		}
-	}
-
-	private final class HealthBarDistanceScaleSlider extends AbstractSliderButton {
-		private static final int MIN = 0;
-		private static final int MAX = 200;
-
-		private HealthBarDistanceScaleSlider(int width, int height) {
-			super(0, 0, width, height, Component.empty(), 0.0d);
-			syncFromConfig();
-		}
-
-		private void syncFromConfig() {
-			int current = Math.max(MIN, Math.min(MAX, config.partyHealthBarDistanceScale));
-			this.value = (current - MIN) / (double) (MAX - MIN);
-			updateMessage();
-		}
-
-		@Override
-		protected void updateMessage() {
-			if (config.partyHealthBarDistanceScale <= 0) {
-				setMessage(Component.literal("Off"));
-			} else {
-				setMessage(Component.literal(config.partyHealthBarDistanceScale + "%"));
-			}
-		}
-
-		@Override
-		protected void applyValue() {
-			int snapped = MIN + (int) Math.round(this.value * (MAX - MIN));
-			snapped = Math.round(snapped / 5.0f) * 5;
-			snapped = Math.max(MIN, Math.min(MAX, snapped));
-			if (snapped != config.partyHealthBarDistanceScale) {
-				config.partyHealthBarDistanceScale = snapped;
+			snapped = Math.max(min, Math.min(max, snapped));
+			if (snapped != getter.get()) {
+				setter.accept(snapped);
 				config.save();
 			}
 			updateMessage();

@@ -63,11 +63,11 @@ class ChatReplyManagerTest {
 		assertFalse(ChatReplyManager.hasActiveReply());
 
 		// In headless test mc.getUser() is null, so username check is bypassed
-		String replyId = ChatReplyManager.consumePendingReply("AnyUser", "Answer");
+		String replyId = ChatReplyManager.consumePendingReply("AnyUser");
 		assertEquals("222", replyId);
 
 		// Second consume returns null (consumed)
-		assertNull(ChatReplyManager.consumePendingReply("AnyUser", "Answer"));
+		assertNull(ChatReplyManager.consumePendingReply("AnyUser"));
 	}
 
 	@Test

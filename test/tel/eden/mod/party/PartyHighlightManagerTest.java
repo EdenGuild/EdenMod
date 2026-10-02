@@ -98,18 +98,6 @@ public class PartyHighlightManagerTest {
 	}
 
 	@Test
-	public void outlineThicknessSanitization() {
-		int defaultThickness = 2;
-		assertEquals(2, defaultThickness, "Default outline thickness should be 2px");
-
-		int thicknessAbove = Math.max(1, Math.min(6, 10));
-		assertEquals(6, thicknessAbove, "Thickness above 6 should clamp to 6");
-
-		int thicknessBelow = Math.max(1, Math.min(6, 0));
-		assertEquals(1, thicknessBelow, "Thickness below 1 should clamp to 1");
-	}
-
-	@Test
 	public void wynntilsPartyBridgeFallbackSafe() {
 		// When Wynntils is absent or uninitialized in test environment
 		WynntilsPartyBridge.reset();

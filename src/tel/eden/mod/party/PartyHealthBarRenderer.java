@@ -94,7 +94,7 @@ public final class PartyHealthBarRenderer {
 
 		poseStack.pushPose();
 		float scaleFactor = (config != null ? Math.max(50, Math.min(200, config.partyHealthBarScale)) : 100) / 100.0f;
-		float distanceMultiplier = computeDistanceScale(state, config);
+		float distanceMultiplier = config != null ? computeDistanceScale(state.distanceToCameraSq, config.partyHealthBarDistanceScale) : 1.0f;
 		float effectiveScale = NAMETAG_SCALE * scaleFactor * distanceMultiplier;
 		float yOffset = computeWorldYOffset(state);
 		poseStack.translate(attachment.x, attachment.y + yOffset, attachment.z);
@@ -103,13 +103,6 @@ public final class PartyHealthBarRenderer {
 
 		submitEdenBar(submitNodeCollector, poseStack, uuid, health, config);
 		poseStack.popPose();
-	}
-
-	static float computeDistanceScale(AvatarRenderState state, BridgeConfig config) {
-		if (state == null || config == null) {
-			return 1.0f;
-		}
-		return computeDistanceScale(state.distanceToCameraSq, config.partyHealthBarDistanceScale);
 	}
 
 	static float computeDistanceScale(double distanceToCameraSq, int distanceScalePercent) {

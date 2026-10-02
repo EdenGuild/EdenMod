@@ -120,9 +120,15 @@ public final class WynntilsPartyBridge {
 				cappedValueMaxMethod = cvClass.getMethod("max");
 				cappedValueGetProgressMethod = cvClass.getMethod("getProgress");
 			}
-			int current = (int) cappedValueCurrentMethod.invoke(cappedValue);
-			int max = (int) cappedValueMaxMethod.invoke(cappedValue);
-			double progress = (double) cappedValueGetProgressMethod.invoke(cappedValue);
+			Object curObj = cappedValueCurrentMethod.invoke(cappedValue);
+			Object maxObj = cappedValueMaxMethod.invoke(cappedValue);
+			Object progObj = cappedValueGetProgressMethod.invoke(cappedValue);
+			if (!(curObj instanceof Number curNum) || !(maxObj instanceof Number maxNum)) {
+				return null;
+			}
+			int current = curNum.intValue();
+			int max = maxNum.intValue();
+			double progress = (progObj instanceof Number progNum) ? progNum.doubleValue() : 0.0;
 			float percent = max > 0 ? (float) Math.max(0.0, Math.min(1.0, (progress > 0.001) ? progress : ((double) current / max))) : 1.0f;
 			return new LiveHealth(current, max, percent);
 		} catch (Throwable ignored) {

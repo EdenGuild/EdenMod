@@ -2448,7 +2448,7 @@ public final class EdenModClient implements ClientModInitializer {
 			// 0-based: a first occurrence is seq 0, which matches what an old mod (no
 			// seq field) defaults to on the backend, so mixed mod versions still dedup.
 			int seq = chatSeq.next(line.username() + "|" + line.message()) - 1;
-			String replyToId = ChatReplyManager.consumePendingReply(line.username(), line.message());
+			String replyToId = ChatReplyManager.consumePendingReply(line.username());
 			current.sendGuildChat(line.username(), line.nickname(), line.message(), seq, replyToId);
 		}
 	}

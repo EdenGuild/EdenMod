@@ -73,4 +73,18 @@ class PlayerNameResolverTest {
 		assertEquals("TruncatedUser", PlayerNameResolver.canonicalize("get it t"));
 		assertEquals("TruncatedUser", PlayerNameResolver.canonicalize("get it"));
 	}
+
+	@Test
+	void learnFromTextIgnoresUnknownWordsAndLearnsKnownPlayer() {
+		// Conversational chat phrases after player names must not enter the cache
+		PlayerNameResolver.learnFromText("[Guild] Someone: we need tank/healer for raid or good/evil");
+		assertEquals(Optional.empty(), PlayerNameResolver.resolveKnown("healer"));
+		assertEquals(Optional.empty(), PlayerNameResolver.resolveKnown("tank"));
+		assertEquals(Optional.empty(), PlayerNameResolver.resolveKnown("evil"));
+
+		// When a player is known, the pair is recorded
+		PlayerNameResolver.recordAlias("knownUser", "KnownUser");
+		PlayerNameResolver.learnFromText("KnownUser/NickBuddy joined!");
+		assertEquals(Optional.of("KnownUser"), PlayerNameResolver.resolveKnown("NickBuddy"));
+	}
 }

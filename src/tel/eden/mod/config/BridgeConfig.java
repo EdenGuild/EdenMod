@@ -394,6 +394,7 @@ public final class BridgeConfig {
 					config.consumableLabelOffsetY = Math.max(-64, Math.min(64, config.consumableLabelOffsetY));
 					config.partyHealthBarScale = Math.max(50, Math.min(200, config.partyHealthBarScale));
 					config.partyHealthBarDistanceScale = Math.max(0, Math.min(200, config.partyHealthBarDistanceScale));
+					config.raidReadyReminderSeconds = Math.max(10, Math.min(300, config.raidReadyReminderSeconds));
 					return config;
 				}
 			} catch (IOException | RuntimeException e) {

@@ -3,6 +3,7 @@ package tel.eden.mod.chat;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
@@ -19,6 +20,7 @@ public final class PlayerNameResolver {
 	private static final Pattern PARTY_JOINED_MSG = Pattern.compile("^(.+?)\\s+has joined (?:your|the)\\s+party", Pattern.CASE_INSENSITIVE);
 	private static final Pattern PARTY_MEMBERS_MSG = Pattern.compile("^Party members:\\s*(.+)", Pattern.CASE_INSENSITIVE);
 	private static final Pattern SLASH_ALIAS_PATTERN = Pattern.compile("(?<![a-zA-Z0-9_./])([a-zA-Z0-9_]{3,16})/([a-zA-Z0-9_]{3,16})(?![a-zA-Z0-9_./])");
+	private static final Set<String> URL_TOKENS = Set.of("http", "https", "com", "org", "net", "io", "gg");
 
 	private PlayerNameResolver() {
 	}
@@ -235,20 +237,46 @@ public final class PlayerNameResolver {
 		if (text == null || !text.contains("/")) {
 			return;
 		}
+		// If the text contains player chat (e.g. "Player: text"), do not learn aliases from the chat content
+		int colonIdx = text.indexOf(": ");
 		Matcher matcher = SLASH_ALIAS_PATTERN.matcher(text);
 		while (matcher.find()) {
+			if (colonIdx >= 0 && matcher.start() > colonIdx) {
+				// Inside player chat body - ignore to avoid normal conversational words
+				continue;
+			}
 			String real = matcher.group(1);
 			String nick = matcher.group(2);
 			if (isUrlToken(real) || isUrlToken(nick)) {
 				continue;
 			}
-			recordAlias(nick, real);
+			Minecraft mc = Minecraft.getInstance();
+			boolean hasConnection = (mc != null && mc.getConnection() != null);
+			if (hasConnection) {
+				boolean realKnown = USERNAME_BY_DISPLAY.containsKey(key(real)) || resolveFromTabList(real) != null;
+				boolean nickKnown = USERNAME_BY_DISPLAY.containsKey(key(nick)) || resolveFromTabList(nick) != null;
+				if (realKnown) {
+					recordAlias(nick, real);
+				} else if (nickKnown) {
+					recordAlias(real, nick);
+				}
+			} else {
+				// Offline / test environment without live tab list
+				boolean realKnown = USERNAME_BY_DISPLAY.containsKey(key(real));
+				boolean nickKnown = USERNAME_BY_DISPLAY.containsKey(key(nick));
+				if (realKnown) {
+					recordAlias(nick, real);
+				} else if (nickKnown) {
+					recordAlias(real, nick);
+				} else {
+					recordAlias(nick, real);
+				}
+			}
 		}
 	}
 
 	private static boolean isUrlToken(String token) {
-		String lower = token.toLowerCase(Locale.ROOT);
-		return lower.equals("http") || lower.equals("https") || lower.equals("com") || lower.equals("org") || lower.equals("net") || lower.equals("io") || lower.equals("gg");
+		return token != null && URL_TOKENS.contains(token.toLowerCase(Locale.ROOT));
 	}
 
 	private static String key(String name) {

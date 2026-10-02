@@ -172,8 +172,7 @@ public final class PartyHealthTracker {
 			return;
 		}
 
-		List<String> rawWynnPartyMembers = WynntilsPartyBridge.getPartyMembers();
-		List<String> wynnPartyMembers = deduplicatePreservingOrder(rawWynnPartyMembers);
+		List<String> wynnPartyMembers = WynntilsPartyBridge.getPartyMembers();
 		String localName = (mc.player != null && mc.player.getGameProfile() != null) ? mc.player.getGameProfile().name() : null;
 		List<String> candidateRoster = matchCandidateRoster(parsedRows, wynnPartyMembers, localName);
 
@@ -787,28 +786,12 @@ public final class PartyHealthTracker {
 		return count > 1;
 	}
 
-	static List<String> deduplicatePreservingOrder(List<String> list) {
-		if (list == null || list.isEmpty()) {
-			return List.of();
-		}
-		List<String> result = new ArrayList<>(list.size());
-		Set<String> seen = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-		for (String item : list) {
-			if (item != null && !item.isBlank()) {
-				String trimmed = item.trim();
-				if (seen.add(trimmed)) {
-					result.add(trimmed);
-				}
-			}
-		}
-		return result;
-	}
-
 	static List<String> matchCandidateRoster(List<ParsedPartyLine> rows, List<String> wynnPartyMembers, String localUsername) {
 		if (wynnPartyMembers == null || wynnPartyMembers.isEmpty() || rows == null || rows.isEmpty()) {
 			return List.of();
 		}
-		wynnPartyMembers = deduplicatePreservingOrder(wynnPartyMembers);
+		Set<String> seen = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+		wynnPartyMembers = wynnPartyMembers.stream().filter(s -> s != null && !s.isBlank()).map(String::trim).filter(seen::add).toList();
 
 		int localRowIdx = -1;
 		if (localUsername != null) {
@@ -1011,15 +994,7 @@ public final class PartyHealthTracker {
 	}
 
 	private static boolean containsIgnoreCase(List<String> list, String target) {
-		if (list == null || target == null) {
-			return false;
-		}
-		for (String s : list) {
-			if (s.equalsIgnoreCase(target)) {
-				return true;
-			}
-		}
-		return false;
+		return list != null && target != null && list.stream().anyMatch(target::equalsIgnoreCase);
 	}
 
 	private static UUID findTabUuid(Minecraft mc, String name, Set<UUID> claimed) {
