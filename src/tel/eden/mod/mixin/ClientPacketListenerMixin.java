@@ -3,6 +3,7 @@ package tel.eden.mod.mixin;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.chat.ChatDecorators;
 import tel.eden.mod.chat.DiscordChatFormatter;
+import tel.eden.mod.chat.EconomyMessageFilter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.chat.Component;
@@ -108,6 +109,10 @@ public class ClientPacketListenerMixin {
 			if (mod != null) {
 				mod.handleRewardFeedback(packet.content());
 			}
+			return;
+		}
+		if (mod != null && mod.config().hideEconomyMessages && EconomyMessageFilter.isEconomyMessage(packet.content())) {
+			ci.cancel();
 			return;
 		}
 		if (mod != null) {

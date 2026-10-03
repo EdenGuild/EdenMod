@@ -152,6 +152,7 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow(Category.WAR, "Green beacon at soonest war", () -> config.warGreenBeacon, v -> config.warGreenBeacon = v, "On", "Off", true);
 		addToggleRow(Category.WAR, "War info overlay (DPS/EHP)", () -> config.warDpsHud, v -> config.warDpsHud = v, "On", "Off", true);
 		addToggleRow(Category.WAR, "Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
+		addToggleRow(Category.WAR, "Hide economy messages", () -> config.hideEconomyMessages, v -> config.hideEconomyMessages = v, "On", "Off", false);
 
 		// Visuals & QoL
 		if (config.isSecretUnlocked(BridgeConfig.SECRET_BABY_PLAYERS)) {

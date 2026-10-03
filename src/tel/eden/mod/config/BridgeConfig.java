@@ -132,6 +132,9 @@ public final class BridgeConfig {
 	/** HUD chip showing your rolling 7-day war count (from the backend). */
 	public boolean warWeeklyCountHud = false;
 
+	/** Hide territory economy announcements (upgrades, bonuses, tax, borders, loadouts) from chat. */
+	public boolean hideEconomyMessages = false;
+
 	/**
 	 * Run {@code /stream} automatically on entering a Wynncraft world. Off by default:
 	 * it changes what the server shows you, so it should be an opt-in.
