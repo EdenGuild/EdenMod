@@ -95,7 +95,11 @@ public final class WynntilsItemDecoder {
 			Object statType = call(actual, "statType");
 			int value = numberOr(call(actual, "value"), 0);
 			String statName = normalizeRenderableText(String.valueOf(call(statType, "getDisplayName")));
-			String valueText = normalizeRenderableText((value >= 0 ? "+" : "") + value + statUnit(statType));
+			// Wynntils stores inverted stats in benefit order; flip the displayed sign,
+			// while retaining the stored value's sign for the renderer's color.
+			boolean calculateAsInverted = Boolean.TRUE.equals(call(statType, "calculateAsInverted"));
+			long displayed = calculateAsInverted ? -(long) value : value;
+			String valueText = formatStatValue(displayed, statUnit(statType));
 			float roll = rollPercent(actual, possibleByStat.get(statType));
 			ordered.add(new OrderedIdentification(new DecodedItem.Identification(statName, valueText, roll, value >= 0), statOrdinal(statType)));
 		}
