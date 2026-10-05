@@ -46,6 +46,8 @@ public final class ItemCardRenderer {
 
 	/** Render the item to PNG bytes. */
 	public static byte[] render(DecodedItem item) throws IOException {
+		ItemCardDebug.log("renderer class", ItemCardDebug.source(ItemCardRenderer.class));
+		ItemCardDebug.log("render input " + item.name(), ItemCardDebug.ids(item));
 		BufferedImage image = new BufferedImage(WIDTH, measureHeight(item), BufferedImage.TYPE_INT_RGB);
 		Graphics2D g = image.createGraphics();
 		try {
@@ -77,7 +79,9 @@ public final class ItemCardRenderer {
 
 		ByteArrayOutputStream out = new ByteArrayOutputStream();
 		ImageIO.write(image, "png", out);
-		return out.toByteArray();
+		byte[] png = out.toByteArray();
+		ItemCardDebug.log("render output " + item.name(), "size=" + image.getWidth() + "x" + image.getHeight() + "; bytes=" + png.length + "; SHA-256=" + ItemCardDebug.sha256(png));
+		return png;
 	}
 
 	private static int drawName(Graphics2D g, DecodedItem item, int y) {
@@ -165,7 +169,9 @@ public final class ItemCardRenderer {
 		}
 
 		g.setFont(STAT_FONT);
+		int row = 0;
 		for (DecodedItem.Identification id : item.identifications()) {
+			ItemCardDebug.log("draw ID " + item.name(), "row=" + row++ + "; y=" + y + "; " + id.name() + " " + id.valueText());
 			g.setColor(STAT_NAME);
 			g.drawString(id.name(), PAD, y);
 

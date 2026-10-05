@@ -43,6 +43,7 @@ import tel.eden.mod.gui.PartyCreateScreen;
 import tel.eden.mod.gui.PartyListScreen;
 import tel.eden.mod.gui.PartyManageScreen;
 import tel.eden.mod.item.DecodedItem;
+import tel.eden.mod.item.ItemCardDebug;
 import tel.eden.mod.item.ItemCardRenderer;
 import tel.eden.mod.item.ItemStringDetector;
 import tel.eden.mod.net.BridgeWebSocketClient;
@@ -2506,23 +2507,33 @@ public final class EdenModClient implements ClientModInitializer {
 		CapturedMessage who = sender.get();
 		// Local dedup: each system-chat line is delivered twice (netty + render thread).
 		if (!itemCardRelay.shouldSend(new CapturedMessage(who.username(), null, item.itemString()))) {
+			LOGGER.info("[item-card-debug] [{}] local dedup: skipped share from {}", Integer.toHexString(item.itemString().hashCode()), who.username());
 			return;
 		}
+		LOGGER.info("[item-card-debug] [{}] detected: sender={}; craftedName={}; UTF-16 payload={}", Integer.toHexString(item.itemString().hashCode()), who.username(), item.craftedName(), ItemCardDebug.payloadHex(item.itemString()));
 		itemCardExecutor.submit(() -> renderAndSendItemCard(current, who, item));
 	}
 
 	private void renderAndSendItemCard(BridgeWebSocketClient current, CapturedMessage who, ItemStringDetector.Detected item) {
+		ItemCardDebug.begin(item.itemString());
 		try {
+			ItemCardDebug.log("decode request", "sender=" + who.username());
 			Optional<DecodedItem> decoded = decodeSharedItem(item.itemString(), item.craftedName());
 			if (decoded.isEmpty()) {
+				ItemCardDebug.log("decode result", "empty; no PNG sent");
 				return;
 			}
 			DecodedItem card = decoded.get();
-			String image = Base64.getEncoder().encodeToString(ItemCardRenderer.render(card));
+			ItemCardDebug.log("decode result " + card.name(), ItemCardDebug.ids(card));
+			byte[] png = ItemCardRenderer.render(card);
+			String image = Base64.getEncoder().encodeToString(png);
+			ItemCardDebug.log("relay PNG " + card.name(), "bytes=" + png.length + "; SHA-256=" + ItemCardDebug.sha256(png) + "; IDs=" + ItemCardDebug.ids(card));
 			String overall = card.hasOverall() ? String.format(Locale.ROOT, "%.2f", card.overallPercent()) : "";
 			current.sendItemCard(who.username(), who.nickname(), image, card.name() + "|" + overall);
 		} catch (Exception e) {
 			LOGGER.warn("Failed to render/relay shared item card", e);
+		} finally {
+			ItemCardDebug.end();
 		}
 	}
 
@@ -2541,6 +2552,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private Optional<DecodedItem> decodeSharedItem(String itemString, String craftedName) {
 		try {
 			Class<?> decoder = Class.forName("tel.eden.mod.item.WynntilsItemDecoder");
+			ItemCardDebug.log("decoder class", ItemCardDebug.source(decoder));
 			Object decoded = decoder.getMethod("decode", String.class, String.class).invoke(null, itemString, craftedName);
 			return decoded instanceof Optional<?> optional ? (Optional<DecodedItem>) optional : Optional.empty();
 		} catch (Throwable t) {

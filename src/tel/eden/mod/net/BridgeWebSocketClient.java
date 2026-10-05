@@ -18,6 +18,7 @@ import tel.eden.mod.EdenLogger;
 import tel.eden.mod.chat.PlayerNameResolver;
 import tel.eden.mod.guild.GuildLogEvent;
 import tel.eden.mod.guild.GuildManageSnapshot;
+import tel.eden.mod.item.ItemCardDebug;
 
 /**
  * Raw-WebSocket client to the bridge backend.
@@ -244,8 +245,9 @@ public final class BridgeWebSocketClient {
 	 * Chaining instead of blocking keeps every caller non-blocking; {@code handle}
 	 * swallows a prior failure so one bad send can't wedge every send after it.
 	 */
-	private synchronized void enqueueSend(WebSocket ws, String text) {
+	private synchronized CompletableFuture<?> enqueueSend(WebSocket ws, String text) {
 		sendChain = sendChain.handle((v, ex) -> null).thenCompose(ignored -> ws.sendText(text, true));
+		return sendChain;
 	}
 
 	/** Send one captured guild-chat line to the backend. */
@@ -754,6 +756,7 @@ public final class BridgeWebSocketClient {
 	public void sendItemCard(String username, String nickname, String imageBase64, String signature) {
 		WebSocket current = socket;
 		if (current == null) {
+			ItemCardDebug.log("WebSocket item card skipped", "disconnected; signature=" + signature);
 			return;
 		}
 		JsonObject obj = new JsonObject();
@@ -764,7 +767,17 @@ public final class BridgeWebSocketClient {
 		}
 		obj.addProperty("image", imageBase64);
 		obj.addProperty("signature", signature);
-		enqueueSend(current, obj.toString());
+		String traceId = ItemCardDebug.traceId();
+		String imageHash = ItemCardDebug.sha256(java.util.Base64.getDecoder().decode(imageBase64));
+		String payload = obj.toString();
+		ItemCardDebug.log("WebSocket item card queued", "sender=" + username + "; signature=" + signature + "; SHA-256=" + imageHash + "; JSON chars=" + payload.length());
+		enqueueSend(current, payload).whenComplete((sent, error) -> {
+			if (error == null) {
+				LOGGER.info("[item-card-debug] [{}] WebSocket item card sent: signature={}; SHA-256={}", traceId, signature, imageHash);
+			} else {
+				LOGGER.warn("[item-card-debug] [{}] WebSocket item card send failed: signature={}; SHA-256={}", traceId, signature, imageHash, error);
+			}
+		});
 	}
 
 	/**

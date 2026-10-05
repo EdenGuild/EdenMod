@@ -54,6 +54,7 @@ public final class WynntilsItemDecoder {
 			Class<?> bufferClass = Class.forName(WYNNTILS_BUFFER);
 			Object buffer = call(bufferClass, null, "fromUtf16String", new Class<?>[]{String.class}, itemString);
 			Object encodingModel = staticField(WYNNTILS_MODELS, "ItemEncoding");
+			ItemCardDebug.log("Wynntils encoding model", encodingModel == null ? "null" : ItemCardDebug.source(encodingModel.getClass()));
 			Object errorOr = invokeDecode(encodingModel, buffer, craftedName);
 			if (errorOr == null || (boolean) call(errorOr, "hasError")) {
 				LOGGER.warn("Wynntils could not decode shared item: {}", errorOr == null ? "no matching decode method" : call(errorOr, "getError"));
@@ -73,13 +74,16 @@ public final class WynntilsItemDecoder {
 		}
 
 		String name = normalizeRenderableText(String.valueOf(call(wynnItem, "getName")));
+		ItemCardDebug.log("decoded Wynntils item " + name, ItemCardDebug.source(wynnItem.getClass()));
 		Object tier = callOrNull(wynnItem, "getGearTier");
 		Object type = callOrNull(wynnItem, "getGearType");
 
 		String tierName = tier == null ? "" : prettyEnum(String.valueOf(call(tier, "getName")));
 		String typeName = type == null ? "" : prettyEnum(enumName(type));
 
-		return Optional.of(new DecodedItem(name, tierName, resolveRarityColor(tierName, tierColor(tier)), typeName, resolveOverallPercent(wynnItem), buildIdentifications(wynnItem, WynntilsItemDecoder::warnStatOrdering), buildMajorIds(wynnItem), buildWeightings(wynnItem), buildShinyTracker(wynnItem), buildPowders(wynnItem), numberOr(callOrNull(wynnItem, "getPowderSlots"), 0), resolveRerollCount(wynnItem)));
+		DecodedItem card = new DecodedItem(name, tierName, resolveRarityColor(tierName, tierColor(tier)), typeName, resolveOverallPercent(wynnItem), buildIdentifications(wynnItem, WynntilsItemDecoder::warnStatOrdering), buildMajorIds(wynnItem), buildWeightings(wynnItem), buildShinyTracker(wynnItem), buildPowders(wynnItem), numberOr(callOrNull(wynnItem, "getPowderSlots"), 0), resolveRerollCount(wynnItem));
+		ItemCardDebug.log("card model " + name, ItemCardDebug.ids(card));
+		return Optional.of(card);
 	}
 
 	private static List<DecodedItem.Identification> buildIdentifications(Object wynnItem, Consumer<String> warning) throws ReflectiveOperationException {
@@ -89,8 +93,13 @@ public final class WynntilsItemDecoder {
 		Map<Object, Object> possibleByStat = indexByStatType(possibleValues);
 
 		if (!(actualValues instanceof List<?> actualList)) {
+			ItemCardDebug.log("raw identifications", "unexpected value: " + actualValues);
 			return identifications;
 		}
+		ItemCardDebug.log("raw identifications", actualList.stream().map(actual -> {
+			Object stat = callOrNull(actual, "statType");
+			return "key=" + callOrNull(stat, "getKey") + "; name=" + callOrNull(stat, "getDisplayName") + "; unit=" + statUnit(stat) + "; value=" + callOrNull(actual, "value") + "; inverted=" + callOrNull(stat, "calculateAsInverted") + "; type=" + (stat == null ? "null" : stat.getClass().getName());
+		}).toList());
 
 		record OrderedIdentification(DecodedItem.Identification id, int position) {
 		}
@@ -117,10 +126,12 @@ public final class WynntilsItemDecoder {
 		if (!unknownStats.isEmpty()) {
 			warning.accept("Wynntils default ID ordering did not recognise: " + String.join(", ", unknownStats) + ". These IDs appear last in payload order.");
 		}
+		ItemCardDebug.log("before sort", ordered.stream().map(id -> id.id().name() + " " + id.id().valueText() + " (DEFAULT rank " + id.position() + ")").toList());
 		ordered.sort(Comparator.comparingInt(OrderedIdentification::position));
 		for (OrderedIdentification orderedIdentification : ordered) {
 			identifications.add(orderedIdentification.id());
 		}
+		ItemCardDebug.log("after sort", ordered.stream().map(id -> id.id().name() + " " + id.id().valueText() + " (DEFAULT rank " + id.position() + ")").toList());
 		return identifications;
 	}
 
@@ -349,8 +360,13 @@ public final class WynntilsItemDecoder {
 			}
 			Class<?> orderingClass = Class.forName(WYNNTILS_STAT_ORDERING);
 			Object ordering = orderingClass.getField("DEFAULT").get(null);
+			ItemCardDebug.log("ordering model", ItemCardDebug.source(model.getClass()) + "; requested=" + ordering);
 			Object result = model.getClass().getMethod("getOrderingList", orderingClass).invoke(model, ordering);
 			if (result instanceof List<?> stats && !stats.isEmpty()) {
+				ItemCardDebug.log("DEFAULT ordering list", java.util.stream.IntStream.range(0, stats.size()).mapToObj(index -> {
+					Object stat = stats.get(index);
+					return index + ":" + callOrNull(stat, "getKey") + " " + callOrNull(stat, "getDisplayName") + statUnit(stat);
+				}).toList());
 				Map<Object, Integer> positions = new HashMap<>();
 				for (int index = 0; index < stats.size(); index++) {
 					positions.putIfAbsent(stats.get(index), index);
