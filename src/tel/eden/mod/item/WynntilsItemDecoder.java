@@ -23,9 +23,10 @@ import tel.eden.mod.EdenLogger;
 public final class WynntilsItemDecoder {
 	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final String WYNNTILS_BUFFER = "com.wynntils.utils.EncodedByteBuffer";
-	private static final String WYNNTILS_ITEM_ENCODING_MODEL = "com.wynntils.core.components.Models";
+	private static final String WYNNTILS_MODELS = "com.wynntils.core.components.Models";
 	private static final String WYNNTILS_ITEM_WEIGHT_SERVICES = "com.wynntils.core.components.Services";
 	private static final String WYNNTILS_WEIGHT_SOURCE = "com.wynntils.models.gear.type.ItemWeightSource";
+	private static final String WYNNTILS_STAT_ORDERING = "com.wynntils.models.stats.type.StatListOrdering";
 	private static final String WYNNTILS_STAT_CALCULATOR = "com.wynntils.models.stats.StatCalculator";
 
 	private WynntilsItemDecoder() {
@@ -48,7 +49,7 @@ public final class WynntilsItemDecoder {
 		try {
 			Class<?> bufferClass = Class.forName(WYNNTILS_BUFFER);
 			Object buffer = call(bufferClass, null, "fromUtf16String", new Class<?>[]{String.class}, itemString);
-			Object encodingModel = staticField(WYNNTILS_ITEM_ENCODING_MODEL, "ItemEncoding");
+			Object encodingModel = staticField(WYNNTILS_MODELS, "ItemEncoding");
 			Object errorOr = invokeDecode(encodingModel, buffer, craftedName);
 			if (errorOr == null || (boolean) call(errorOr, "hasError")) {
 				LOGGER.warn("Wynntils could not decode shared item: {}", errorOr == null ? "no matching decode method" : call(errorOr, "getError"));
@@ -87,9 +88,10 @@ public final class WynntilsItemDecoder {
 			return identifications;
 		}
 
-		record OrderedIdentification(DecodedItem.Identification id, int ordinal) {
+		record OrderedIdentification(DecodedItem.Identification id, int position) {
 		}
 
+		Map<Object, Integer> defaultOrder = defaultStatOrder();
 		List<OrderedIdentification> ordered = new ArrayList<>();
 		for (Object actual : actualList) {
 			Object statType = call(actual, "statType");
@@ -101,10 +103,10 @@ public final class WynntilsItemDecoder {
 			long displayed = calculateAsInverted ? -(long) value : value;
 			String valueText = formatStatValue(displayed, statUnit(statType));
 			float roll = rollPercent(actual, possibleByStat.get(statType));
-			ordered.add(new OrderedIdentification(new DecodedItem.Identification(statName, valueText, roll, value >= 0), statOrdinal(statType)));
+			ordered.add(new OrderedIdentification(new DecodedItem.Identification(statName, valueText, roll, value >= 0), defaultOrder.getOrDefault(statType, Integer.MAX_VALUE)));
 		}
 
-		ordered.sort(Comparator.comparingInt(OrderedIdentification::ordinal));
+		ordered.sort(Comparator.comparingInt(OrderedIdentification::position));
 		for (OrderedIdentification orderedIdentification : ordered) {
 			identifications.add(orderedIdentification.id());
 		}
@@ -326,16 +328,26 @@ public final class WynntilsItemDecoder {
 		return prettyEnum(element);
 	}
 
-	private static int statOrdinal(Object statType) {
-		if (statType instanceof Enum<?> e) {
-			return e.ordinal();
-		}
+	private static Map<Object, Integer> defaultStatOrder() {
 		try {
-			Object ordinal = call(statType, "ordinal");
-			return ordinal instanceof Number n ? n.intValue() : Integer.MAX_VALUE;
+			// Use the same list as Wynntils' tooltip, explicitly selecting DEFAULT rather
+			// than the player's configured ordering. Delimiters only occupy unused ranks.
+			Object model = staticField(WYNNTILS_MODELS, "Stat");
+			Class<?> orderingClass = Class.forName(WYNNTILS_STAT_ORDERING);
+			Object ordering = orderingClass.getField("DEFAULT").get(null);
+			Object result = model.getClass().getMethod("getOrderingList", orderingClass).invoke(model, ordering);
+			if (result instanceof List<?> stats) {
+				Map<Object, Integer> positions = new HashMap<>();
+				for (int index = 0; index < stats.size(); index++) {
+					positions.putIfAbsent(stats.get(index), index);
+				}
+				return positions;
+			}
 		} catch (ReflectiveOperationException | RuntimeException ignored) {
-			return Integer.MAX_VALUE;
 		}
+		// Preserve payload order if the optional API is unavailable. Unrecognised
+		// stats likewise remain in payload order after the known stats.
+		return Map.of();
 	}
 
 	private static String statUnit(Object statType) {
