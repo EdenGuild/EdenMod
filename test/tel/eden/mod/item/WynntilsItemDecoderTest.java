@@ -1,13 +1,16 @@
 package tel.eden.mod.item;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.wynntils.core.components.Models;
 import com.wynntils.models.stats.type.StatListOrdering;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -37,7 +40,9 @@ class WynntilsItemDecoderTest {
 		Collections.reverse(actuals);
 		List<Actual> payload = List.copyOf(actuals);
 
-		assertEquals(expected, decodeIdentifications(new Item(actuals)));
+		List<String> warnings = new ArrayList<>();
+		assertEquals(expected, decodeIdentifications(new Item(actuals), warnings));
+		assertEquals(List.of(), warnings);
 		assertEquals(payload, actuals);
 	}
 
@@ -49,15 +54,24 @@ class WynntilsItemDecoderTest {
 		Models.Stat = new StatModel(List.of(known));
 		Item item = new Item(List.of(new Actual(firstUnknown, 2), new Actual(known, 3), new Actual(secondUnknown, 4)));
 
-		assertEquals(List.of("Mana Regen", "Future stat", "Another future stat"), decodeIdentifications(item).stream().map(DecodedItem.Identification::name).toList());
+		List<String> warnings = new ArrayList<>();
+		assertEquals(List.of("Mana Regen", "Future stat", "Another future stat"), decodeIdentifications(item, warnings).stream().map(DecodedItem.Identification::name).toList());
+		assertEquals(List.of("Wynntils default ID ordering did not recognise: Future stat%, Another future stat. These IDs appear last in payload order."), warnings);
 	}
 
 	@Test
 	void unavailableOrderingPreservesPayloadOrder() throws ReflectiveOperationException {
 		Item item = new Item(List.of(new Actual(stat("Walk Speed", "%"), 6), new Actual(stat("Strength", ""), 2)));
-		for (Object unavailableModel : new Object[]{null, new Object(), new StatModel(null)}) {
+		List<Object> unavailableModels = Arrays.asList(null, new Object(), new StatModel(null), new StatModel(List.of()));
+		List<String> reasons = List.of("IllegalStateException: Wynntils Models.Stat is null", "NoSuchMethodException", "IllegalStateException: Wynntils getOrderingList(DEFAULT) returned null", "IllegalStateException: Wynntils getOrderingList(DEFAULT) returned an empty list");
+		for (int index = 0; index < unavailableModels.size(); index++) {
+			Object unavailableModel = unavailableModels.get(index);
 			Models.Stat = unavailableModel;
-			assertEquals(List.of("Walk Speed", "Strength"), decodeIdentifications(item).stream().map(DecodedItem.Identification::name).toList());
+			List<String> warnings = new ArrayList<>();
+			assertEquals(List.of("Walk Speed", "Strength"), decodeIdentifications(item, warnings).stream().map(DecodedItem.Identification::name).toList());
+			assertEquals(1, warnings.size());
+			assertTrue(warnings.getFirst().startsWith("Could not apply Wynntils default ID ordering. Using payload order. Reason: "));
+			assertTrue(warnings.getFirst().contains(reasons.get(index)));
 		}
 	}
 
@@ -85,11 +99,15 @@ class WynntilsItemDecoderTest {
 		assertEquals(expectedPositive, identification.positive());
 	}
 
-	@SuppressWarnings("unchecked")
 	private static List<DecodedItem.Identification> decodeIdentifications(Item item) throws ReflectiveOperationException {
-		Method method = WynntilsItemDecoder.class.getDeclaredMethod("buildIdentifications", Object.class);
+		return decodeIdentifications(item, new ArrayList<>());
+	}
+
+	@SuppressWarnings("unchecked")
+	private static List<DecodedItem.Identification> decodeIdentifications(Item item, List<String> warnings) throws ReflectiveOperationException {
+		Method method = WynntilsItemDecoder.class.getDeclaredMethod("buildIdentifications", Object.class, Consumer.class);
 		method.setAccessible(true);
-		return (List<DecodedItem.Identification>) method.invoke(null, item);
+		return (List<DecodedItem.Identification>) method.invoke(null, item, (Consumer<String>) warnings::add);
 	}
 
 	private static Stat stat(String name, String unit) {

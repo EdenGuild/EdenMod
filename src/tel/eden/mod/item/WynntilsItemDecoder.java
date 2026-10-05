@@ -9,7 +9,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import tel.eden.mod.EdenLogger;
 
 /**
@@ -75,10 +79,10 @@ public final class WynntilsItemDecoder {
 		String tierName = tier == null ? "" : prettyEnum(String.valueOf(call(tier, "getName")));
 		String typeName = type == null ? "" : prettyEnum(enumName(type));
 
-		return Optional.of(new DecodedItem(name, tierName, resolveRarityColor(tierName, tierColor(tier)), typeName, resolveOverallPercent(wynnItem), buildIdentifications(wynnItem), buildMajorIds(wynnItem), buildWeightings(wynnItem), buildShinyTracker(wynnItem), buildPowders(wynnItem), numberOr(callOrNull(wynnItem, "getPowderSlots"), 0), resolveRerollCount(wynnItem)));
+		return Optional.of(new DecodedItem(name, tierName, resolveRarityColor(tierName, tierColor(tier)), typeName, resolveOverallPercent(wynnItem), buildIdentifications(wynnItem, WynntilsItemDecoder::warnStatOrdering), buildMajorIds(wynnItem), buildWeightings(wynnItem), buildShinyTracker(wynnItem), buildPowders(wynnItem), numberOr(callOrNull(wynnItem, "getPowderSlots"), 0), resolveRerollCount(wynnItem)));
 	}
 
-	private static List<DecodedItem.Identification> buildIdentifications(Object wynnItem) throws ReflectiveOperationException {
+	private static List<DecodedItem.Identification> buildIdentifications(Object wynnItem, Consumer<String> warning) throws ReflectiveOperationException {
 		List<DecodedItem.Identification> identifications = new ArrayList<>();
 		Object actualValues = call(wynnItem, "getIdentifications");
 		Object possibleValues = callOrNull(wynnItem, "getPossibleValues");
@@ -91,12 +95,16 @@ public final class WynntilsItemDecoder {
 		record OrderedIdentification(DecodedItem.Identification id, int position) {
 		}
 
-		Map<Object, Integer> defaultOrder = defaultStatOrder();
+		Map<Object, Integer> defaultOrder = defaultStatOrder(warning);
+		List<String> unknownStats = new ArrayList<>();
 		List<OrderedIdentification> ordered = new ArrayList<>();
 		for (Object actual : actualList) {
 			Object statType = call(actual, "statType");
 			int value = numberOr(call(actual, "value"), 0);
 			String statName = normalizeRenderableText(String.valueOf(call(statType, "getDisplayName")));
+			if (!defaultOrder.isEmpty() && !defaultOrder.containsKey(statType)) {
+				unknownStats.add(statName + statUnit(statType));
+			}
 			// Wynntils stores inverted stats in benefit order; flip the displayed sign,
 			// while retaining the stored value's sign for the renderer's color.
 			boolean calculateAsInverted = Boolean.TRUE.equals(call(statType, "calculateAsInverted"));
@@ -106,6 +114,9 @@ public final class WynntilsItemDecoder {
 			ordered.add(new OrderedIdentification(new DecodedItem.Identification(statName, valueText, roll, value >= 0), defaultOrder.getOrDefault(statType, Integer.MAX_VALUE)));
 		}
 
+		if (!unknownStats.isEmpty()) {
+			warning.accept("Wynntils default ID ordering did not recognise: " + String.join(", ", unknownStats) + ". These IDs appear last in payload order.");
+		}
 		ordered.sort(Comparator.comparingInt(OrderedIdentification::position));
 		for (OrderedIdentification orderedIdentification : ordered) {
 			identifications.add(orderedIdentification.id());
@@ -328,26 +339,42 @@ public final class WynntilsItemDecoder {
 		return prettyEnum(element);
 	}
 
-	private static Map<Object, Integer> defaultStatOrder() {
+	private static Map<Object, Integer> defaultStatOrder(Consumer<String> warning) {
 		try {
 			// Use the same list as Wynntils' tooltip, explicitly selecting DEFAULT rather
 			// than the player's configured ordering. Delimiters only occupy unused ranks.
 			Object model = staticField(WYNNTILS_MODELS, "Stat");
+			if (model == null) {
+				throw new IllegalStateException("Wynntils Models.Stat is null");
+			}
 			Class<?> orderingClass = Class.forName(WYNNTILS_STAT_ORDERING);
 			Object ordering = orderingClass.getField("DEFAULT").get(null);
 			Object result = model.getClass().getMethod("getOrderingList", orderingClass).invoke(model, ordering);
-			if (result instanceof List<?> stats) {
+			if (result instanceof List<?> stats && !stats.isEmpty()) {
 				Map<Object, Integer> positions = new HashMap<>();
 				for (int index = 0; index < stats.size(); index++) {
 					positions.putIfAbsent(stats.get(index), index);
 				}
 				return positions;
 			}
-		} catch (ReflectiveOperationException | RuntimeException ignored) {
+			throw new IllegalStateException("Wynntils getOrderingList(DEFAULT) returned " + (result == null ? "null" : result instanceof List<?> ? "an empty list" : result.getClass().getName()));
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			Throwable cause = e.getCause() == null ? e : e.getCause();
+			warning.accept("Could not apply Wynntils default ID ordering. Using payload order. Reason: " + cause);
 		}
 		// Preserve payload order if the optional API is unavailable. Unrecognised
 		// stats likewise remain in payload order after the known stats.
 		return Map.of();
+	}
+
+	private static void warnStatOrdering(String message) {
+		LOGGER.warn("{}", message);
+		Minecraft client = Minecraft.getInstance();
+		client.execute(() -> {
+			if (client.player != null) {
+				client.player.displayClientMessage(Component.literal("[EdenMod] " + message).withStyle(ChatFormatting.YELLOW), false);
+			}
+		});
 	}
 
 	private static String statUnit(Object statType) {
