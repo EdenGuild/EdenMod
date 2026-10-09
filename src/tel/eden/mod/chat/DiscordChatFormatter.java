@@ -143,6 +143,41 @@ public final class DiscordChatFormatter {
 		return out;
 	}
 
+	/**
+	 * Guild ally activity list (backend-authoritative, ordered from most inactive to active).
+	 * If {@code canManage} is true (Strategist+), each ally row has a hover tooltip and click
+	 * action to execute {@code /eden ally remove {name}}.
+	 */
+	public static Component allyActivity(java.util.List<tel.eden.mod.net.AllyActivityEntry> entries, boolean canManage) {
+		MutableComponent out = Component.empty().append(prefix(SHIELD));
+		if (entries.isEmpty()) {
+			return out.append(Component.literal("No guild allies currently found.").withStyle(ChatFormatting.GOLD));
+		}
+		out.append(Component.literal("Guild Allies (by inactivity):").withStyle(ChatFormatting.GREEN));
+		for (tel.eden.mod.net.AllyActivityEntry entry : entries) {
+			ChatFormatting color;
+			if (entry.elapsedMinutes() > 45) {
+				color = ChatFormatting.RED;
+			} else if (entry.elapsedMinutes() >= 30) {
+				color = ChatFormatting.YELLOW;
+			} else {
+				color = ChatFormatting.GREEN;
+			}
+			long mins = Math.round(entry.elapsedMinutes());
+			String timeStr = mins < 60 ? mins + "m ago" : (mins / 60) + "h " + (mins % 60) + "m ago";
+			String tagStr = (entry.tag() != null && !entry.tag().isEmpty()) ? " [" + entry.tag() + "]" : "";
+			String lineText = "\n  " + entry.name() + tagStr + " — " + timeStr;
+
+			MutableComponent line = Component.literal(lineText).withStyle(color);
+			if (canManage) {
+				String target = (entry.tag() != null && !entry.tag().isEmpty()) ? entry.tag() : entry.name();
+				line = line.withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to run /eden ally remove " + target).withStyle(ChatFormatting.GRAY))).withClickEvent(new ClickEvent.RunCommand("/eden ally remove " + target)));
+			}
+			out.append(line);
+		}
+		return out;
+	}
+
 	// Inline reply excerpt is truncated to this many characters (full text on hover).
 	private static final int EXCERPT_MAX = 50;
 

@@ -136,6 +136,9 @@ public final class BridgeWebSocketClient {
 		 */
 		void onWarCounts(int days, java.util.List<WarCountEntry> entries, String requester, String color);
 
+		/** Response to an {@code allyActivityRequest}: allies ordered by inactivity. */
+		void onAllyActivity(java.util.List<AllyActivityEntry> entries);
+
 		/**
 		 * The live war board changed: each attacked territory's scraped defence rating
 		 * (from someone's {@code /guild attack} menu) and who is heading there. A full
@@ -650,6 +653,17 @@ public final class BridgeWebSocketClient {
 		enqueueSend(current, obj.toString());
 	}
 
+	/** Ask for the guild's current allies ordered by inactivity (same as Discord). */
+	public void sendAllyActivityRequest() {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "allyActivityRequest");
+		enqueueSend(current, obj.toString());
+	}
+
 	/**
 	 * Tell the server whether this client is active in a game world ({@code true})
 	 * or dormant (in queue, hub, or AFK with no recent guild activity — {@code false}).
@@ -1036,6 +1050,7 @@ public final class BridgeWebSocketClient {
 				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
 				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"));
 				case "warCountsReply" -> sink.onWarCounts(getInt(obj, "days", 7), parseWarCounts(obj), get(obj, "requester"), get(obj, "color"));
+				case "allyActivityReply" -> sink.onAllyActivity(parseAllyActivity(obj));
 				case "warBoard" -> sink.onWarBoard(parseWarBoard(obj));
 				case "authChallenge" -> handleAuthChallenge(get(obj, "serverId"));
 				case "authOk" -> {
@@ -1189,6 +1204,23 @@ public final class BridgeWebSocketClient {
 				if (element.isJsonObject()) {
 					JsonObject member = element.getAsJsonObject();
 					out.add(new WarCountEntry(get(member, "name"), getInt(member, "wars", 0)));
+				}
+			}
+		}
+		return out;
+	}
+
+	private static java.util.List<AllyActivityEntry> parseAllyActivity(JsonObject obj) {
+		java.util.List<AllyActivityEntry> out = new java.util.ArrayList<>();
+		if (obj.has("allies") && obj.get("allies").isJsonArray()) {
+			for (var element : obj.get("allies").getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject ally = element.getAsJsonObject();
+					String name = get(ally, "name");
+					String tag = get(ally, "tag");
+					double elapsed = ally.has("elapsedMinutes") && ally.get("elapsedMinutes").isJsonPrimitive() ? ally.get("elapsedMinutes").getAsDouble() : 0.0;
+					String lastRaid = get(ally, "lastRaidName");
+					out.add(new AllyActivityEntry(name, tag.isEmpty() ? null : tag, elapsed, lastRaid.isEmpty() ? null : lastRaid));
 				}
 			}
 		}
