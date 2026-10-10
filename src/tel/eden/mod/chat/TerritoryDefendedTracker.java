@@ -65,7 +65,7 @@ public final class TerritoryDefendedTracker {
 			Matcher m = LOST_WAR_PATTERN.matcher(text);
 			if (m.matches()) {
 				String attacker = cleanTag(m.group(1));
-				if (!attacker.isEmpty() && !attacker.equalsIgnoreCase("Eden")) {
+				if (!attacker.isEmpty() && !isEden(attacker)) {
 					if (pendingTerritory != null && (now - pendingTerritoryTime <= WINDOW_MS)) {
 						String territory = pendingTerritory;
 						clear();
@@ -85,6 +85,10 @@ public final class TerritoryDefendedTracker {
 		}
 
 		return Optional.empty();
+	}
+
+	private static boolean isEden(String tag) {
+		return tag.equalsIgnoreCase("Eden") || tag.equalsIgnoreCase("EDN") || tag.equalsIgnoreCase("EDEN");
 	}
 
 	private static String cleanTag(String raw) {

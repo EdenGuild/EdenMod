@@ -55,6 +55,16 @@ class TerritoryDefendedTrackerTest {
 		tracker.onChat(Component.literal("Eden has lost the war!"));
 		var result = tracker.onChat(Component.literal("Your guild has successfully defended Detlas"));
 		assertTrue(result.isEmpty(), "Should not pair with Eden's own loss");
+
+		tracker.clear();
+		tracker.onChat(Component.literal("[EDN] has lost the war!"));
+		result = tracker.onChat(Component.literal("Your guild has successfully defended Detlas"));
+		assertTrue(result.isEmpty(), "Should not pair with [EDN] tag loss");
+
+		tracker.clear();
+		tracker.onChat(Component.literal("[EDEN] has lost the war!"));
+		result = tracker.onChat(Component.literal("Your guild has successfully defended Detlas"));
+		assertTrue(result.isEmpty(), "Should not pair with [EDEN] tag loss");
 	}
 
 	@Test

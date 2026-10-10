@@ -50,7 +50,8 @@ public final class GuildAllyManager {
 
 	private volatile boolean running;
 	private volatile boolean cancelled;
-	private volatile boolean addAllyFailed;
+	private volatile boolean addAllySuccess;
+	private volatile String addAllyFailureReason;
 
 	public GuildAllyManager(BackgroundContainerSession session) {
 		this.session = session;
@@ -247,7 +248,8 @@ public final class GuildAllyManager {
 				if (cancelled)
 					return;
 
-				addAllyFailed = false;
+				addAllySuccess = false;
+				addAllyFailureReason = null;
 
 				Minecraft mc = Minecraft.getInstance();
 				onClientRun(() -> {
@@ -256,17 +258,19 @@ public final class GuildAllyManager {
 					}
 				});
 
-				long deadline = System.currentTimeMillis() + 1000L;
-				while (System.currentTimeMillis() < deadline && !addAllyFailed && !cancelled) {
+				long deadline = System.currentTimeMillis() + 5000L;
+				while (System.currentTimeMillis() < deadline && addAllyFailureReason == null && !addAllySuccess && !cancelled) {
 					sleep(50);
 				}
 				if (cancelled)
 					return;
 
-				if (addAllyFailed) {
-					chat("Failed to send alliance request to " + nameOrTag.trim() + ".", ChatFormatting.RED);
-				} else {
+				if (addAllyFailureReason != null) {
+					chat("Failed to add ally: " + addAllyFailureReason, ChatFormatting.RED);
+				} else if (addAllySuccess) {
 					chat("Sent alliance request to " + nameOrTag.trim() + ".", ChatFormatting.GREEN);
+				} else {
+					chat("Timed out waiting for alliance response for " + nameOrTag.trim() + " (server may be lagging).", ChatFormatting.YELLOW);
 				}
 			} catch (Exception e) {
 				LOGGER.error("Error adding ally", e);
@@ -401,8 +405,11 @@ public final class GuildAllyManager {
 			return;
 		}
 		String stripped = stripCodes(text).trim();
-		if (stripped.contains("That guild was not found or invalid, try again!") || stripped.toLowerCase(Locale.ROOT).contains("not found or invalid")) {
-			addAllyFailed = true;
+		String lower = stripped.toLowerCase(Locale.ROOT);
+		if (lower.contains("not found or invalid") || lower.contains("already allied") || lower.contains("already pending") || lower.contains("cannot ally") || (lower.contains("maximum") && lower.contains("allies")) || lower.contains("no ally slots") || lower.contains("do not have permission")) {
+			addAllyFailureReason = stripped;
+		} else if (lower.contains("alliance request") || lower.contains("requested an alliance") || lower.contains("sent an alliance request") || lower.contains("alliance request sent")) {
+			addAllySuccess = true;
 		}
 	}
 

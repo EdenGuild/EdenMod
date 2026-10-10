@@ -146,7 +146,7 @@ public final class DiscordChatFormatter {
 	/**
 	 * Guild ally activity list (backend-authoritative, ordered from most inactive to active).
 	 * If {@code canManage} is true (Strategist+), each ally row has a hover tooltip and click
-	 * action to execute {@code /eden ally remove {name}}.
+	 * action to suggest {@code /eden ally remove {name}}.
 	 */
 	public static Component allyActivity(java.util.List<tel.eden.mod.net.AllyActivityEntry> entries, boolean canManage) {
 		MutableComponent out = Component.empty().append(prefix(SHIELD));
@@ -171,7 +171,7 @@ public final class DiscordChatFormatter {
 			MutableComponent line = Component.literal(lineText).withStyle(color);
 			if (canManage) {
 				String target = (entry.tag() != null && !entry.tag().isEmpty()) ? entry.tag() : entry.name();
-				line = line.withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to run /eden ally remove " + target).withStyle(ChatFormatting.GRAY))).withClickEvent(new ClickEvent.RunCommand("/eden ally remove " + target)));
+				line = line.withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to suggest /eden ally remove " + target).withStyle(ChatFormatting.GRAY))).withClickEvent(new ClickEvent.SuggestCommand("/eden ally remove " + target)));
 			}
 			out.append(line);
 		}
