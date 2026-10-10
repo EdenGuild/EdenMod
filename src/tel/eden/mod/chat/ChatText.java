@@ -199,7 +199,7 @@ public final class ChatText {
 	 * fixing spacing before punctuation so {@code name: message} and raid-completion
 	 * shapes are cleanly matchable.
 	 */
-	static String normalize(String raw) {
+	public static String normalize(String raw) {
 		return normalizeWhitespace(raw).replaceAll("\\s+([,.:;!?])", "$1");
 	}
 
@@ -241,7 +241,7 @@ public final class ChatText {
 	 * without changing punctuation spacing. Use this for user-authored text, where a
 	 * space before {@code :shortcode:} or punctuation may be intentional.
 	 */
-	static String normalizeWhitespace(String raw) {
+	public static String normalizeWhitespace(String raw) {
 		if (raw == null || raw.isBlank()) {
 			return "";
 		}

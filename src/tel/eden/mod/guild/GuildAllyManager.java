@@ -20,6 +20,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemLore;
 import tel.eden.mod.EdenLogger;
 import tel.eden.mod.EdenModClient;
+import tel.eden.mod.chat.ChatText;
 import tel.eden.mod.gui.AllyProgressScreen;
 
 /**
@@ -71,14 +72,15 @@ public final class GuildAllyManager {
 			chat("An ally management action is already in progress.", ChatFormatting.RED);
 			return;
 		}
-		if (nameOrTag == null || nameOrTag.isBlank()) {
+		String target = normalizeTarget(nameOrTag);
+		if (target.isEmpty()) {
 			chat("Please specify an ally name or tag to remove.", ChatFormatting.RED);
 			return;
 		}
 
 		running = true;
 		cancelled = false;
-		AllyProgressScreen progress = showProgress("Removing Ally: " + nameOrTag.trim());
+		AllyProgressScreen progress = showProgress("Removing Ally: " + target);
 
 		worker.submit(() -> {
 			try {
@@ -127,12 +129,12 @@ public final class GuildAllyManager {
 					ItemStack stack = items.get(slot);
 					if (stack.isEmpty())
 						continue;
-					String displayed = stripCodes(stack.getHoverName().getString()).trim();
+					String displayed = cleanFailureReason(stack.getHoverName().getString());
 					Matcher m = ALLY_ITEM.matcher(displayed);
 					if (m.matches()) {
 						String guildName = m.group(1).trim();
 						String tag = m.group(2).trim();
-						if (guildName.equalsIgnoreCase(nameOrTag.trim()) || tag.equalsIgnoreCase(nameOrTag.trim())) {
+						if (guildName.equalsIgnoreCase(target) || tag.equalsIgnoreCase(target)) {
 							targetSlot = slot;
 							matchedName = guildName + " [" + tag + "]";
 							break;
@@ -141,7 +143,7 @@ public final class GuildAllyManager {
 				}
 
 				if (targetSlot == -1) {
-					chat("Could not find ally matching \"" + nameOrTag.trim() + "\" in diplomacy menu.", ChatFormatting.RED);
+					chat("Could not find ally matching \"" + target + "\" in diplomacy menu.", ChatFormatting.RED);
 					return;
 				}
 
@@ -185,14 +187,15 @@ public final class GuildAllyManager {
 			chat("An ally management action is already in progress.", ChatFormatting.RED);
 			return;
 		}
-		if (nameOrTag == null || nameOrTag.isBlank()) {
+		String target = normalizeTarget(nameOrTag);
+		if (target.isEmpty()) {
 			chat("Please specify an ally name or tag to add.", ChatFormatting.RED);
 			return;
 		}
 
 		running = true;
 		cancelled = false;
-		AllyProgressScreen progress = showProgress("Adding Ally: " + nameOrTag.trim());
+		AllyProgressScreen progress = showProgress("Adding Ally: " + target);
 
 		worker.submit(() -> {
 			try {
@@ -237,7 +240,7 @@ public final class GuildAllyManager {
 
 				if (cancelled)
 					return;
-				progress.setStatus("Submitting alliance request for " + nameOrTag.trim() + "...");
+				progress.setStatus("Submitting alliance request for " + target + "...");
 				Boolean addClick = onClient(() -> session.click(ADD_ALLY_SLOT, 0, ClickType.PICKUP));
 				if (!Boolean.TRUE.equals(addClick)) {
 					chat("Failed to click add ally.", ChatFormatting.RED);
@@ -254,7 +257,7 @@ public final class GuildAllyManager {
 				Minecraft mc = Minecraft.getInstance();
 				onClientRun(() -> {
 					if (mc.getConnection() != null) {
-						mc.getConnection().sendChat(nameOrTag.trim());
+						mc.getConnection().sendChat(target);
 					}
 				});
 
@@ -266,11 +269,12 @@ public final class GuildAllyManager {
 					return;
 
 				if (addAllyFailureReason != null) {
-					chat("Failed to add ally: " + addAllyFailureReason, ChatFormatting.RED);
+					String cleanReason = cleanFailureReason(addAllyFailureReason);
+					chat("Failed to add ally: " + (cleanReason.isEmpty() ? "Unknown error" : cleanReason), ChatFormatting.RED);
 				} else if (addAllySuccess) {
-					chat("Sent alliance request to " + nameOrTag.trim() + ".", ChatFormatting.GREEN);
+					chat("Sent alliance request to " + target + ".", ChatFormatting.GREEN);
 				} else {
-					chat("Timed out waiting for alliance response for " + nameOrTag.trim() + " (server may be lagging).", ChatFormatting.YELLOW);
+					chat("Timed out waiting for alliance response for " + target + " (server may be lagging).", ChatFormatting.YELLOW);
 				}
 			} catch (Exception e) {
 				LOGGER.error("Error adding ally", e);
@@ -404,13 +408,32 @@ public final class GuildAllyManager {
 		if (text == null || !running) {
 			return;
 		}
-		String stripped = stripCodes(text).trim();
-		String lower = stripped.toLowerCase(Locale.ROOT);
+		String cleaned = cleanFailureReason(text);
+		String lower = cleaned.toLowerCase(Locale.ROOT);
 		if (lower.contains("not found or invalid") || lower.contains("already allied") || lower.contains("already pending") || lower.contains("cannot ally") || (lower.contains("maximum") && lower.contains("allies")) || lower.contains("no ally slots") || lower.contains("do not have permission")) {
-			addAllyFailureReason = stripped;
+			addAllyFailureReason = cleaned;
 		} else if (lower.contains("alliance request") || lower.contains("requested an alliance") || lower.contains("sent an alliance request") || lower.contains("alliance request sent")) {
 			addAllySuccess = true;
 		}
+	}
+
+	static String normalizeTarget(String input) {
+		if (input == null) {
+			return "";
+		}
+		String trimmed = input.trim();
+		if ((trimmed.startsWith("\"") && trimmed.endsWith("\"") && trimmed.length() >= 2) || (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length() >= 2)) {
+			trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+		}
+		return trimmed.replaceAll("\\s+", " ");
+	}
+
+	static String cleanFailureReason(String text) {
+		if (text == null) {
+			return "";
+		}
+		String noCodes = stripCodes(text);
+		return ChatText.normalize(noCodes).strip();
 	}
 
 	private static String stripCodes(String text) {
