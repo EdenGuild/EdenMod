@@ -134,6 +134,7 @@ public final class GuildAllyManager {
 					if (m.matches()) {
 						String guildName = m.group(1).trim();
 						String tag = m.group(2).trim();
+						AllyTagCache.remember(guildName, tag);
 						if (guildName.equalsIgnoreCase(target) || tag.equalsIgnoreCase(target)) {
 							targetSlot = slot;
 							matchedName = guildName + " [" + tag + "]";

@@ -16,6 +16,7 @@ import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.resources.Identifier;
+import tel.eden.mod.guild.AllyTagCache;
 
 /**
  * Renders a relayed Discord message for in-game display so it sits flush with
@@ -165,12 +166,16 @@ public final class DiscordChatFormatter {
 			}
 			long mins = Math.round(entry.elapsedMinutes());
 			String timeStr = mins < 60 ? mins + "m ago" : (mins / 60) + "h " + (mins % 60) + "m ago";
-			String tagStr = (entry.tag() != null && !entry.tag().isEmpty()) ? " [" + entry.tag() + "]" : "";
+			String tag = (entry.tag() != null && !entry.tag().isEmpty()) ? entry.tag() : AllyTagCache.getTag(entry.name());
+			if (tag != null && !tag.isEmpty()) {
+				AllyTagCache.remember(entry.name(), tag);
+			}
+			String tagStr = (tag != null && !tag.isEmpty()) ? " [" + tag + "]" : "";
 			String lineText = "\n  " + entry.name() + tagStr + " — " + timeStr;
 
 			MutableComponent line = Component.literal(lineText).withStyle(color);
 			if (canManage) {
-				String target = (entry.tag() != null && !entry.tag().isEmpty()) ? entry.tag() : entry.name();
+				String target = (tag != null && !tag.isEmpty()) ? tag : entry.name();
 				line = line.withStyle(style -> style.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to suggest /eden ally remove " + target).withStyle(ChatFormatting.GRAY))).withClickEvent(new ClickEvent.SuggestCommand("/eden ally remove " + target)));
 			}
 			out.append(line);
