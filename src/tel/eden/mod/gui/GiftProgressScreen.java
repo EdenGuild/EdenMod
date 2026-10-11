@@ -19,7 +19,7 @@ import tel.eden.mod.reward.GuildRewards;
  * That's deliberate: closing early would mean the automation keeps driving the menu
  * unseen, which defeats the point of showing this at all.
  */
-public final class GiftProgressScreen extends EdenReferenceScreen implements GuildRewards.GiftProgressListener {
+public final class GiftProgressScreen extends EdenReferenceScreen implements GuildRewards.GiftProgressListener, BackgroundProgressScreen {
 	private static final int BASE_PANEL_WIDTH = 320;
 	private static final int BASE_PANEL_HEIGHT = 110;
 
@@ -93,13 +93,22 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 	// -- rendering --------------------------------------------------------------
 
 	@Override
+	protected void renderMenuBackground(GuiGraphics g) {
+		// Suppressed so the in-game world remains visible through lessened blur during background container automation.
+	}
+
+	@Override
+	protected void renderMenuBackground(GuiGraphics g, int x, int y, int width, int height) {
+		// Suppressed so the in-game world remains visible through lessened blur during background container automation.
+	}
+
+	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
 		int scaledMouseX = scaledMouseX(mouseX);
 		int scaledMouseY = scaledMouseY(mouseY);
 
-		this.renderMenuBackground(g);
 		pushReferencePose(g);
-		layout.drawBackground(g);
+		layout.drawBackground(g, 0x40000000);
 		layout.drawPanel(g);
 		super.render(g, scaledMouseX, scaledMouseY, delta);
 

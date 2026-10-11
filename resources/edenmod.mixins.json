@@ -25,6 +25,7 @@
     "ItemDecorationMixin",
     "ItemRenderMixin",
     "LivingEntityRendererMixin",
+    "OptionsMixin",
     "TitleScreenMixin"
   ],
   "injectors": {
