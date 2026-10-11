@@ -26,7 +26,17 @@ import tel.eden.mod.EdenLogger;
 public final class BridgeConfig {
 	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("edenmod.json");
+	private static final Path PATH = resolveConfigPath();
+
+	private static Path resolveConfigPath() {
+		try {
+			if (FabricLoader.getInstance() != null) {
+				return FabricLoader.getInstance().getConfigDir().resolve("edenmod.json");
+			}
+		} catch (Throwable ignored) {
+		}
+		return Path.of("config", "edenmod.json");
+	}
 
 	/** The EdenBot backend URL, baked into the build. Never written to the config file. */
 	public static final String DEFAULT_BACKEND_URL = "https://bridge.eden.tel/";
@@ -131,6 +141,33 @@ public final class BridgeConfig {
 
 	/** HUD chip showing your rolling 7-day war count (from the backend). */
 	public boolean warWeeklyCountHud = false;
+
+	/** Client-to-client Radiance Tracker for Paladins/Knights in guild wars. Off by default. */
+	public boolean radianceTracker = false;
+
+	/** Self Paladin aspect tier for Radiance (0 = Base/None, 1 = T1, 2 = T2, 3 = T3). */
+	public int radianceSelfTier = 0;
+
+	/** Group sync key for sharing Radiance with teammates. Only syncs when 2+ members share the key. */
+	public String radianceGroupKey = "";
+
+	/** Only show/track Radiance while actively in a guild war. */
+	public boolean radianceRequireWar = true;
+
+	/** Play an audio pling when the Radiance timer hits zero (cast prompt). */
+	public boolean radiancePing = true;
+
+	/** Volume of the audio ping. Range 0.1 - 2.0. */
+	public float radiancePingVolume = 1.5f;
+
+	/** Pitch of the audio ping. Range 0.5 - 2.0. */
+	public float radiancePingPitch = 1.0f;
+
+	/** How many seconds the "CAST RADIANCE" text stays on screen. */
+	public double radianceCastPromptSeconds = 2.0;
+
+	/** How many seconds before the previous Radiance expires to alert the next cast (default 1.25s grace period). */
+	public double radianceAdvanceNoticeSeconds = 1.25;
 
 	/** Hide territory economy announcements (upgrades, bonuses, tax, borders, loadouts) from chat. */
 	public boolean hideEconomyMessages = false;
@@ -398,6 +435,18 @@ public final class BridgeConfig {
 					config.partyHealthBarScale = Math.max(50, Math.min(200, config.partyHealthBarScale));
 					config.partyHealthBarDistanceScale = Math.max(0, Math.min(200, config.partyHealthBarDistanceScale));
 					config.raidReadyReminderSeconds = Math.max(10, Math.min(300, config.raidReadyReminderSeconds));
+					if (config.radianceGroupKey == null) {
+						config.radianceGroupKey = "";
+					}
+					config.radianceSelfTier = Math.max(0, Math.min(3, config.radianceSelfTier));
+					config.radiancePingVolume = Math.max(0.1f, Math.min(2.0f, config.radiancePingVolume));
+					config.radiancePingPitch = Math.max(0.5f, Math.min(2.0f, config.radiancePingPitch));
+					config.radianceCastPromptSeconds = Math.max(0.5, Math.min(10.0, config.radianceCastPromptSeconds));
+					if (Double.isNaN(config.radianceAdvanceNoticeSeconds) || Double.isInfinite(config.radianceAdvanceNoticeSeconds)) {
+						config.radianceAdvanceNoticeSeconds = 1.25;
+					} else {
+						config.radianceAdvanceNoticeSeconds = Math.max(0.0, Math.min(3.0, Math.round(config.radianceAdvanceNoticeSeconds * 4.0) / 4.0));
+					}
 					return config;
 				}
 			} catch (IOException | RuntimeException e) {

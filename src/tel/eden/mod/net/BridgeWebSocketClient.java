@@ -143,6 +143,18 @@ public final class BridgeWebSocketClient {
 		 */
 		void onWarBoard(java.util.List<WarBoardEntry> entries);
 
+		/** A guild peer broadcasted a Radiance cast. */
+		default void onRadianceCast(String sender, String senderUuid, String groupKey, int tier, long remainingMs, long timestamp) {
+			onRadianceCast(sender, groupKey, tier, remainingMs, timestamp);
+		}
+
+		default void onRadianceCast(String sender, String groupKey, int tier, long remainingMs, long timestamp) {
+		}
+
+		/** Active member count for a shared Radiance group key. */
+		default void onRadianceGroupCount(String groupKey, int count) {
+		}
+
 		/**
 		 * The Mojang session was verified ({@code authOk}); {@code linked} and
 		 * {@code member} report this player's backend standing. Both true means full
@@ -587,6 +599,42 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "warDefense");
 		obj.addProperty("territory", territory);
 		obj.addProperty("defense", defense);
+		enqueueSend(current, obj.toString());
+		return true;
+	}
+
+	/**
+	 * Announce or update this player's shared Radiance group key.
+	 *
+	 * @return whether the message was queued on a connected socket
+	 */
+	public boolean sendRadianceGroup(String groupKey) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "radianceGroup");
+		obj.addProperty("groupKey", groupKey != null ? groupKey.trim() : "");
+		enqueueSend(current, obj.toString());
+		return true;
+	}
+
+	/**
+	 * Broadcast a local Radiance cast to guild members sharing the same group key.
+	 *
+	 * @return whether the message was queued on a connected socket
+	 */
+	public boolean sendRadianceCast(String groupKey, int tier, long remainingMs) {
+		WebSocket current = socket;
+		if (current == null || groupKey == null || groupKey.isBlank()) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "radianceCast");
+		obj.addProperty("groupKey", groupKey.trim());
+		obj.addProperty("tier", tier);
+		obj.addProperty("remainingMs", remainingMs);
 		enqueueSend(current, obj.toString());
 		return true;
 	}
@@ -1037,6 +1085,8 @@ public final class BridgeWebSocketClient {
 				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"));
 				case "warCountsReply" -> sink.onWarCounts(getInt(obj, "days", 7), parseWarCounts(obj), get(obj, "requester"), get(obj, "color"));
 				case "warBoard" -> sink.onWarBoard(parseWarBoard(obj));
+				case "radianceGroupCount" -> sink.onRadianceGroupCount(get(obj, "groupKey"), getInt(obj, "count", 0));
+				case "radianceCast" -> sink.onRadianceCast(get(obj, "sender"), get(obj, "senderUuid"), get(obj, "groupKey"), getInt(obj, "tier", 0), getLong(obj, "remainingMs", 0L), getLong(obj, "timestamp", System.currentTimeMillis()));
 				case "authChallenge" -> handleAuthChallenge(get(obj, "serverId"));
 				case "authOk" -> {
 					// Session verified: reset backoff and hand the backend-reported

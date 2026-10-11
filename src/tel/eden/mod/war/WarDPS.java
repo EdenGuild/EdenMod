@@ -57,9 +57,17 @@ public final class WarDPS {
 	private static double lowerDpsDisplay;
 	private static double higherDpsDisplay;
 
+	public static boolean isActivelyFighting() {
+		return warStartTime > 0 && (System.currentTimeMillis() - lastTimeInWar <= 10_000L);
+	}
+
+	public static boolean isInWar() {
+		return System.currentTimeMillis() - lastTimeInWar <= IN_WAR_WINDOW_MS;
+	}
+
 	/** Scan the active boss bars for a war tower and update the stats. */
 	public static void onTick(BridgeConfig config) {
-		if (!config.warDpsHud) {
+		if (!config.warDpsHud && !config.radianceTracker) {
 			return;
 		}
 		Minecraft mc = Minecraft.getInstance();
@@ -266,7 +274,7 @@ public final class WarDPS {
 	}
 
 	/** Strip colour codes and private-use glyphs (war-message prefixes) from a line. */
-	static String clean(String raw) {
+	public static String clean(String raw) {
 		StringBuilder out = new StringBuilder(raw.length());
 		for (int i = 0; i < raw.length();) {
 			int cp = raw.codePointAt(i);
