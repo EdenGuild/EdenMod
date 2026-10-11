@@ -9,6 +9,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemLore;
+import tel.eden.mod.chat.ChatText;
 
 /** Extracts stable status fields from the 27-slot root {@code /gu man} menu. */
 public final class GuildManageMenuParser {
@@ -97,7 +98,7 @@ public final class GuildManageMenuParser {
 		boolean inAllianceSection = false;
 		List<GuildManageSnapshot.Alliance> result = new java.util.ArrayList<>();
 		for (String raw : rawLines) {
-			String line = ChatFormatting.stripFormatting(raw).trim();
+			String line = ChatText.normalize(ChatFormatting.stripFormatting(raw)).strip();
 			if (ALLIANCE_HEADING.matcher(line).matches()) {
 				headingSeen = true;
 				inAllianceSection = true;
@@ -116,7 +117,10 @@ public final class GuildManageMenuParser {
 			}
 			Matcher matcher = ALLIANCE.matcher(line);
 			if (matcher.matches()) {
-				result.add(new GuildManageSnapshot.Alliance(matcher.group(1).trim(), matcher.group(2)));
+				String guildName = matcher.group(1).trim();
+				String tag = matcher.group(2).trim();
+				result.add(new GuildManageSnapshot.Alliance(guildName, tag));
+				AllyTagCache.remember(guildName, tag);
 			}
 		}
 		return headingSeen ? List.copyOf(result) : null;

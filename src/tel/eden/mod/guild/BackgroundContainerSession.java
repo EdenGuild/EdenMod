@@ -78,10 +78,9 @@ public final class BackgroundContainerSession {
 			return false;
 		}
 		if (observedServerContainerId > 0) {
-			long elapsed = System.currentTimeMillis() - joinedAt;
 			boolean localInventoryOnly = mc.player.containerMenu == mc.player.inventoryMenu && !(mc.screen instanceof AbstractContainerScreen<?>);
-			if (elapsed >= STARTUP_ORPHAN_GRACE_MS && elapsed <= STARTUP_ORPHAN_WINDOW_MS && localInventoryOnly) {
-				LOGGER.warn("Background container: closing startup orphan {} ('{}') after {}ms", observedServerContainerId, observedServerTitle, elapsed);
+			if (localInventoryOnly) {
+				LOGGER.info("Background container: closing lingering container {} ('{}')", observedServerContainerId, observedServerTitle);
 				mc.getConnection().send(new ServerboundContainerClosePacket(observedServerContainerId));
 				observedServerContainerId = -1;
 				observedServerTitle = "";
