@@ -11,6 +11,8 @@ class BackgroundProgressScreenTest {
 	void progressScreensImplementMarkerInterface() {
 		assertTrue(BackgroundProgressScreen.class.isAssignableFrom(GiftProgressScreen.class), "GiftProgressScreen (/eden dump, /eden gift) must implement BackgroundProgressScreen");
 		assertTrue(BackgroundProgressScreen.class.isAssignableFrom(AllyProgressScreen.class), "AllyProgressScreen (/eden ally add/remove) must implement BackgroundProgressScreen");
+		assertTrue(BackgroundProgressScreen.class.isAssignableFrom(AspectGiveawayScreen.class), "AspectGiveawayScreen must implement BackgroundProgressScreen");
+		assertTrue(BackgroundProgressScreen.class.isAssignableFrom(PayoutScreen.class), "PayoutScreen must implement BackgroundProgressScreen");
 	}
 
 	@Test

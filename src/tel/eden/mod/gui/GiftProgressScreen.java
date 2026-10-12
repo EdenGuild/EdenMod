@@ -108,7 +108,7 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 		int scaledMouseY = scaledMouseY(mouseY);
 
 		pushReferencePose(g);
-		layout.drawBackground(g, 0x40000000);
+		layout.drawBackground(g, 0x66000000);
 		layout.drawPanel(g);
 		super.render(g, scaledMouseX, scaledMouseY, delta);
 
