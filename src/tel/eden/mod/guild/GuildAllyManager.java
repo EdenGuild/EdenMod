@@ -119,6 +119,23 @@ public final class GuildAllyManager {
 					return;
 				}
 
+				ItemStack slot18 = items.get(REMOVE_ALLIES_SLOT);
+				String slot18Name = cleanFailureReason(slot18.getHoverName().getString()).toLowerCase(Locale.ROOT);
+				if (slot18Name.contains("permission") || slot18Name.contains("locked") || slot18Name.contains("cannot")) {
+					chat(PERMISSION_ERROR, ChatFormatting.RED);
+					return;
+				}
+				ItemLore removeLore = slot18.get(DataComponents.LORE);
+				if (removeLore != null) {
+					for (var line : removeLore.lines()) {
+						String s = stripCodes(line.getString()).toLowerCase(Locale.ROOT);
+						if (s.contains("do not have permission") || s.contains("requires strategist") || s.contains("only chief") || s.contains("only owner") || s.contains("permission to remove")) {
+							chat(PERMISSION_ERROR, ChatFormatting.RED);
+							return;
+						}
+					}
+				}
+
 				progress.setStatus("Entering removal mode...");
 				Boolean enterClick = onClient(() -> session.click(REMOVE_ALLIES_SLOT, 0, ClickType.PICKUP));
 				if (!Boolean.TRUE.equals(enterClick)) {
@@ -269,10 +286,19 @@ public final class GuildAllyManager {
 
 				progress.setStatus("Checking ally capacity...");
 				ItemStack slot0 = items.get(ADD_ALLY_SLOT);
+				String slot0Name = cleanFailureReason(slot0.getHoverName().getString()).toLowerCase(Locale.ROOT);
+				if (slot0Name.contains("permission") || slot0Name.contains("locked") || slot0Name.contains("cannot")) {
+					chat(PERMISSION_ERROR, ChatFormatting.RED);
+					return;
+				}
 				ItemLore lore = slot0.get(DataComponents.LORE);
 				if (lore != null) {
 					for (var line : lore.lines()) {
 						String s = stripCodes(line.getString()).toLowerCase(Locale.ROOT);
+						if (s.contains("do not have permission") || s.contains("requires strategist") || s.contains("only chief") || s.contains("only owner") || s.contains("permission to add")) {
+							chat(PERMISSION_ERROR, ChatFormatting.RED);
+							return;
+						}
 						if (s.contains("do not have any") || s.contains("7/7") || s.contains("no ally slots available")) {
 							chat("Cannot add ally: no ally slots available (all slots used).", ChatFormatting.RED);
 							return;
@@ -362,19 +388,28 @@ public final class GuildAllyManager {
 	}
 
 	private boolean openAndCommand(String owner, Predicate<String> title, int slots, String command) {
-		Boolean opened = onClient(() -> {
-			Minecraft mc = Minecraft.getInstance();
-			if (mc.getConnection() == null) {
-				return false;
+		long deadline = System.currentTimeMillis() + 5000L;
+		boolean opened = false;
+		while (System.currentTimeMillis() < deadline && !cancelled) {
+			Boolean attempt = onClient(() -> {
+				Minecraft mc = Minecraft.getInstance();
+				if (mc.getConnection() == null) {
+					return false;
+				}
+				if (!session.begin(owner, title, slots)) {
+					return false;
+				}
+				mc.getConnection().sendCommand(command);
+				return true;
+			});
+			if (Boolean.TRUE.equals(attempt)) {
+				opened = true;
+				break;
 			}
-			if (!session.begin(owner, title, slots)) {
-				LOGGER.info("Guild ally: session.begin failed — {}", session.blockingState());
-				return false;
-			}
-			mc.getConnection().sendCommand(command);
-			return true;
-		});
-		if (!Boolean.TRUE.equals(opened)) {
+			sleep(100);
+		}
+		if (!opened || cancelled) {
+			LOGGER.info("Guild ally: session.begin failed for {} — {}", owner, session.blockingState());
 			return false;
 		}
 		if (!waitUntil(() -> (session.isOpen() && session.isSettled() && session.items().size() >= slots) || session.isAborted() || cancelled, MENU_TIMEOUT_MS)) {

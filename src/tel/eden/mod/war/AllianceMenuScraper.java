@@ -81,7 +81,7 @@ public final class AllianceMenuScraper {
 		}
 		// Strategists can edit the alliance menu themselves, so let them keep it synced
 		// too, not just Chiefs/Owners — see GuildRewards.isChiefOwnerOrStrategist's doc.
-		if (!EdenModClient.instance().guildRewards().isChiefOwnerOrStrategist()) {
+		if (!EdenModClient.instance().isChiefOwnerOrStrategist()) {
 			return;
 		}
 		AbstractContainerMenu menu = screen.getMenu();

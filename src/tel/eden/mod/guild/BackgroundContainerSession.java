@@ -69,25 +69,32 @@ public final class BackgroundContainerSession {
 	/** Claim the next matching server menu. Returns false if a real foreign menu is open. */
 	public boolean begin(String owner, Predicate<String> expectedTitle, int menuSlotCount) {
 		Minecraft mc = Minecraft.getInstance();
-		if (owner == null || owner.isBlank() || expectedTitle == null || menuSlotCount <= 0 || mc.player == null || mc.getConnection() == null || open || !this.owner.isEmpty()) {
-			return false;
-		}
-		if (System.currentTimeMillis() - joinedAt < WORLD_COMMAND_GRACE_MS) {
+		if (owner == null || owner.isBlank() || expectedTitle == null || menuSlotCount <= 0 || mc.player == null || mc.getConnection() == null) {
 			return false;
 		}
 		if (mc.screen instanceof AbstractContainerScreen<?>) {
 			return false;
 		}
-		if (observedServerContainerId > 0) {
-			boolean localInventoryOnly = mc.player.containerMenu == mc.player.inventoryMenu && !(mc.screen instanceof AbstractContainerScreen<?>);
-			if (localInventoryOnly) {
-				LOGGER.info("Background container: closing lingering container {} ('{}')", observedServerContainerId, observedServerTitle);
-				mc.getConnection().send(new ServerboundContainerClosePacket(observedServerContainerId));
-				observedServerContainerId = -1;
-				observedServerTitle = "";
+		if (open || !this.owner.isEmpty()) {
+			if ("guild_log".equals(this.owner) && !"guild_log".equals(owner)) {
+				LOGGER.info("Background container: {} preempting background guild_log", owner);
+				close();
 			} else {
 				return false;
 			}
+		}
+		if (System.currentTimeMillis() - joinedAt < WORLD_COMMAND_GRACE_MS) {
+			return false;
+		}
+		if (mc.player.containerMenu != mc.player.inventoryMenu) {
+			LOGGER.info("Background container: closing orphan containerMenu {} ('{}')", mc.player.containerMenu.containerId, observedServerTitle);
+			mc.player.closeContainer();
+		}
+		if (observedServerContainerId > 0) {
+			LOGGER.info("Background container: closing lingering container {} ('{}')", observedServerContainerId, observedServerTitle);
+			mc.getConnection().send(new ServerboundContainerClosePacket(observedServerContainerId));
+			observedServerContainerId = -1;
+			observedServerTitle = "";
 		}
 		this.owner = owner;
 		this.expectedTitle = expectedTitle;

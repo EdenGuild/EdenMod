@@ -497,13 +497,23 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/**
 	 * Whether the player is a Chief, Owner, or Strategist according to the bridge or Wynncraft.
+	 * If rank has not yet been fetched/verified, defaults to true so legitimate Strategists
+	 * are not locked out; the in-game diplomacy menu validates permissions definitively.
 	 */
 	public boolean isChiefOwnerOrStrategist() {
-		if (liveGuildRank != null && (liveGuildRank.equalsIgnoreCase("owner") || liveGuildRank.equalsIgnoreCase("chief") || liveGuildRank.equalsIgnoreCase("strategist"))) {
-			return true;
+		if (liveGuildRank != null && !liveGuildRank.isBlank()) {
+			return liveGuildRank.equalsIgnoreCase("owner") || liveGuildRank.equalsIgnoreCase("chief") || liveGuildRank.equalsIgnoreCase("strategist");
+		}
+		if (guildRewards.hasKnownRank()) {
+			return guildRewards.isChiefOwnerOrStrategist();
 		}
 		guildRewards.ensureFresh(playerName());
-		return guildRewards.isChiefOwnerOrStrategist();
+		return true;
+	}
+
+	public void onWorldRespawn() {
+		enteredWynnGameWorld = true;
+		guildLogSync.onWorldJoin();
 	}
 
 	/** Packet hooks for the invisible guild-log query (mirrors Wynntils' query path). */
