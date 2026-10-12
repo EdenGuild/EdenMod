@@ -153,6 +153,9 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow(Category.WAR, "War info overlay (DPS/EHP)", () -> config.warDpsHud, v -> config.warDpsHud = v, "On", "Off", true);
 		addToggleRow(Category.WAR, "Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
 		addToggleRow(Category.WAR, "Hide economy messages", () -> config.hideEconomyMessages, v -> config.hideEconomyMessages = v, "On", "Off", false);
+		addToggleRow(Category.WAR, "Territory loss sound", () -> config.territoryLossSound, v -> config.territoryLossSound = v, "On", "Off", false);
+		addToggleRow(Category.WAR, "Territory loss blacklist", () -> config.territoryLossBlacklistEnabled, v -> config.territoryLossBlacklistEnabled = v, "On", "Off", true);
+		addButtonRow(Category.WAR, "Territory blacklist", () -> Component.literal("Edit (" + config.territoryLossBlacklist.size() + ")"), () -> this.minecraft.setScreen(new TerritoryLossBlacklistScreen(this, config)), () -> config.territoryLossBlacklist = new ArrayList<>(BridgeConfig.DEFAULT_TERRITORY_LOSS_BLACKLIST));
 
 		// Visuals & QoL
 		if (config.isSecretUnlocked(BridgeConfig.SECRET_BABY_PLAYERS)) {

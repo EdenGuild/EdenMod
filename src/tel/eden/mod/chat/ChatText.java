@@ -199,7 +199,7 @@ public final class ChatText {
 	 * fixing spacing before punctuation so {@code name: message} and raid-completion
 	 * shapes are cleanly matchable.
 	 */
-	static String normalize(String raw) {
+	public static String normalize(String raw) {
 		return normalizeWhitespace(raw).replaceAll("\\s+([,.:;!?])", "$1");
 	}
 
