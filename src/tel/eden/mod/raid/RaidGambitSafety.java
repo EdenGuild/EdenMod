@@ -215,8 +215,8 @@ public final class RaidGambitSafety {
 		return Component.literal("§c" + getWarningMessage(minRequired));
 	}
 
-	/** Plays rejection sound and sends action bar warning when a ready click is blocked. */
-	public static void notifyBlocked(Minecraft mc, int minRequired) {
+	/** Plays rejection sound when a ready click is blocked. */
+	public static void notifyBlocked(Minecraft mc) {
 		if (mc == null) {
 			return;
 		}
@@ -226,12 +226,11 @@ public final class RaidGambitSafety {
 			}
 		} catch (Throwable ignored) {
 		}
-		try {
-			if (mc.player != null) {
-				mc.player.displayClientMessage(Component.literal("§c[Eden] " + getWarningMessage(minRequired)), true);
-			}
-		} catch (Throwable ignored) {
-		}
+	}
+
+	/** Plays rejection sound when a ready click is blocked. */
+	public static void notifyBlocked(Minecraft mc, int minRequired) {
+		notifyBlocked(mc);
 	}
 
 	private static List<String> getLoreLines(ItemStack stack) {
