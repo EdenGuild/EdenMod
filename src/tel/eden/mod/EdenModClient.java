@@ -71,7 +71,6 @@ import tel.eden.mod.util.WynntilsChatBridge;
 import com.mojang.authlib.minecraft.MinecraftSessionService;
 import com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService;
 import com.mojang.blaze3d.platform.InputConstants;
-import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -668,7 +667,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildRadianceCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
+			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
 				requestWarCounts(ctx.getSource(), 7);
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
@@ -1048,7 +1047,7 @@ public final class EdenModClient implements ClientModInitializer {
 								return;
 							}
 						}
-						tel.eden.mod.war.radiance.RadianceTracker.onRemoteCast(config, groupKey, tier, remainingMs, timestamp, 0L);
+						tel.eden.mod.war.radiance.RadianceTracker.onRemoteCast(config, groupKey, tier, remainingMs, System.currentTimeMillis(), 0L);
 					});
 				}
 
@@ -1293,75 +1292,6 @@ public final class EdenModClient implements ClientModInitializer {
 			return 0;
 		}
 		sendDeduct(rewardKind, member, amount);
-		return 1;
-	}
-
-	/** Build {@code /eden radiance ...}. */
-	private LiteralArgumentBuilder<FabricClientCommandSource> buildRadianceCommand() {
-		LiteralArgumentBuilder<FabricClientCommandSource> cmd = ClientCommandManager.literal("radiance");
-		cmd.executes(ctx -> openConfigWar(ctx.getSource())).then(ClientCommandManager.literal("aspect").executes(ctx -> {
-			config.radianceSelfTier = (config.radianceSelfTier + 1) % 4;
-			config.save();
-			ctx.getSource().sendFeedback(Component.literal("Radiance Aspect Tier: " + config.radianceSelfTier).withStyle(ChatFormatting.AQUA));
-			return 1;
-		}).then(ClientCommandManager.argument("tier", StringArgumentType.word()).suggests((ctx, builder) -> net.minecraft.commands.SharedSuggestionProvider.suggest(new String[]{"none", "t1", "t2", "t3"}, builder)).executes(ctx -> {
-			String raw = StringArgumentType.getString(ctx, "tier").toLowerCase(Locale.ROOT);
-			int tier = switch (raw) {
-				case "t1", "1" -> 1;
-				case "t2", "2" -> 2;
-				case "t3", "3" -> 3;
-				default -> 0;
-			};
-			config.radianceSelfTier = tier;
-			config.save();
-			ctx.getSource().sendFeedback(Component.literal("Radiance Aspect Tier set to: " + tier).withStyle(ChatFormatting.AQUA));
-			return 1;
-		}))).then(ClientCommandManager.literal("requirewar").then(ClientCommandManager.argument("value", StringArgumentType.word()).suggests((ctx, builder) -> net.minecraft.commands.SharedSuggestionProvider.suggest(new String[]{"on", "off"}, builder)).executes(ctx -> {
-			String val = StringArgumentType.getString(ctx, "value").toLowerCase(Locale.ROOT);
-			config.radianceRequireWar = "on".equals(val) || "true".equals(val);
-			config.save();
-			ctx.getSource().sendFeedback(Component.literal("Radiance require war: " + config.radianceRequireWar).withStyle(ChatFormatting.AQUA));
-			return 1;
-		}))).then(ClientCommandManager.literal("ping").then(ClientCommandManager.argument("value", StringArgumentType.word()).suggests((ctx, builder) -> net.minecraft.commands.SharedSuggestionProvider.suggest(new String[]{"on", "off"}, builder)).executes(ctx -> {
-			String val = StringArgumentType.getString(ctx, "value").toLowerCase(Locale.ROOT);
-			config.radiancePing = "on".equals(val) || "true".equals(val);
-			config.save();
-			ctx.getSource().sendFeedback(Component.literal("Radiance audio ping: " + config.radiancePing).withStyle(ChatFormatting.AQUA));
-			return 1;
-		}))).then(ClientCommandManager.literal("key").then(ClientCommandManager.argument("value", StringArgumentType.greedyString()).executes(ctx -> {
-			String key = StringArgumentType.getString(ctx, "value").trim();
-			config.radianceGroupKey = key;
-			config.save();
-			syncRadianceGroup(config);
-			ctx.getSource().sendFeedback(Component.literal("Radiance group key set to: " + key).withStyle(ChatFormatting.GREEN));
-			return 1;
-		}))).then(ClientCommandManager.literal("grace").then(ClientCommandManager.argument("seconds", DoubleArgumentType.doubleArg(0.0, 3.0)).executes(ctx -> {
-			double sec = DoubleArgumentType.getDouble(ctx, "seconds");
-			sec = Math.round(sec * 4.0) / 4.0;
-			config.radianceAdvanceNoticeSeconds = sec;
-			config.save();
-			ctx.getSource().sendFeedback(Component.literal("Radiance grace set to: " + sec + "s").withStyle(ChatFormatting.AQUA));
-			return 1;
-		}))).then(ClientCommandManager.literal("advance").then(ClientCommandManager.argument("seconds", DoubleArgumentType.doubleArg(0.0, 5.0)).executes(ctx -> {
-			double sec = DoubleArgumentType.getDouble(ctx, "seconds");
-			sec = Math.round(sec * 4.0) / 4.0;
-			config.radianceAdvanceNoticeSeconds = sec;
-			config.save();
-			ctx.getSource().sendFeedback(Component.literal("Radiance grace set to: " + sec + "s").withStyle(ChatFormatting.AQUA));
-			return 1;
-		}))).then(ClientCommandManager.literal("toggle").executes(ctx -> {
-			config.radianceTracker = !config.radianceTracker;
-			config.save();
-			syncRadianceGroup(config);
-			ctx.getSource().sendFeedback(Component.literal("Radiance tracker: " + (config.radianceTracker ? "Enabled" : "Disabled")).withStyle(ChatFormatting.AQUA));
-			return 1;
-		}));
-		return cmd;
-	}
-
-	private int openConfigWar(FabricClientCommandSource source) {
-		Minecraft mc = Minecraft.getInstance();
-		mc.execute(() -> mc.setScreen(BridgeConfigScreen.create(mc.screen, EdenModClient.instance())));
 		return 1;
 	}
 
