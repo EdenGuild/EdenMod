@@ -1294,9 +1294,17 @@ public final class EdenModClient implements ClientModInitializer {
 			requestAllyView(ctx.getSource());
 			return 1;
 		})).then(ClientCommandManager.literal("add").then(ClientCommandManager.argument("name", StringArgumentType.greedyString()).executes(ctx -> {
+			if (!isChiefOwnerOrStrategist()) {
+				ctx.getSource().sendFeedback(Component.literal(tel.eden.mod.guild.GuildAllyManager.PERMISSION_ERROR).withStyle(ChatFormatting.RED));
+				return 0;
+			}
 			guildAllyManager.addAlly(StringArgumentType.getString(ctx, "name"));
 			return 1;
 		}))).then(ClientCommandManager.literal("remove").then(ClientCommandManager.argument("name", StringArgumentType.greedyString()).executes(ctx -> {
+			if (!isChiefOwnerOrStrategist()) {
+				ctx.getSource().sendFeedback(Component.literal(tel.eden.mod.guild.GuildAllyManager.PERMISSION_ERROR).withStyle(ChatFormatting.RED));
+				return 0;
+			}
 			guildAllyManager.removeAlly(StringArgumentType.getString(ctx, "name"));
 			return 1;
 		})));

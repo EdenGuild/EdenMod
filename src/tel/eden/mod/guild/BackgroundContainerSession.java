@@ -46,6 +46,7 @@ public final class BackgroundContainerSession {
 	private volatile int stateId;
 	private volatile boolean open;
 	private volatile boolean aborted;
+	private volatile boolean serverClosed;
 	private volatile List<ItemStack> items = List.of();
 	private volatile long lastContentAt;
 	private volatile long snapshotRevision;
@@ -92,6 +93,7 @@ public final class BackgroundContainerSession {
 		this.expectedTitle = expectedTitle;
 		this.menuSlotCount = menuSlotCount;
 		this.aborted = false;
+		this.serverClosed = false;
 		return true;
 	}
 
@@ -152,6 +154,14 @@ public final class BackgroundContainerSession {
 
 	public boolean isAborted() {
 		return aborted;
+	}
+
+	public boolean isClosed() {
+		return serverClosed || aborted || !open;
+	}
+
+	public boolean isServerClosed() {
+		return serverClosed;
 	}
 
 	public boolean inStartupRecoveryWindow() {
@@ -276,6 +286,7 @@ public final class BackgroundContainerSession {
 		}
 		if (closedId == containerId) {
 			aborted = true;
+			serverClosed = true;
 		}
 	}
 
@@ -287,6 +298,7 @@ public final class BackgroundContainerSession {
 		stateId = 0;
 		open = false;
 		aborted = false;
+		serverClosed = false;
 		items = List.of();
 		lastContentAt = 0L;
 		snapshotRevision = 0L;

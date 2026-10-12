@@ -40,7 +40,7 @@ public final class GuildAllyManager {
 	private static final Pattern ALLY_ITEM = Pattern.compile("^(.+?) \\[([A-Za-z0-9]{2,5})]$");
 	private static final Pattern COLOR_CODE = Pattern.compile("[§&][0-9a-fk-orA-FK-OR]");
 	private static final long MENU_TIMEOUT_MS = 6_000L;
-	private static final String PERMISSION_ERROR = "Only guild Strategist+ members can manage allies.";
+	public static final String PERMISSION_ERROR = "Only guild Strategist+ members can manage allies.";
 
 	private final BackgroundContainerSession session;
 	private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
@@ -51,8 +51,11 @@ public final class GuildAllyManager {
 
 	private volatile boolean running;
 	private volatile boolean cancelled;
+	private volatile boolean promptAppeared;
 	private volatile boolean addAllySuccess;
 	private volatile String addAllyFailureReason;
+	private volatile boolean removeAllySuccess;
+	private volatile String removeAllyFailureReason;
 
 	public GuildAllyManager(BackgroundContainerSession session) {
 		this.session = session;
@@ -68,6 +71,10 @@ public final class GuildAllyManager {
 	}
 
 	public void removeAlly(String nameOrTag) {
+		if (EdenModClient.instance() != null && !EdenModClient.instance().isChiefOwnerOrStrategist()) {
+			chat(PERMISSION_ERROR, ChatFormatting.RED);
+			return;
+		}
 		if (running) {
 			chat("An ally management action is already in progress.", ChatFormatting.RED);
 			return;
@@ -80,6 +87,8 @@ public final class GuildAllyManager {
 
 		running = true;
 		cancelled = false;
+		removeAllySuccess = false;
+		removeAllyFailureReason = null;
 		AllyProgressScreen progress = showProgress("Removing Ally: " + target);
 
 		worker.submit(() -> {
@@ -162,16 +171,41 @@ public final class GuildAllyManager {
 				if (cancelled)
 					return;
 				progress.setStatus("Confirming removal...");
+				long beforeConfirmRev = session.snapshotRevision();
+				removeAllySuccess = false;
+				removeAllyFailureReason = null;
 				Boolean confirmClick = onClient(() -> session.click(REMOVE_ALLIES_SLOT, 0, ClickType.PICKUP));
 				if (!Boolean.TRUE.equals(confirmClick)) {
 					chat("Failed to confirm ally removal.", ChatFormatting.RED);
 					return;
 				}
-				sleep(400);
+
+				boolean confirmed = waitUntil(() -> {
+					if (cancelled || removeAllySuccess || removeAllyFailureReason != null) {
+						return true;
+					}
+					if (session.snapshotRevision() > beforeConfirmRev && session.isSettled()) {
+						return !isAllyPresentInMenu(target);
+					}
+					return session.isClosed();
+				}, 4000L);
+
 				if (cancelled)
 					return;
 
-				chat("Successfully removed ally " + matchedName + ".", ChatFormatting.GREEN);
+				if (removeAllyFailureReason != null) {
+					chat("Failed to remove ally: " + removeAllyFailureReason, ChatFormatting.RED);
+					return;
+				}
+
+				boolean verifiedRemoved = removeAllySuccess || (session.snapshotRevision() > beforeConfirmRev && !isAllyPresentInMenu(target));
+				if (verifiedRemoved) {
+					chat("Successfully removed ally " + matchedName + ".", ChatFormatting.GREEN);
+				} else if (session.isOpen() && isAllyPresentInMenu(target)) {
+					chat("Failed to remove ally " + matchedName + " (ally still present in diplomacy menu).", ChatFormatting.RED);
+				} else {
+					chat("Could not verify removal of ally " + matchedName + " (timed out waiting for confirmation).", ChatFormatting.RED);
+				}
 			} catch (Exception e) {
 				LOGGER.error("Error removing ally", e);
 				chat("Failed to remove ally: " + e.getMessage(), ChatFormatting.RED);
@@ -184,6 +218,10 @@ public final class GuildAllyManager {
 	}
 
 	public void addAlly(String nameOrTag) {
+		if (EdenModClient.instance() != null && !EdenModClient.instance().isChiefOwnerOrStrategist()) {
+			chat(PERMISSION_ERROR, ChatFormatting.RED);
+			return;
+		}
 		if (running) {
 			chat("An ally management action is already in progress.", ChatFormatting.RED);
 			return;
@@ -196,6 +234,9 @@ public final class GuildAllyManager {
 
 		running = true;
 		cancelled = false;
+		promptAppeared = false;
+		addAllySuccess = false;
+		addAllyFailureReason = null;
 		AllyProgressScreen progress = showProgress("Adding Ally: " + target);
 
 		worker.submit(() -> {
@@ -242,15 +283,22 @@ public final class GuildAllyManager {
 				if (cancelled)
 					return;
 				progress.setStatus("Submitting alliance request for " + target + "...");
+				promptAppeared = false;
 				Boolean addClick = onClient(() -> session.click(ADD_ALLY_SLOT, 0, ClickType.PICKUP));
 				if (!Boolean.TRUE.equals(addClick)) {
 					chat("Failed to click add ally.", ChatFormatting.RED);
 					return;
 				}
-				sleep(350);
 
+				// Wait for the server container to close or the prompt message to appear
+				// before sending the chat packet, preventing blurting the tag into public chat under lag.
+				boolean promptReady = waitUntil(() -> promptAppeared || session.isClosed() || cancelled, 5000L);
 				if (cancelled)
 					return;
+				if (!promptReady) {
+					chat("Timed out waiting for server ally prompt (server lag).", ChatFormatting.RED);
+					return;
+				}
 
 				addAllySuccess = false;
 				addAllyFailureReason = null;
@@ -405,16 +453,53 @@ public final class GuildAllyManager {
 		});
 	}
 
+	private boolean isAllyPresentInMenu(String target) {
+		List<ItemStack> items = session.items();
+		for (int slot : ALLY_SLOTS) {
+			if (slot >= items.size()) {
+				continue;
+			}
+			ItemStack stack = items.get(slot);
+			if (stack.isEmpty()) {
+				continue;
+			}
+			String displayed = cleanFailureReason(stack.getHoverName().getString());
+			Matcher m = ALLY_ITEM.matcher(displayed);
+			if (m.matches()) {
+				String guildName = m.group(1).trim();
+				String tag = m.group(2).trim();
+				if (guildName.equalsIgnoreCase(target) || tag.equalsIgnoreCase(target)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	public static boolean isPromptMessage(String lowerText) {
+		if (lowerText == null) {
+			return false;
+		}
+		return (lowerText.contains("type") && (lowerText.contains("guild") || lowerText.contains("tag") || lowerText.contains("name"))) || (lowerText.contains("enter") && (lowerText.contains("guild") || lowerText.contains("tag") || lowerText.contains("name"))) || (lowerText.contains("ally") && (lowerText.contains("guild name") || lowerText.contains("guild tag") || lowerText.contains("type") || lowerText.contains("enter")));
+	}
+
 	public void onSystemChat(String text) {
 		if (text == null || !running) {
 			return;
 		}
 		String cleaned = cleanFailureReason(text);
 		String lower = cleaned.toLowerCase(Locale.ROOT);
+		if (isPromptMessage(lower)) {
+			promptAppeared = true;
+		}
 		if (lower.contains("not found or invalid") || lower.contains("already allied") || lower.contains("already pending") || lower.contains("cannot ally") || (lower.contains("maximum") && lower.contains("allies")) || lower.contains("no ally slots") || lower.contains("do not have permission")) {
 			addAllyFailureReason = cleaned;
 		} else if (lower.contains("alliance request") || lower.contains("requested an alliance") || lower.contains("sent an alliance request") || lower.contains("alliance request sent")) {
 			addAllySuccess = true;
+		} else if (lower.contains("no longer allied") || (lower.contains("removed") && lower.contains("ally")) || lower.contains("ended alliance") || (lower.contains("alliance") && lower.contains("ended")) || lower.contains("successfully removed")) {
+			removeAllySuccess = true;
+		} else if (lower.contains("failed to remove") || lower.contains("cannot remove") || lower.contains("could not remove")) {
+			removeAllyFailureReason = cleaned;
 		}
 	}
 

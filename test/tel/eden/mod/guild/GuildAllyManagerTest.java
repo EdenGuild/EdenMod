@@ -30,4 +30,18 @@ class GuildAllyManagerTest {
 		assertEquals("That guild was not found or invalid, try again!", GuildAllyManager.cleanFailureReason("§c\uDAFF\uDFFC\uE001  That guild was not found or invalid, try again!§r"));
 		assertEquals("You do not have permission to manage guild allies.", GuildAllyManager.cleanFailureReason("§c You do not have permission to manage guild allies."));
 	}
+
+	@Test
+	void recognizesPromptMessages() {
+		org.junit.jupiter.api.Assertions.assertTrue(GuildAllyManager.isPromptMessage("type the guild name or tag in chat"));
+		org.junit.jupiter.api.Assertions.assertTrue(GuildAllyManager.isPromptMessage("enter the guild name or tag:"));
+		org.junit.jupiter.api.Assertions.assertTrue(GuildAllyManager.isPromptMessage("type the name of the guild you want to ally with"));
+		org.junit.jupiter.api.Assertions.assertFalse(GuildAllyManager.isPromptMessage("that guild was not found or invalid"));
+		org.junit.jupiter.api.Assertions.assertFalse(GuildAllyManager.isPromptMessage(null));
+	}
+
+	@Test
+	void permissionErrorStringIsAccurate() {
+		assertEquals("Only guild Strategist+ members can manage allies.", GuildAllyManager.PERMISSION_ERROR);
+	}
 }
