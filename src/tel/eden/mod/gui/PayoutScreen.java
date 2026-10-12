@@ -37,7 +37,7 @@ import tel.eden.mod.reward.GuildRewards;
  * emeralds are simply dumped to one player (see {@link GuildRewards#dumpEmeralds}) who
  * redistributes them manually.
  */
-public final class PayoutScreen extends EdenReferenceScreen {
+public final class PayoutScreen extends EdenReferenceScreen implements BackgroundProgressScreen {
 	private static final int BASE_PANEL_WIDTH = 420;
 	// Taller than the bare minimum on purpose — EdenPanelLayout.centered() already
 	// scales this down (to a 0.55x floor) on a window too small to fit it, so a
@@ -345,13 +345,22 @@ public final class PayoutScreen extends EdenReferenceScreen {
 	// -- rendering --------------------------------------------------------------
 
 	@Override
+	protected void renderMenuBackground(GuiGraphics g) {
+		// Suppressed so the in-game world remains visible through lessened blur during background container automation.
+	}
+
+	@Override
+	protected void renderMenuBackground(GuiGraphics g, int x, int y, int width, int height) {
+		// Suppressed so the in-game world remains visible through lessened blur during background container automation.
+	}
+
+	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
 		int scaledMouseX = scaledMouseX(mouseX);
 		int scaledMouseY = scaledMouseY(mouseY);
 
-		this.renderMenuBackground(g);
 		pushReferencePose(g);
-		layout.drawBackground(g);
+		layout.drawBackground(g, 0x66000000);
 		layout.drawPanel(g);
 		super.render(g, scaledMouseX, scaledMouseY, delta);
 

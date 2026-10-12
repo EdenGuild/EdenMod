@@ -79,7 +79,11 @@ final class EdenPanelLayout {
 	}
 
 	void drawBackground(GuiGraphics g) {
-		g.fill(0, 0, screenWidth, screenHeight, 0xC0000000);
+		drawBackground(g, 0xC0000000);
+	}
+
+	void drawBackground(GuiGraphics g, int color) {
+		g.fill(0, 0, screenWidth, screenHeight, color);
 	}
 
 	void drawPanel(GuiGraphics g) {
