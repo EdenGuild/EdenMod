@@ -537,10 +537,6 @@ public final class TccLabyrinthTracker {
 		if (wynntilsMembers != null) {
 			members.addAll(wynntilsMembers);
 		}
-		java.util.List<String> tracked = tel.eden.mod.party.PartyHealthTracker.getTrackedPartyNames();
-		if (tracked != null) {
-			members.addAll(tracked);
-		}
 		Minecraft mc = Minecraft.getInstance();
 		if (mc != null && mc.player != null) {
 			String myName = mc.player.getScoreboardName();
