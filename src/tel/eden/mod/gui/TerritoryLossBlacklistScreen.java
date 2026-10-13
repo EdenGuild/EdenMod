@@ -6,8 +6,11 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import org.lwjgl.glfw.GLFW;
 import tel.eden.mod.config.BridgeConfig;
 
 /**
@@ -204,7 +207,48 @@ public final class TerritoryLossBlacklistScreen extends EdenReferenceScreen {
 			updateScrollFromMouse(scaled.y());
 			return true;
 		}
+		if (scaled.button() == 0 && addBox != null) {
+			if (addBox.isMouseOver(scaled.x(), scaled.y())) {
+				this.setFocused(addBox);
+				addBox.setFocused(true);
+			} else {
+				addBox.setFocused(false);
+			}
+		}
 		return super.mouseClicked(scaled, doubleClick);
+	}
+
+	@Override
+	public boolean keyPressed(KeyEvent event) {
+		if (addBox != null && addBox.isFocused()) {
+			if (event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER) {
+				onAdd();
+				return true;
+			}
+			if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
+				addBox.setFocused(false);
+				this.setFocused(null);
+				return true;
+			}
+			if (addBox.keyPressed(event)) {
+				return true;
+			}
+		}
+		if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
+			this.onClose();
+			return true;
+		}
+		return super.keyPressed(event);
+	}
+
+	@Override
+	public boolean charTyped(CharacterEvent event) {
+		if (addBox != null && addBox.isFocused()) {
+			if (addBox.charTyped(event)) {
+				return true;
+			}
+		}
+		return super.charTyped(event);
 	}
 
 	@Override
