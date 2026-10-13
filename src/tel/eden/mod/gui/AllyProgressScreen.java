@@ -10,7 +10,7 @@ import net.minecraft.network.chat.Component;
  * BackgroundContainerSession — blocks gameplay input and keeps progress visible
  * (matching /eden dump and /eden gift).
  */
-public final class AllyProgressScreen extends EdenReferenceScreen {
+public final class AllyProgressScreen extends EdenReferenceScreen implements BackgroundProgressScreen {
 	private static final int BASE_PANEL_WIDTH = 320;
 	private static final int BASE_PANEL_HEIGHT = 110;
 
@@ -71,13 +71,22 @@ public final class AllyProgressScreen extends EdenReferenceScreen {
 	}
 
 	@Override
+	protected void renderMenuBackground(GuiGraphics g) {
+		// Suppressed so the in-game world remains visible through lessened blur during background container automation.
+	}
+
+	@Override
+	protected void renderMenuBackground(GuiGraphics g, int x, int y, int width, int height) {
+		// Suppressed so the in-game world remains visible through lessened blur during background container automation.
+	}
+
+	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
 		int scaledMouseX = scaledMouseX(mouseX);
 		int scaledMouseY = scaledMouseY(mouseY);
 
-		this.renderMenuBackground(g);
 		pushReferencePose(g);
-		layout.drawBackground(g);
+		layout.drawBackground(g, 0x66000000);
 		layout.drawPanel(g);
 		super.render(g, scaledMouseX, scaledMouseY, delta);
 

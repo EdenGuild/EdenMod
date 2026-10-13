@@ -575,6 +575,22 @@ public final class BridgeWebSocketClient {
 	}
 
 	/**
+	 * Report a detected territory defense victory against an enemy guild.
+	 */
+	public boolean sendTerritoryDefended(String territory, String attacker) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "territoryDefended");
+		obj.addProperty("territory", territory);
+		obj.addProperty("attacker", attacker);
+		enqueueSend(current, obj.toString());
+		return true;
+	}
+
+	/**
 	 * Report a territory's defence rating scraped from the {@code /guild attack} menu.
 	 * The backend caches it and broadcasts it to every member's attack-timer HUD, so a
 	 * member who never opened the menu still sees the freshest defence intel.

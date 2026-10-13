@@ -31,6 +31,8 @@ import tel.eden.mod.party.PartyHealthTracker;
 import tel.eden.mod.chat.RankChange;
 import tel.eden.mod.chat.RankChangeParser;
 import tel.eden.mod.chat.ShoutParser;
+import tel.eden.mod.chat.TerritoryDefendedEvent;
+import tel.eden.mod.chat.TerritoryDefendedTracker;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.guild.GuildAllyManager;
 import tel.eden.mod.guild.GuildLogSync;
@@ -138,6 +140,8 @@ public final class EdenModClient implements ClientModInitializer {
 	private final ChatRelay shoutRelay = new ChatRelay();
 	private final ChatRelay annihilationRelay = new ChatRelay();
 	private final ChatRelay itemCardRelay = new ChatRelay();
+	private final TerritoryDefendedTracker territoryDefendedTracker = new TerritoryDefendedTracker();
+	private final ChatRelay territoryDefendedRelay = new ChatRelay();
 	// Single-shot suppression of the shout-composition preview, armed by the compose prompt.
 	private long shoutPreviewSuppressUntil;
 	// Decoding (Wynntils reflection) + image rendering run off the game thread.
@@ -2311,6 +2315,7 @@ public final class EdenModClient implements ClientModInitializer {
 		PartyHealthTracker.reset();
 		ChatReplyManager.reset();
 		guildAllyManager.requestCancel();
+		territoryDefendedTracker.clear();
 		// Before the socket goes: an outstanding deduct must not outlive the session that
 		// made it, or it resurfaces at the next connect naming a player from another
 		// server — or, after an account switch, another guild.
@@ -2386,6 +2391,7 @@ public final class EdenModClient implements ClientModInitializer {
 			// leave a packet-only character-selection container behind, and GuildLogSync
 			// needs a new bounded startup-recovery window for it.
 			guildLogSync.onWorldJoin();
+			territoryDefendedTracker.clear();
 			setInGameWorld(true);
 		}
 		BridgeWebSocketClient current = socket;
@@ -2445,6 +2451,16 @@ public final class EdenModClient implements ClientModInitializer {
 			int seconds = anni.getAsInt();
 			if (annihilationRelay.shouldSend(new CapturedMessage("annihilation", null, String.valueOf(seconds)))) {
 				current.sendAnnihilation(seconds);
+			}
+			return;
+		}
+		// Territory defense victory against an enemy attacking guild.
+		Optional<TerritoryDefendedEvent> defended = territoryDefendedTracker.onChat(message);
+		if (defended.isPresent()) {
+			TerritoryDefendedEvent ev = defended.get();
+			if (territoryDefendedRelay.shouldSend(new CapturedMessage(ev.attacker(), null, ev.territory()))) {
+				current.sendTerritoryDefended(ev.territory(), ev.attacker());
+				LOGGER.info("Territory defended: {} against {}", ev.territory(), ev.attacker());
 			}
 			return;
 		}
