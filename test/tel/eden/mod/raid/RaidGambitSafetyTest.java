@@ -141,7 +141,7 @@ class RaidGambitSafetyTest {
 	}
 
 	@Test
-	void guildRaidSafetyBlocksWhenNotGuildRaid() {
+	void guildRaidSafetyBlocksWhenNotGuildRaidWithoutShiftBypass() {
 		config.requireGuildRaid = true;
 		config.raidGambitSafety = false;
 
@@ -149,9 +149,12 @@ class RaidGambitSafetyTest {
 		boolean blocked = RaidGambitSafety.evaluateSafetyBlock(33, true, false, 0, false, ClickType.PICKUP, false, config);
 		assertTrue(blocked, "Normal click must be blocked when requireGuildRaid is true and raid is not a guild raid");
 
-		// Shift click -> allowed
-		boolean shiftAllowed = RaidGambitSafety.evaluateSafetyBlock(33, true, false, 0, false, ClickType.QUICK_MOVE, false, config);
-		assertFalse(shiftAllowed, "Shift-click must be allowed even when raid is not a guild raid");
+		// Shift click -> STILL BLOCKED (no shift bypass for guild raid safety)
+		boolean quickMoveBlocked = RaidGambitSafety.evaluateSafetyBlock(33, true, false, 0, false, ClickType.QUICK_MOVE, false, config);
+		assertTrue(quickMoveBlocked, "QUICK_MOVE must be blocked when requireGuildRaid is true and raid is not a guild raid");
+
+		boolean shiftHeldBlocked = RaidGambitSafety.evaluateSafetyBlock(33, true, false, 0, false, ClickType.PICKUP, true, config);
+		assertTrue(shiftHeldBlocked, "Click with shift held must be blocked when requireGuildRaid is true and raid is not a guild raid");
 
 		// Is a guild raid -> allowed
 		boolean graidAllowed = RaidGambitSafety.evaluateSafetyBlock(33, true, false, 0, true, ClickType.PICKUP, false, config);
@@ -169,8 +172,20 @@ class RaidGambitSafetyTest {
 	}
 
 	@Test
+	void detectsAllGuildMembersOptedInFromLore() {
+		List<String> allOptedIn = List.of("§7All members of this party", "§7✔ altaqska has opted in", "§7✔ agency agency has opted in", "§7✔ blob has opted in", "§8All players must opt in");
+		assertTrue(RaidGambitSafety.isAllGuildMembersOptedIn(allOptedIn), "Must be true when all players opted in");
+
+		List<String> hasOptedOut = List.of("§7All members of this party", "§7✔ altaqska has opted in", "§7✖ Liu Ruyan has opted out", "§7✔ agency agency has opted in", "§7✔ blob has opted in", "§8All players must opt in");
+		assertFalse(RaidGambitSafety.isAllGuildMembersOptedIn(hasOptedOut), "Must be false when a player has ✖ / opted out");
+
+		assertFalse(RaidGambitSafety.isAllGuildMembersOptedIn(List.of()));
+		assertFalse(RaidGambitSafety.isAllGuildMembersOptedIn(null));
+	}
+
+	@Test
 	void generatesGuildRaidWarningMessage() {
-		assertEquals("This raid is not a Guild Raid, Shift-Click to ready up anyways.", RaidGambitSafety.getGuildRaidWarningMessage());
-		assertEquals("§cThis raid is not a Guild Raid, Shift-Click to ready up anyways.", RaidGambitSafety.getGuildRaidTooltipWarning().getString());
+		assertEquals("This raid is not a Guild Raid, disable Require guild raid to ready in settings to ready up anyways.", RaidGambitSafety.getGuildRaidWarningMessage());
+		assertEquals("§cThis raid is not a Guild Raid, disable Require guild raid to ready in settings to ready up anyways.", RaidGambitSafety.getGuildRaidTooltipWarning().getString());
 	}
 }

@@ -165,7 +165,7 @@ public final class RaidGambitSafety {
 		return false;
 	}
 
-	/** Checks if the raid preparation menu has a guild raid available. */
+	/** Checks if the raid preparation menu has a guild raid available and all players are opted in. */
 	public static boolean isGuildRaidAvailable(AbstractContainerMenu menu) {
 		if (menu == null) {
 			return false;
@@ -175,11 +175,28 @@ public final class RaidGambitSafety {
 			if (!stack.isEmpty()) {
 				String name = ChatFormatting.stripFormatting(stack.getHoverName().getString()).trim();
 				if (name.equalsIgnoreCase("Guild Raid Available") || name.contains("Guild Raid Available")) {
-					return true;
+					return isAllGuildMembersOptedIn(getLoreLines(stack));
 				}
 			}
 		}
 		return false;
+	}
+
+	/** Checks whether all players have opted in to the guild raid (no ✖ / opted out indicators). */
+	public static boolean isAllGuildMembersOptedIn(List<String> loreLines) {
+		if (loreLines == null || loreLines.isEmpty()) {
+			return false;
+		}
+		for (String line : loreLines) {
+			if (line == null) {
+				continue;
+			}
+			String stripped = ChatFormatting.stripFormatting(line).trim();
+			if (stripped.contains("✖") || stripped.contains("\u2716") || stripped.toLowerCase(Locale.ROOT).contains("opted out")) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/** Evaluates whether a ready click should be blocked based on active gambits and settings. */
@@ -201,12 +218,12 @@ public final class RaidGambitSafety {
 		if (isAlreadyReadied) {
 			return false;
 		}
+		if (config.requireGuildRaid && !isGuildRaid) {
+			return true;
+		}
 		boolean isShift = (clickType == ClickType.QUICK_MOVE || shiftHeld);
 		if (isShift) {
 			return false;
-		}
-		if (config.requireGuildRaid && !isGuildRaid) {
-			return true;
 		}
 		if (config.raidGambitSafety && config.raidGambitMinimum > 0 && enabledGambits < config.raidGambitMinimum) {
 			return true;
@@ -250,7 +267,7 @@ public final class RaidGambitSafety {
 
 	/** Generates the user-facing warning message for non-guild raid readying. */
 	public static String getGuildRaidWarningMessage() {
-		return "This raid is not a Guild Raid, Shift-Click to ready up anyways.";
+		return "This raid is not a Guild Raid, disable Require guild raid to ready in settings to ready up anyways.";
 	}
 
 	/** Generates the colored tooltip warning component for non-guild raid readying. */
