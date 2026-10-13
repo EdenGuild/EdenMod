@@ -518,6 +518,7 @@ public final class EdenModClient implements ClientModInitializer {
 	public void onWorldRespawn() {
 		enteredWynnGameWorld = true;
 		guildLogSync.onWorldJoin();
+		tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 	}
 
 	/** Packet hooks for the invisible guild-log query (mirrors Wynntils' query path). */
@@ -633,12 +634,14 @@ public final class EdenModClient implements ClientModInitializer {
 		TerritoryMenuKeybind.register(edenCategory);
 		TerritoryOutlineRenderer.register(edenCategory);
 		tel.eden.mod.emote.EmoteWheel.register(edenCategory);
+		tel.eden.mod.raid.tcc.TccLabyrinthTracker.registerKeybind(edenCategory);
 		WarTracker.setReporter(this::relayWarAttended);
 
 		// War-suite 2D HUD overlays, drawn only while on Wynncraft.
 		HudRenderCallback.EVENT.register((graphics, tickCounter) -> {
 			if (onWynncraft) {
 				WarHud.render(config, graphics);
+				tel.eden.mod.raid.tcc.TccLabyrinthMapHud.render(config, graphics);
 			}
 		});
 		// War-suite territory outlines, added to the per-frame gizmo collector during
@@ -662,6 +665,7 @@ public final class EdenModClient implements ClientModInitializer {
 			AllianceMenuScraper.reset();
 			GuildMenuScraper.reset();
 			AttackTimerMenu.reset();
+			tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
 			guildAllyManager.requestCancel();
 			// Connect if applicable; the backend reports link/membership standing via
@@ -709,7 +713,12 @@ public final class EdenModClient implements ClientModInitializer {
 			}))).then(ClientCommandManager.literal("congratulate").then(ClientCommandManager.argument("name", StringArgumentType.word()).executes(ctx -> {
 				congratulate(ctx.getSource(), StringArgumentType.getString(ctx, "name"));
 				return 1;
-			}))).then(ClientCommandManager.literal("debug").executes(ctx -> {
+			}))).then(ClientCommandManager.literal("tcctest").executes(ctx -> {
+				boolean next = !tel.eden.mod.raid.tcc.TccLabyrinthTracker.isDebugForceShow();
+				tel.eden.mod.raid.tcc.TccLabyrinthTracker.setDebugForceShow(next);
+				ctx.getSource().sendFeedback(Component.literal("TCC Labyrinth minimap test force-show: " + (next ? "ON" : "OFF")).withStyle(ChatFormatting.AQUA));
+				return 1;
+			})).then(ClientCommandManager.literal("debug").executes(ctx -> {
 				for (String line : AttackTimerMenu.debugSidebarLines()) {
 					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.AQUA));
 				}
@@ -760,6 +769,7 @@ public final class EdenModClient implements ClientModInitializer {
 			tel.eden.mod.war.radiance.RadianceTracker.onClientTick(config, client);
 			RaidPartyTracker.onTick();
 			RaidReadyTracker.onClientTick();
+			tel.eden.mod.raid.tcc.TccLabyrinthTracker.tick(config, socket);
 			PartyHealthTracker.tick();
 			AttackMenuScraper.onTick(client);
 			AllianceMenuScraper.onTick(client);
@@ -1085,6 +1095,36 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
+				public void onTccMapPos(String sender, String senderUuid, double x, double y, double z, float yaw, boolean isWings) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						if (mc.player != null) {
+							String myUuid = mc.player.getUUID().toString().replace("-", "");
+							String cleanSenderUuid = senderUuid != null ? senderUuid.replace("-", "").trim() : "";
+							if (!cleanSenderUuid.isEmpty() && cleanSenderUuid.equalsIgnoreCase(myUuid)) {
+								return;
+							}
+						}
+						tel.eden.mod.raid.tcc.TccLabyrinthTracker.onPeerPosition(sender, senderUuid, x, y, z, yaw, isWings);
+					});
+				}
+
+				@Override
+				public void onTccGolemDefeated(String sender, String golemId) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> tel.eden.mod.raid.tcc.TccLabyrinthTracker.onPeerGolemDefeated(golemId));
+				}
+
+				@Override
+				public void onTccExitReached(String sender, String path, double x, double z) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						if (mc.player != null && sender != null && sender.equalsIgnoreCase(mc.player.getScoreboardName())) {
+							return;
+						}
+						tel.eden.mod.raid.tcc.TccLabyrinthTracker.onPeerExitReached(sender, path, x, z, config);
+					});
+				}
 				public void onConnectionRejected(String code) {
 					pendingConnectionCode = code;
 					Minecraft.getInstance().execute(() -> socket = null);
@@ -2369,7 +2409,8 @@ public final class EdenModClient implements ClientModInitializer {
 		RaidPartyTracker.reset();
 		RaidReadyTracker.reset();
 		PartyHealthTracker.reset();
-		ChatReplyManager.reset();
+		tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
+		tel.eden.mod.util.PlayerSkinResolver.reset();
 		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();
 		guildAllyManager.requestCancel();
 		territoryDefendedTracker.clear();

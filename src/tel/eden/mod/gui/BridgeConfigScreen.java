@@ -148,6 +148,8 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow(Category.PARTY_RAIDS, "Raid gambit ready safety", () -> config.raidGambitSafety, v -> config.raidGambitSafety = v, "On", "Off", true);
 		IntConfigSlider gambitSlider = new IntConfigSlider(CONTROL_W, 20, 0, 3, 1, () -> config.raidGambitMinimum, v -> config.raidGambitMinimum = v, v -> Component.literal(v == 0 ? "Off (0)" : String.valueOf(v)));
 		addSliderRow(Category.PARTY_RAIDS, "Minimum raid gambits", gambitSlider, gambitSlider::syncFromConfig, () -> config.raidGambitMinimum = 1);
+		addToggleRow(Category.PARTY_RAIDS, "TCC Labyrinth minimap (Map credits: kimchaewon)", () -> config.tccLabyrinthMap, v -> config.tccLabyrinthMap = v, "On", "Off", true);
+		addToggleRow(Category.PARTY_RAIDS, "TCC exit discovery ping", () -> config.tccExitPing, v -> config.tccExitPing = v, "On", "Off", true);
 
 		// War & Territory
 		addToggleRow(Category.WAR, "Attack timers HUD", () -> config.warAttackTimers, v -> config.warAttackTimers = v, "On", "Off", true);
