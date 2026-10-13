@@ -6,6 +6,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import tel.eden.mod.config.BridgeConfig;
 
@@ -23,6 +24,8 @@ public final class EmoteConfigScreen extends Screen {
 	private final Screen parent;
 	private final BridgeConfig config;
 	private final String[] favorites = new String[EmoteWheel.SLOTS];
+	private final List<CycleButton<String>> slotButtons = new ArrayList<>();
+	private final List<String> options = new ArrayList<>();
 
 	public EmoteConfigScreen(Screen parent, BridgeConfig config) {
 		super(Component.literal("Emote Wheel Favorites"));
@@ -39,7 +42,8 @@ public final class EmoteConfigScreen extends Screen {
 
 		// Options: empty, every unlocked emote, plus any saved favorite not (yet) in the
 		// unlocked list so an existing choice is never dropped.
-		List<String> options = new ArrayList<>();
+		slotButtons.clear();
+		options.clear();
 		options.add("");
 		for (String emote : config.emoteUnlocked) {
 			if (!options.contains(emote)) {
@@ -66,10 +70,42 @@ public final class EmoteConfigScreen extends Screen {
 			int x = startX + col * (BUTTON_W + GAP_X);
 			int y = startY + row * (BUTTON_H + GAP_Y);
 			CycleButton<String> button = CycleButton.<String>builder(value -> Component.literal(value.isEmpty() ? "(none)" : value), favorites[index]).withValues(options).create(x, y, BUTTON_W, BUTTON_H, Component.literal("Slot " + (index + 1)), (widget, value) -> favorites[index] = value);
+			slotButtons.add(button);
 			this.addRenderableWidget(button);
 		}
 
 		this.addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose()).bounds(this.width / 2 - 75, this.height - 28, 150, 20).build());
+	}
+
+	@Override
+	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (event.button() == 1) { // Right-click steps backwards through options
+			for (int i = 0; i < slotButtons.size(); i++) {
+				CycleButton<String> button = slotButtons.get(i);
+				if (button.isMouseOver(event.x(), event.y())) {
+					cycleSlotBackward(i, button);
+					return true;
+				}
+			}
+		}
+		return super.mouseClicked(event, doubleClick);
+	}
+
+	private void cycleSlotBackward(int index, CycleButton<String> button) {
+		String prev = previousOption(options, button.getValue());
+		favorites[index] = prev;
+		button.setValue(prev);
+		if (this.minecraft != null) {
+			button.playDownSound(this.minecraft.getSoundManager());
+		}
+	}
+
+	static String previousOption(List<String> options, String current) {
+		if (options == null || options.isEmpty()) {
+			return "";
+		}
+		int idx = options.indexOf(current);
+		return options.get(idx <= 0 ? options.size() - 1 : idx - 1);
 	}
 
 	@Override

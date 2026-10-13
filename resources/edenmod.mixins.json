@@ -4,6 +4,7 @@
   "package": "tel.eden.mod.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "AbstractContainerScreenMixin",
     "AvatarRendererMixin",
     "AvatarRenderStateMixin",
     "BabyPlayerEmoteDisplayMixin",
@@ -25,6 +26,7 @@
     "ItemDecorationMixin",
     "ItemRenderMixin",
     "LivingEntityRendererMixin",
+    "OptionsMixin",
     "TitleScreenMixin"
   ],
   "injectors": {
