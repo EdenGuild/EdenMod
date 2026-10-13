@@ -46,6 +46,7 @@ public final class BackgroundContainerSession {
 	private volatile int stateId;
 	private volatile boolean open;
 	private volatile boolean aborted;
+	private volatile boolean serverClosed;
 	private volatile List<ItemStack> items = List.of();
 	private volatile long lastContentAt;
 	private volatile long snapshotRevision;
@@ -68,31 +69,38 @@ public final class BackgroundContainerSession {
 	/** Claim the next matching server menu. Returns false if a real foreign menu is open. */
 	public boolean begin(String owner, Predicate<String> expectedTitle, int menuSlotCount) {
 		Minecraft mc = Minecraft.getInstance();
-		if (owner == null || owner.isBlank() || expectedTitle == null || menuSlotCount <= 0 || mc.player == null || mc.getConnection() == null || open || !this.owner.isEmpty()) {
-			return false;
-		}
-		if (System.currentTimeMillis() - joinedAt < WORLD_COMMAND_GRACE_MS) {
+		if (owner == null || owner.isBlank() || expectedTitle == null || menuSlotCount <= 0 || mc.player == null || mc.getConnection() == null) {
 			return false;
 		}
 		if (mc.screen instanceof AbstractContainerScreen<?>) {
 			return false;
 		}
-		if (observedServerContainerId > 0) {
-			long elapsed = System.currentTimeMillis() - joinedAt;
-			boolean localInventoryOnly = mc.player.containerMenu == mc.player.inventoryMenu && !(mc.screen instanceof AbstractContainerScreen<?>);
-			if (elapsed >= STARTUP_ORPHAN_GRACE_MS && elapsed <= STARTUP_ORPHAN_WINDOW_MS && localInventoryOnly) {
-				LOGGER.warn("Background container: closing startup orphan {} ('{}') after {}ms", observedServerContainerId, observedServerTitle, elapsed);
-				mc.getConnection().send(new ServerboundContainerClosePacket(observedServerContainerId));
-				observedServerContainerId = -1;
-				observedServerTitle = "";
+		if (open || !this.owner.isEmpty()) {
+			if ("guild_log".equals(this.owner) && !"guild_log".equals(owner)) {
+				LOGGER.info("Background container: {} preempting background guild_log", owner);
+				close();
 			} else {
 				return false;
 			}
+		}
+		if (System.currentTimeMillis() - joinedAt < WORLD_COMMAND_GRACE_MS) {
+			return false;
+		}
+		if (mc.player.containerMenu != mc.player.inventoryMenu) {
+			LOGGER.info("Background container: closing orphan containerMenu {} ('{}')", mc.player.containerMenu.containerId, observedServerTitle);
+			mc.player.closeContainer();
+		}
+		if (observedServerContainerId > 0) {
+			LOGGER.info("Background container: closing lingering container {} ('{}')", observedServerContainerId, observedServerTitle);
+			mc.getConnection().send(new ServerboundContainerClosePacket(observedServerContainerId));
+			observedServerContainerId = -1;
+			observedServerTitle = "";
 		}
 		this.owner = owner;
 		this.expectedTitle = expectedTitle;
 		this.menuSlotCount = menuSlotCount;
 		this.aborted = false;
+		this.serverClosed = false;
 		return true;
 	}
 
@@ -153,6 +161,14 @@ public final class BackgroundContainerSession {
 
 	public boolean isAborted() {
 		return aborted;
+	}
+
+	public boolean isClosed() {
+		return serverClosed || aborted || !open;
+	}
+
+	public boolean isServerClosed() {
+		return serverClosed;
 	}
 
 	public boolean inStartupRecoveryWindow() {
@@ -277,6 +293,7 @@ public final class BackgroundContainerSession {
 		}
 		if (closedId == containerId) {
 			aborted = true;
+			serverClosed = true;
 		}
 	}
 
@@ -288,6 +305,7 @@ public final class BackgroundContainerSession {
 		stateId = 0;
 		open = false;
 		aborted = false;
+		serverClosed = false;
 		items = List.of();
 		lastContentAt = 0L;
 		snapshotRevision = 0L;

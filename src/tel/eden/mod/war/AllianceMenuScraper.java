@@ -13,6 +13,8 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import tel.eden.mod.EdenLogger;
 import tel.eden.mod.EdenModClient;
+import tel.eden.mod.chat.ChatText;
+import tel.eden.mod.guild.AllyTagCache;
 import tel.eden.mod.net.BridgeWebSocketClient;
 
 /**
@@ -79,7 +81,7 @@ public final class AllianceMenuScraper {
 		}
 		// Strategists can edit the alliance menu themselves, so let them keep it synced
 		// too, not just Chiefs/Owners — see GuildRewards.isChiefOwnerOrStrategist's doc.
-		if (!EdenModClient.instance().guildRewards().isChiefOwnerOrStrategist()) {
+		if (!EdenModClient.instance().isChiefOwnerOrStrategist()) {
 			return;
 		}
 		AbstractContainerMenu menu = screen.getMenu();
@@ -215,7 +217,7 @@ public final class AllianceMenuScraper {
 			if (stack.isEmpty()) {
 				continue;
 			}
-			String displayed = stripCodes(stack.getHoverName().getString()).trim();
+			String displayed = ChatText.normalize(stripCodes(stack.getHoverName().getString())).strip();
 			Matcher matcher = ALLY_ITEM.matcher(displayed);
 			if (!matcher.matches()) {
 				LOGGER.warn("Diplomacy slot {} holds {} named \"{}\", which is not an ally entry", slot, stack.getItem(), displayed);
@@ -227,7 +229,9 @@ public final class AllianceMenuScraper {
 				LOGGER.warn("Diplomacy slot {} yielded an implausible guild name: \"{}\"", slot, name);
 				return null;
 			}
-			unique.putIfAbsent(name.toLowerCase(Locale.ROOT), new Ally(name, matcher.group(2).trim()));
+			String tag = matcher.group(2).trim();
+			unique.putIfAbsent(name.toLowerCase(Locale.ROOT), new Ally(name, tag));
+			AllyTagCache.remember(name, tag);
 			if (unique.size() > MAX_ALLIES) {
 				return null;
 			}

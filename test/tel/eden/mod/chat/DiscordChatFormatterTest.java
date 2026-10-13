@@ -53,4 +53,37 @@ class DiscordChatFormatterTest {
 		// The literal ":shortcode:" text is replaced by a glyph, not left as-is.
 		assertNotEquals("hi :" + shortcode + ": there", result.getString());
 	}
+
+	@Test
+	void allyActivityFormatsTagWhenPresentAndRemembersInCache() {
+		tel.eden.mod.guild.AllyTagCache.clear();
+		var entries = List.of(new tel.eden.mod.net.AllyActivityEntry("Blood Orchid", "Wilt", 15.0, "Nexus"));
+		Component component = DiscordChatFormatter.allyActivity(entries, false);
+		String text = component.getString();
+
+		org.junit.jupiter.api.Assertions.assertTrue(text.contains("Blood Orchid [Wilt] — 15m ago"));
+		assertEquals("Wilt", tel.eden.mod.guild.AllyTagCache.getTag("Blood Orchid"));
+	}
+
+	@Test
+	void allyActivityFallsBackToCachedTagWhenMissingFromEntry() {
+		tel.eden.mod.guild.AllyTagCache.clear();
+		tel.eden.mod.guild.AllyTagCache.remember("Fallen Angels", "FA");
+
+		var entries = List.of(new tel.eden.mod.net.AllyActivityEntry("Fallen Angels", null, 5.0, null));
+		Component component = DiscordChatFormatter.allyActivity(entries, false);
+		String text = component.getString();
+
+		org.junit.jupiter.api.Assertions.assertTrue(text.contains("Fallen Angels [FA] — 5m ago"));
+	}
+
+	@Test
+	void allyActivityFormatsCleanlyWhenTagUnknown() {
+		tel.eden.mod.guild.AllyTagCache.clear();
+		var entries = List.of(new tel.eden.mod.net.AllyActivityEntry("Unknown Guild", null, 10.0, null));
+		Component component = DiscordChatFormatter.allyActivity(entries, false);
+		String text = component.getString();
+
+		org.junit.jupiter.api.Assertions.assertTrue(text.contains("Unknown Guild — 10m ago"));
+	}
 }

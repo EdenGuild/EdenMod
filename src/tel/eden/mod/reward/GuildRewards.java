@@ -517,6 +517,11 @@ public final class GuildRewards {
 		return isChief() || rank.equalsIgnoreCase("strategist");
 	}
 
+	/** Whether this player's guild rank is known from the API. */
+	public boolean hasKnownRank() {
+		return rank != null && !rank.isBlank();
+	}
+
 	/** Current known member usernames (for command tab-completion). */
 	public List<String> memberNames() {
 		return new ArrayList<>(members.keySet());
