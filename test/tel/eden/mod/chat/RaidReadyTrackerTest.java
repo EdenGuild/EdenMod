@@ -144,4 +144,44 @@ class RaidReadyTrackerTest {
 		assertEquals("2 minutes 15 seconds", RaidReadyTracker.formatWaitDuration(135));
 		assertEquals("1 second", RaidReadyTracker.formatWaitDuration(1));
 	}
+
+	@Test
+	void handlesExactUserBugReportSequence() {
+		// Lumeniia starts with Wynncraft unicode glyphs
+		RaidReadyTracker.onSystemChat(Component.literal("\uD83F\uDFFC\uE005\uD83F\uDFFF\uE002\uD83F\uDFFE Lumeniia would like to start The Canyon Colossus!"));
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("lumeniia"));
+
+		// SharZz readies with glyphs
+		RaidReadyTracker.onSystemChat(Component.literal("\uD83F\uDFFC\uE001\uD834\uDC06 SharZz is ready!"));
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("sharzz"));
+
+		// Werveh readies later
+		RaidReadyTracker.onSystemChat(Component.literal("\uD83F\uDFFC\uE005\uD83F\uDFFF\uE002\uD83F\uDFFE Werveh is ready!"));
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("werveh"));
+
+		// All 3 players are retained in ready list
+		assertEquals(3, RaidReadyTracker.readyPlayersForTesting().size());
+
+		// Lumeniia unreadies -> removed from readyPlayers
+		RaidReadyTracker.onSystemChat(Component.literal("Lumeniia is no longer ready!"));
+		assertFalse(RaidReadyTracker.readyPlayersForTesting().contains("lumeniia"));
+		assertEquals(2, RaidReadyTracker.readyPlayersForTesting().size());
+	}
+
+	@Test
+	void handlesEveryoneUnreadyingAndNewQueueStart() {
+		RaidReadyTracker.onSystemChat(Component.literal("Alice would like to start The Canyon Colossus!"));
+		RaidReadyTracker.onSystemChat(Component.literal("Bob is ready!"));
+		assertEquals(2, RaidReadyTracker.readyPlayersForTesting().size());
+
+		// Everyone unreadies
+		RaidReadyTracker.onSystemChat(Component.literal("Alice is no longer ready!"));
+		RaidReadyTracker.onSystemChat(Component.literal("Bob is no longer ready!"));
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().isEmpty());
+
+		// Someone starts again
+		RaidReadyTracker.onSystemChat(Component.literal("Charlie would like to start The Canyon Colossus!"));
+		assertEquals(1, RaidReadyTracker.readyPlayersForTesting().size());
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("charlie"));
+	}
 }

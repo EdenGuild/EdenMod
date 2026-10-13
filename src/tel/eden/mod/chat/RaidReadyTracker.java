@@ -30,9 +30,14 @@ import tel.eden.mod.war.ScoreboardCapture;
  * have been waiting for the player for 1 minute.
  */
 public final class RaidReadyTracker {
-	private static final Pattern READY_PATTERN = Pattern.compile("^(?:[\\u27A4\\u25C6\\u25B6\\u00BB\\u2192>\\[!\\]\\s*]+)?([a-zA-Z0-9_/ ()-]+?)\\s+is ready!\\s*$", Pattern.CASE_INSENSITIVE);
-	private static final Pattern UNREADY_PATTERN = Pattern.compile("^(?:[\\u27A4\\u25C6\\u25B6\\u00BB\\u2192>\\[!\\]\\s*]+)?([a-zA-Z0-9_/ ()-]+?)\\s+is no longer ready!\\s*$", Pattern.CASE_INSENSITIVE);
-	private static final Pattern RAID_START_PATTERN = Pattern.compile("^(?:[\\u27A4\\u25C6\\u25B6\\u00BB\\u2192>\\[!\\]\\s*]+)?([a-zA-Z0-9_/ ()-]+?)\\s+would like to start\\s+(.+?)!", Pattern.CASE_INSENSITIVE);
+	private static final Pattern READY_PATTERN = Pattern.compile("([a-zA-Z0-9_/ ()-]+?)\\s+is ready!\\s*$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern UNREADY_PATTERN = Pattern.compile("([a-zA-Z0-9_/ ()-]+?)\\s+is no longer ready!\\s*$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern RAID_START_PATTERN = Pattern.compile("([a-zA-Z0-9_/ ()-]+?)\\s+would like to start\\s+(.+?)!", Pattern.CASE_INSENSITIVE);
+
+	// How long to wait without pawns before timing out an unstarted queue (3 minutes).
+	private static final long RAID_QUEUE_TIMEOUT_MS = 180_000L;
+	// Settle debounce: how long pawns must stay gone before treating the check as ended (10 seconds).
+	private static final long PAWNS_GONE_TIMEOUT_MS = 10_000L;
 
 	private static final Set<String> readyPlayers = new HashSet<>();
 	private static long waitingSince = 0L;
@@ -41,6 +46,8 @@ public final class RaidReadyTracker {
 	private static PawnStatus lastPawnStatus = null;
 	private static String lastRaidStartText = "";
 	private static long lastRaidStartTime = 0L;
+	private static boolean selfStartedRaid = false;
+	private static long pawnsMissingSince = 0L;
 
 	public record PawnStatus(int ready, int unready, int empty, List<String> details, String rawLine) {
 		public int partySize() {
@@ -76,6 +83,10 @@ public final class RaidReadyTracker {
 				String realName = extractRealName(message, rawName);
 				if (realName != null) {
 					handlePlayerReady(realName);
+					String self = localPlayerName();
+					if (self != null && self.equalsIgnoreCase(realName)) {
+						selfStartedRaid = true;
+					}
 				}
 			}
 			return;
@@ -87,12 +98,24 @@ public final class RaidReadyTracker {
 				lastRaidStartTime = now;
 				lastRaidStartText = text;
 				reset();
+				int idx = text.toLowerCase(Locale.ROOT).indexOf("would like to start");
+				if (idx > 0) {
+					String rawName = text.substring(0, idx).trim();
+					String realName = extractRealName(message, rawName);
+					if (realName != null) {
+						handlePlayerReady(realName);
+						String self = localPlayerName();
+						if (self != null && self.equalsIgnoreCase(realName)) {
+							selfStartedRaid = true;
+						}
+					}
+				}
 			}
 			return;
 		}
 
 		Matcher readyMatcher = READY_PATTERN.matcher(text);
-		if (readyMatcher.matches()) {
+		if (readyMatcher.find()) {
 			if (!isRaidPromptActive()) {
 				return;
 			}
@@ -105,10 +128,7 @@ public final class RaidReadyTracker {
 		}
 
 		Matcher unreadyMatcher = UNREADY_PATTERN.matcher(text);
-		if (unreadyMatcher.matches()) {
-			if (!isRaidPromptActive()) {
-				return;
-			}
+		if (unreadyMatcher.find()) {
 			String rawName = unreadyMatcher.group(1).trim();
 			String realName = extractRealName(message, rawName);
 			if (realName != null) {
@@ -148,45 +168,50 @@ public final class RaidReadyTracker {
 
 	private static void handlePlayerUnready(String realName) {
 		readyPlayers.remove(realName.toLowerCase(Locale.ROOT));
+		String self = localPlayerName();
+		if (self != null && self.equalsIgnoreCase(realName)) {
+			selfStartedRaid = false;
+		}
 		checkWaitingState();
 	}
 
 	private static void checkWaitingState() {
 		// Scan live scoreboard pawns for authoritative party readiness
-		lastPawnStatus = scanScoreboardPawns();
-		if (lastPawnStatus == null) {
-			Scoreboard scoreboard = sidebarScoreboard();
-			if (scoreboard != null && System.currentTimeMillis() - lastRaidStartTime > 3000L) {
-				if (!readyPlayers.isEmpty() || waitingSince > 0L) {
+		PawnStatus currentPawns = scanScoreboardPawns();
+		long now = System.currentTimeMillis();
+
+		if (currentPawns == null) {
+			// Pawns are not currently on sidebar
+			if (lastPawnStatus != null) {
+				// Pawns were previously seen: debounce before resetting
+				if (pawnsMissingSince == 0L) {
+					pawnsMissingSince = now;
+				} else if (now - pawnsMissingSince >= PAWNS_GONE_TIMEOUT_MS) {
 					reset();
+					return;
 				}
+			} else if (lastRaidStartTime > 0L && now - lastRaidStartTime >= RAID_QUEUE_TIMEOUT_MS) {
+				// Pawns were never seen and queue timed out
+				reset();
+				return;
 			}
-			return;
+		} else {
+			lastPawnStatus = currentPawns;
+			pawnsMissingSince = 0L;
 		}
 
-		EdenModClient client = EdenModClient.instance();
-		String self = client != null ? client.playerName() : null;
-		if (self == null) {
-			try {
-				Minecraft mc = Minecraft.getInstance();
-				if (mc != null && mc.player != null) {
-					self = mc.player.getGameProfile().name();
-				}
-			} catch (Throwable ignored) {
-			}
-		}
-
+		String self = localPlayerName();
 		if (self == null) {
 			return;
 		}
 
 		String selfLower = self.toLowerCase(Locale.ROOT);
-		boolean selfReady = readyPlayers.contains(selfLower);
-		int chatOthersReady = readyPlayers.size() - (selfReady ? 1 : 0);
+		boolean selfReady = selfStartedRaid || readyPlayers.contains(selfLower);
+		int chatOthersReady = readyPlayers.size() - (readyPlayers.contains(selfLower) ? 1 : 0);
 
 		int scoreboardOthersReady = 0;
-		if (lastPawnStatus.totalPieces() > 0) {
-			int readyPieces = lastPawnStatus.ready();
+		if (currentPawns != null && currentPawns.totalPieces() > 0) {
+			int readyPieces = currentPawns.ready();
 			// If all 4 slots are ready, raid is starting / all ready -> cancel waiting
 			if (readyPieces >= 4) {
 				waitingSince = 0L;
@@ -204,13 +229,28 @@ public final class RaidReadyTracker {
 
 		if (!selfReady && othersReady >= 3) {
 			if (waitingSince == 0L) {
-				waitingSince = System.currentTimeMillis();
+				waitingSince = now;
 				alertSent = false;
 			}
 		} else {
 			waitingSince = 0L;
 			alertSent = false;
 		}
+	}
+
+	private static String localPlayerName() {
+		EdenModClient client = EdenModClient.instance();
+		String self = client != null ? client.playerName() : null;
+		if (self == null) {
+			try {
+				Minecraft mc = Minecraft.getInstance();
+				if (mc != null && mc.player != null) {
+					return mc.player.getGameProfile().name();
+				}
+			} catch (Throwable ignored) {
+			}
+		}
+		return self;
 	}
 
 	public static boolean isPawn(char c) {
@@ -415,6 +455,8 @@ public final class RaidReadyTracker {
 		waitingSince = 0L;
 		alertSent = false;
 		lastPawnStatus = null;
+		selfStartedRaid = false;
+		pawnsMissingSince = 0L;
 	}
 
 	public static boolean isRaidPromptActive() {
@@ -423,7 +465,7 @@ public final class RaidReadyTracker {
 			// In offline test environment without a world, allow testing chat patterns
 			return true;
 		}
-		return scanScoreboardPawns() != null || (System.currentTimeMillis() - lastRaidStartTime <= 3000L);
+		return scanScoreboardPawns() != null || (System.currentTimeMillis() - lastRaidStartTime <= RAID_QUEUE_TIMEOUT_MS);
 	}
 
 	public static List<String> debugState() {
@@ -431,19 +473,10 @@ public final class RaidReadyTracker {
 		lines.add("--- Raid Ready Tracker ---");
 		lines.add("chat ready players: " + (readyPlayers.isEmpty() ? "(none)" : String.join(", ", readyPlayers)));
 
-		EdenModClient client = EdenModClient.instance();
-		String self = client != null ? client.playerName() : null;
-		if (self == null) {
-			try {
-				Minecraft mc = Minecraft.getInstance();
-				if (mc != null && mc.player != null) {
-					self = mc.player.getGameProfile().name();
-				}
-			} catch (Throwable ignored) {
-			}
-		}
-		boolean selfReady = self != null && readyPlayers.contains(self.toLowerCase(Locale.ROOT));
-		lines.add("local player: " + (self != null ? self : "unknown") + " (selfReady=" + selfReady + ")");
+		String self = localPlayerName();
+		String selfLower = self != null ? self.toLowerCase(Locale.ROOT) : "";
+		boolean selfReady = selfStartedRaid || (!selfLower.isEmpty() && readyPlayers.contains(selfLower));
+		lines.add("local player: " + (self != null ? self : "unknown") + " (selfReady=" + selfReady + ", selfStarted=" + selfStartedRaid + ")");
 
 		PawnStatus pawns = scanScoreboardPawns();
 		if (pawns == null) {
@@ -464,6 +497,7 @@ public final class RaidReadyTracker {
 		int othersReady = pawns != null ? Math.max(chatOthersReady, sbOthersReady) : 0;
 		lines.add("effective others ready: " + othersReady + " (chat=" + chatOthersReady + ", scoreboard=" + sbOthersReady + ")");
 
+		EdenModClient client = EdenModClient.instance();
 		BridgeConfig config = client != null ? client.config() : null;
 		int waitSec = (config != null) ? Math.max(5, config.raidReadyReminderSeconds) : 60;
 
@@ -553,5 +587,13 @@ public final class RaidReadyTracker {
 
 	static void setWaitingSinceForTesting(long time) {
 		waitingSince = time;
+	}
+
+	static boolean selfStartedRaidForTesting() {
+		return selfStartedRaid;
+	}
+
+	static void setSelfStartedRaidForTesting(boolean started) {
+		selfStartedRaid = started;
 	}
 }

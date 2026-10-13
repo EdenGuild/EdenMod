@@ -1,14 +1,18 @@
 package tel.eden.mod.chat;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.scores.DisplaySlot;
@@ -16,6 +20,7 @@ import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
+import tel.eden.mod.party.WynntilsPartyBridge;
 import tel.eden.mod.war.ScoreboardCapture;
 
 /**
@@ -63,6 +68,7 @@ public final class RaidPartyTracker {
 	private static final String RAID_HEADER = "Raid:";
 	private static final Pattern IGN = Pattern.compile("^[A-Za-z0-9_]{3,16}$");
 	private static final Pattern COLOR_CODE = Pattern.compile("[§&][0-9a-fk-orA-FK-OR]");
+	private static final Pattern PARTY_MEMBERS_PATTERN = Pattern.compile("^Party members:\\s*(.+)", Pattern.CASE_INSENSITIVE);
 	// A raid instance is compact and the party has to stay together to clear it, so this only
 	// has to reach across a room. Kept near the war radius for the same reason: wide enough to
 	// hold the group, tight enough that a lobby crowd does not all land in the tally.
@@ -100,8 +106,13 @@ public final class RaidPartyTracker {
 	// what calls extraPlayers and reset. Every field below is therefore touched from both,
 	// and is guarded by LOCK — without it the completion can read a stale "no raid is
 	// running", judge the tally stale, and report no allies at all.
+	private static final int MAX_PARTY_LIST_ATTEMPTS = 2;
 	private static final Object LOCK = new Object();
 	private static final Map<String, Integer> sightings = new HashMap<>();
+	private static final Set<String> partyMembers = new LinkedHashSet<>();
+	private static boolean expectingPartyList;
+	private static long partyListRequestedAt;
+	private static int partyListAttempts;
 	private static boolean raiding;
 	private static long raidEndedAt;
 	private static int tickCounter;
@@ -127,6 +138,9 @@ public final class RaidPartyTracker {
 				updateRaidState(inRaid);
 				sampling = raiding;
 			}
+			if (inRaid) {
+				checkOrRequestParty();
+			}
 		}
 		if (!sampling) {
 			return;
@@ -143,6 +157,10 @@ public final class RaidPartyTracker {
 			// a room transition briefly clearing the sidebar, so the count carries on.
 			if (raidEndedAt != 0 && System.currentTimeMillis() - raidEndedAt > NEW_RAID_GAP_MS) {
 				sightings.clear();
+				partyMembers.clear();
+				expectingPartyList = false;
+				partyListRequestedAt = 0L;
+				partyListAttempts = 0;
 			}
 			raiding = true;
 			raidEndedAt = 0;
@@ -150,6 +168,89 @@ public final class RaidPartyTracker {
 			raiding = false;
 			raidEndedAt = System.currentTimeMillis();
 		}
+	}
+
+	private static void checkOrRequestParty() {
+		if (WynntilsPartyBridge.isAvailable()) {
+			List<String> wynnMembers = WynntilsPartyBridge.getPartyMembers();
+			if (!wynnMembers.isEmpty()) {
+				synchronized (LOCK) {
+					for (String m : wynnMembers) {
+						String resolved = PlayerNameResolver.resolve(null, m);
+						partyMembers.add(resolved != null && !resolved.isBlank() ? resolved : m);
+					}
+				}
+			}
+		} else {
+			boolean needRequest;
+			long now = System.currentTimeMillis();
+			synchronized (LOCK) {
+				needRequest = partyMembers.isEmpty() && partyListAttempts < MAX_PARTY_LIST_ATTEMPTS && (!expectingPartyList || now - partyListRequestedAt > 5000L) && (now - partyListRequestedAt > 10_000L);
+				if (needRequest) {
+					partyListAttempts++;
+					expectingPartyList = true;
+					partyListRequestedAt = now;
+				}
+			}
+			if (needRequest) {
+				try {
+					Minecraft mc = Minecraft.getInstance();
+					if (mc.getConnection() != null) {
+						mc.getConnection().sendCommand("party list");
+					}
+				} catch (Throwable ignored) {
+				}
+			}
+		}
+	}
+
+	public static boolean isExpectingPartyList() {
+		synchronized (LOCK) {
+			if (!expectingPartyList) {
+				return false;
+			}
+			if (partyListRequestedAt != 0L && System.currentTimeMillis() - partyListRequestedAt > 5000L) {
+				expectingPartyList = false;
+				return false;
+			}
+			return true;
+		}
+	}
+
+	public static boolean handlePartyListChat(Component message) {
+		if (message == null) {
+			return false;
+		}
+		String plain = stripCodes(ChatText.normalize(message.getString())).trim();
+		synchronized (LOCK) {
+			if (!expectingPartyList) {
+				return false;
+			}
+			String lower = plain.toLowerCase(Locale.ROOT);
+			if ((lower.contains("not") && lower.contains("party")) || lower.contains("must be in a party")) {
+				expectingPartyList = false;
+				return true;
+			}
+			Matcher matcher = PARTY_MEMBERS_PATTERN.matcher(plain);
+			if (matcher.find()) {
+				expectingPartyList = false;
+				String tail = matcher.group(1).trim();
+				String[] tokens = tail.split("\\s*,\\s*(?:and\\s+)?|\\s+and\\s+");
+				for (String token : tokens) {
+					String item = token.trim().replaceAll("[^a-zA-Z0-9_]", "");
+					if (!item.isEmpty()) {
+						String real = ChatText.resolveRealName(message, item);
+						if (real == null) {
+							real = PlayerNameResolver.resolve(message, item);
+						}
+						String finalName = (real != null && !real.isBlank()) ? real : item;
+						partyMembers.add(finalName);
+					}
+				}
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -169,15 +270,26 @@ public final class RaidPartyTracker {
 		if (announcedParty.size() >= RAID_PARTY_SIZE) {
 			return List.of();
 		}
-		Set<String> announced = announcedParty.stream().map(name -> name.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
-		List<Map.Entry<String, Integer>> ranked;
+		Set<String> seen = announcedParty.stream().map(name -> name.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
+		List<String> result = new ArrayList<>();
 		synchronized (LOCK) {
 			if (isStale()) {
 				return List.of();
 			}
-			ranked = sightings.entrySet().stream().filter(entry -> entry.getValue() >= MIN_SIGHTINGS).filter(entry -> !announced.contains(entry.getKey().toLowerCase(Locale.ROOT))).sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).limit(MAX_CANDIDATES).collect(Collectors.toList());
+			for (String member : partyMembers) {
+				if (seen.add(member.toLowerCase(Locale.ROOT))) {
+					result.add(member);
+				}
+			}
+			int missing = RAID_PARTY_SIZE - announcedParty.size();
+			if (result.size() < missing) {
+				sightings.entrySet().stream().filter(entry -> entry.getValue() >= MIN_SIGHTINGS).filter(entry -> !seen.contains(entry.getKey().toLowerCase(Locale.ROOT))).sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).limit(MAX_CANDIDATES - result.size()).forEach(entry -> {
+					seen.add(entry.getKey().toLowerCase(Locale.ROOT));
+					result.add(entry.getKey());
+				});
+			}
 		}
-		return ranked.stream().map(Map.Entry::getKey).collect(Collectors.toUnmodifiableList());
+		return Collections.unmodifiableList(result);
 	}
 
 	/** Drop the tally once a completion has consumed it, or on world change. */
@@ -187,6 +299,10 @@ public final class RaidPartyTracker {
 			raidEndedAt = 0;
 			tickCounter = 0;
 			sightings.clear();
+			partyMembers.clear();
+			expectingPartyList = false;
+			partyListRequestedAt = 0L;
+			partyListAttempts = 0;
 		}
 	}
 
@@ -288,12 +404,45 @@ public final class RaidPartyTracker {
 		List<String> out = new ArrayList<>();
 		synchronized (LOCK) {
 			out.add("raid sampling: " + raiding + " (need " + MIN_SIGHTINGS + " sightings, " + (MIN_PRESENCE_MS / 1000) + "s)");
+			out.add("party members (" + partyMembers.size() + "): " + (partyMembers.isEmpty() ? "(none)" : String.join(", ", partyMembers)) + " (expectingList=" + expectingPartyList + ")");
 			if (sightings.isEmpty()) {
-				out.add("  (nobody sampled)");
+				out.add("  (nobody sampled via proximity)");
 				return out;
 			}
 			sightings.entrySet().stream().sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).forEach(entry -> out.add("  " + entry.getKey() + " x" + entry.getValue() + (entry.getValue() >= MIN_SIGHTINGS ? "" : " (below threshold)")));
 		}
 		return out;
+	}
+
+	public static Set<String> partyMembersForTesting() {
+		synchronized (LOCK) {
+			return new LinkedHashSet<>(partyMembers);
+		}
+	}
+
+	public static void setRaidingForTesting(boolean isRaiding) {
+		synchronized (LOCK) {
+			raiding = isRaiding;
+			raidEndedAt = 0;
+		}
+	}
+
+	public static void setExpectingPartyListForTesting(boolean expecting) {
+		synchronized (LOCK) {
+			expectingPartyList = expecting;
+			partyListRequestedAt = expecting ? System.currentTimeMillis() : 0L;
+		}
+	}
+
+	public static void addPartyMemberForTesting(String member) {
+		synchronized (LOCK) {
+			partyMembers.add(member);
+		}
+	}
+
+	public static void recordSightingForTesting(String name, int count) {
+		synchronized (LOCK) {
+			sightings.put(name, count);
+		}
 	}
 }

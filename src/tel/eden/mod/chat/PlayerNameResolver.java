@@ -223,7 +223,7 @@ public final class PlayerNameResolver {
 			for (String token : tokens) {
 				String item = token.trim().replaceAll("[^a-zA-Z0-9_]", "");
 				if (!item.isEmpty()) {
-					String real = ChatText.resolveRealNameAnywhere(message, item);
+					String real = ChatText.resolveRealName(message, item);
 					if (real != null) {
 						recordAlias(item, real);
 					}

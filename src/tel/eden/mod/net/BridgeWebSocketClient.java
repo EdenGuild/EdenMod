@@ -675,16 +675,34 @@ public final class BridgeWebSocketClient {
 	}
 
 	/**
-	 * Report whether this player is currently inside the territory they marked heading to,
-	 * so their head border shows green (inside) or red (en route) on every member's HUD.
+	 * Report whether this player is currently inside a marked territory, so their head
+	 * border shows green (inside) or red (en route) on every member's HUD.
 	 */
-	public void sendWarGoingInside(boolean inside) {
+	public void sendWarGoingInside(String territory, boolean inside) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
 		}
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "warGoingInside");
+		if (territory != null && !territory.isBlank()) {
+			obj.addProperty("territory", territory.trim());
+		}
+		obj.addProperty("inside", inside);
+		enqueueSend(current, obj.toString());
+	}
+
+	/**
+	 * Report that this player queued an attack on {@code territory} in the attack GUI.
+	 */
+	public void sendWarQueued(String territory, boolean inside) {
+		WebSocket current = socket;
+		if (current == null || territory == null || territory.isBlank()) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "warQueued");
+		obj.addProperty("territory", territory.trim());
 		obj.addProperty("inside", inside);
 		enqueueSend(current, obj.toString());
 	}
@@ -1310,7 +1328,12 @@ public final class BridgeWebSocketClient {
 						}
 					}
 				}
-				out.add(new WarBoardEntry(get(entry, "territory"), get(entry, "defense"), getBool(entry, "conflict"), going));
+				WarQueuer queuer = null;
+				if (entry.has("queuer") && entry.get("queuer").isJsonObject()) {
+					JsonObject q = entry.getAsJsonObject("queuer");
+					queuer = new WarQueuer(get(q, "name"), get(q, "uuid"), getBool(q, "inside"));
+				}
+				out.add(new WarBoardEntry(get(entry, "territory"), get(entry, "defense"), getBool(entry, "conflict"), queuer, going));
 			}
 		}
 		return out;

@@ -36,6 +36,7 @@ import tel.eden.mod.hud.TextElement;
 import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.net.WarBoardEntry;
 import tel.eden.mod.net.WarGoer;
+import tel.eden.mod.net.WarQueuer;
 
 /**
  * HUD list of upcoming territory attacks read from the scoreboard sidebar, each row
@@ -63,9 +64,13 @@ public final class AttackTimerMenu {
 	private static final int HEAD_GAP = 1;
 	// A war party caps at 5, so at most five distinct heads ever need showing.
 	private static final int MAX_HEADS = 5;
-	// Head border: green once a goer is inside their target territory, red while en route.
+	// Head border: green once a goer/queuer is inside their target territory, red while en route.
 	private static final int BORDER_GREEN = 0xFF44FF44;
 	private static final int BORDER_RED = 0xFFFF5050;
+
+	// Layout coordinates for the queuer head on the left and row text.
+	private static final int QUEUER_HEAD_X = 3;
+	private static final int TEXT_OFFSET_X = QUEUER_HEAD_X + HEAD_SIZE + 3; // 14px
 
 	/** Latest fresher-than-scrape defense reports keyed by territory. */
 	private static final Map<String, ChatDefenseInfo> chatDefenses = new HashMap<>();
@@ -77,6 +82,8 @@ public final class AttackTimerMenu {
 	private static final Map<String, String> scrapedDefenses = new HashMap<>();
 	/** Territories where scouts reported conflicting scraped ratings (from the board). */
 	private static final Map<String, Boolean> defenseConflict = new HashMap<>();
+	/** Who queued each attack (from the {@code warBoard} broadcast or local detection). */
+	private static final Map<String, WarQueuer> queuers = new HashMap<>();
 	/** Who is heading to each territory (from the {@code warBoard} broadcast). */
 	private static final Map<String, List<WarGoer>> going = new HashMap<>();
 	/** Territories that had an attack timer last tick, to detect when one ends. */
@@ -89,15 +96,13 @@ public final class AttackTimerMenu {
 	// How long a territory must stay off the sidebar to be believed gone. A re-render blip
 	// is sub-second; a timer that really ended never comes back.
 	private static final long TIMER_GONE_MS = 3_000L;
-	// Last inside-status this client reported for its own head, and whether it was
-	// heading anywhere, so it only sends on a change (enter/leave the target territory).
-	private static boolean wasGoing;
-	private static boolean lastReportedInside;
+	// Last inside-status this client reported per territory, and settle debounce state.
+	private static final Map<String, Boolean> lastReportedInsideByTerritory = new HashMap<>();
+	private static final Map<String, Boolean> pendingInsideByTerritory = new HashMap<>();
+	private static final Map<String, Long> pendingSinceByTerritory = new HashMap<>();
 	// A crossing must hold this long before it's reported, so wiggling on a territory edge
 	// never spams updates. The settled value is what gets sent, so state can't desync.
 	private static final long INSIDE_SETTLE_MS = 500L;
-	private static boolean pendingInside;
-	private static long pendingSince;
 	/** Screen rectangles [x1,y1,x2,y2] of the last-rendered rows, for click hit-testing. */
 	private static final Map<String, int[]> clickBoxes = new HashMap<>();
 	/** Screen rectangles of the last-rendered heads and the names to show on hover. */
@@ -147,6 +152,17 @@ public final class AttackTimerMenu {
 		chatDefenses.put(territory, new ChatDefenseInfo(username, territory, defense, System.currentTimeMillis()));
 	}
 
+	/** Record a war queuer locally (called when attack is confirmed or from chat fallback). */
+	public static void reportQueued(String territory, String name, String uuid) {
+		Minecraft mc = Minecraft.getInstance();
+		boolean inside = false;
+		if (mc.player != null && mc.player.getUUID().toString().equals(uuid)) {
+			BlockPos pos = mc.player.blockPosition();
+			inside = territory.equals(TerritoryData.territoryAt(pos.getX(), pos.getZ()));
+		}
+		queuers.put(territory, new WarQueuer(name, uuid, inside));
+	}
+
 	/**
 	 * Parse a guild-chat line for a "&lt;territory&gt; defense is &lt;rating&gt;" report
 	 * (as Wynntils announces) and fold it into the HUD's fresher-intel overlay.
@@ -154,8 +170,30 @@ public final class AttackTimerMenu {
 	public static void intakeChat(String reporter, String message) {
 		Matcher matcher = DEFENSE_REPORT.matcher(message.trim());
 		if (matcher.find()) {
-			reportDefense(reporter, matcher.group(1).trim(), canonicalDefense(matcher.group(2)));
+			String territory = matcher.group(1).trim();
+			reportDefense(reporter, territory, canonicalDefense(matcher.group(2)));
+			if (!queuers.containsKey(territory) && reporter != null && !reporter.isBlank()) {
+				UUID uuid = resolvePlayerUuid(reporter.trim());
+				if (uuid != null) {
+					reportQueued(territory, reporter.trim(), uuid.toString());
+				}
+			}
 		}
+	}
+
+	private static UUID resolvePlayerUuid(String name) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player != null && mc.player.getName().getString().equalsIgnoreCase(name)) {
+			return mc.player.getUUID();
+		}
+		if (mc.getConnection() != null) {
+			for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
+				if (info.getProfile() != null && info.getProfile().name().equalsIgnoreCase(name)) {
+					return info.getProfile().id();
+				}
+			}
+		}
+		return null;
 	}
 
 	private static String canonicalDefense(String defense) {
@@ -183,6 +221,8 @@ public final class AttackTimerMenu {
 		going.clear();
 		scrapedDefenses.clear();
 		defenseConflict.clear();
+		Map<String, WarQueuer> oldQueuers = new HashMap<>(queuers);
+		queuers.clear();
 		for (WarBoardEntry entry : entries) {
 			if (!entry.defense().isEmpty()) {
 				scrapedDefenses.put(entry.territory(), canonicalDefense(entry.defense()));
@@ -193,7 +233,11 @@ public final class AttackTimerMenu {
 			if (!entry.going().isEmpty()) {
 				going.put(entry.territory(), entry.going());
 			}
+			if (entry.queuer() != null) {
+				queuers.put(entry.territory(), entry.queuer());
+			}
 		}
+		oldQueuers.forEach(queuers::putIfAbsent);
 	}
 
 	/**
@@ -232,6 +276,10 @@ public final class AttackTimerMenu {
 			}
 			missingSince.remove(territory);
 			chatDefenses.remove(territory);
+			queuers.remove(territory);
+			lastReportedInsideByTerritory.remove(territory);
+			pendingInsideByTerritory.remove(territory);
+			pendingSinceByTerritory.remove(territory);
 			if (socket != null) {
 				socket.sendWarTimerEnded(territory);
 			}
@@ -241,60 +289,89 @@ public final class AttackTimerMenu {
 	}
 
 	/**
-	 * If this client marked itself heading to a territory, report whether it's standing
-	 * inside it (only on a change), so its head border flips green/red for everyone. The
-	 * goer's own client is the authority on its position — no one else knows it.
+	 * If this client marked itself heading to a territory or queued it, report whether
+	 * it's standing inside it (only on a change), so its head border flips green/red for
+	 * everyone. The client is the authority on its position.
 	 */
 	private static void reportInside(BridgeWebSocketClient socket) {
 		Minecraft mc = Minecraft.getInstance();
-		String myTerritory = mc.player == null ? null : myGoingTerritory(mc.player.getUUID().toString());
-		if (myTerritory == null) {
-			wasGoing = false;
+		if (mc.player == null) {
+			lastReportedInsideByTerritory.clear();
+			pendingInsideByTerritory.clear();
+			pendingSinceByTerritory.clear();
 			return;
 		}
+		String myUuid = mc.player.getUUID().toString();
+		java.util.Set<String> myTerritories = myRelevantTerritories(myUuid);
+		if (myTerritories.isEmpty()) {
+			lastReportedInsideByTerritory.clear();
+			pendingInsideByTerritory.clear();
+			pendingSinceByTerritory.clear();
+			return;
+		}
+
+		lastReportedInsideByTerritory.keySet().retainAll(myTerritories);
+		pendingInsideByTerritory.keySet().retainAll(myTerritories);
+		pendingSinceByTerritory.keySet().retainAll(myTerritories);
+
 		BlockPos pos = mc.player.blockPosition();
-		boolean inside = myTerritory.equals(TerritoryData.territoryAt(pos.getX(), pos.getZ()));
-		if (!wasGoing) {
-			// First report of this trip: send the initial state at once.
-			wasGoing = true;
-			lastReportedInside = inside;
-			pendingInside = inside;
-			sendInside(socket, inside);
-			return;
-		}
-		if (inside == lastReportedInside) {
-			pendingInside = inside; // steady at the value the backend already has
-			return;
-		}
-		// Differs from what the backend has: only report once it has held for the settle
-		// window, and always the settled value — so border-edge jitter can't spam, and the
-		// backend never ends up with a stale value we then never correct.
+		String playerTerritory = TerritoryData.territoryAt(pos.getX(), pos.getZ());
 		long now = System.currentTimeMillis();
-		if (inside != pendingInside) {
-			pendingInside = inside;
-			pendingSince = now;
-		} else if (now - pendingSince >= INSIDE_SETTLE_MS) {
-			lastReportedInside = inside;
-			sendInside(socket, inside);
-		}
-	}
 
-	private static void sendInside(BridgeWebSocketClient socket, boolean inside) {
-		if (socket != null) {
-			socket.sendWarGoingInside(inside);
-		}
-	}
-
-	/** The territory this client is currently marked as heading to (from the board), or null. */
-	private static String myGoingTerritory(String myUuid) {
-		for (Map.Entry<String, List<WarGoer>> entry : going.entrySet()) {
-			for (WarGoer goer : entry.getValue()) {
-				if (goer.uuid().equals(myUuid)) {
-					return entry.getKey();
+		for (String terr : myTerritories) {
+			boolean isInside = terr.equals(playerTerritory);
+			WarQueuer q = queuers.get(terr);
+			if (q != null && q.uuid().equals(myUuid) && q.inside() != isInside) {
+				queuers.put(terr, new WarQueuer(q.name(), q.uuid(), isInside));
+			}
+			Boolean last = lastReportedInsideByTerritory.get(terr);
+			if (last == null) {
+				lastReportedInsideByTerritory.put(terr, isInside);
+				pendingInsideByTerritory.put(terr, isInside);
+				sendInside(socket, terr, isInside);
+				continue;
+			}
+			if (isInside == last) {
+				pendingInsideByTerritory.put(terr, isInside);
+				continue;
+			}
+			Boolean pending = pendingInsideByTerritory.get(terr);
+			if (pending == null || isInside != pending) {
+				pendingInsideByTerritory.put(terr, isInside);
+				pendingSinceByTerritory.put(terr, now);
+			} else {
+				Long since = pendingSinceByTerritory.get(terr);
+				if (since != null && now - since >= INSIDE_SETTLE_MS) {
+					lastReportedInsideByTerritory.put(terr, isInside);
+					sendInside(socket, terr, isInside);
 				}
 			}
 		}
-		return null;
+	}
+
+	private static void sendInside(BridgeWebSocketClient socket, String territory, boolean inside) {
+		if (socket != null) {
+			socket.sendWarGoingInside(territory, inside);
+		}
+	}
+
+	/** Territories where this client is either a marked goer or the queuer. */
+	private static java.util.Set<String> myRelevantTerritories(String myUuid) {
+		java.util.Set<String> set = new java.util.HashSet<>();
+		for (Map.Entry<String, List<WarGoer>> entry : going.entrySet()) {
+			for (WarGoer goer : entry.getValue()) {
+				if (goer.uuid().equals(myUuid)) {
+					set.add(entry.getKey());
+					break;
+				}
+			}
+		}
+		for (Map.Entry<String, WarQueuer> entry : queuers.entrySet()) {
+			if (entry.getValue() != null && entry.getValue().uuid().equals(myUuid)) {
+				set.add(entry.getKey());
+			}
+		}
+		return set;
 	}
 
 	/** Clear all local war-board state (on world change / disconnect). */
@@ -303,15 +380,15 @@ public final class AttackTimerMenu {
 		scrapedDefenses.clear();
 		defenseConflict.clear();
 		going.clear();
+		queuers.clear();
 		previousActive.clear();
 		missingSince.clear();
 		clickBoxes.clear();
 		headBoxes.clear();
 		soonestTerritory = null;
-		wasGoing = false;
-		lastReportedInside = false;
-		pendingInside = false;
-		pendingSince = 0;
+		lastReportedInsideByTerritory.clear();
+		pendingInsideByTerritory.clear();
+		pendingSinceByTerritory.clear();
 	}
 
 	public static void render(BridgeConfig config, GuiGraphics graphics) {
@@ -341,18 +418,22 @@ public final class AttackTimerMenu {
 
 		// Per-row text width, so heads sit just past each row's text and the panel is
 		// widened to fit them (keeping the whole row — text and heads — clickable).
+		// Note: We use font.width(line) directly without stripping codes so that §l (bold)
+		// text metrics are correctly accounted for, avoiding heads overlapping countdown seconds.
 		List<String> lines = new ArrayList<>();
 		int[] textWidths = new int[shown.size()];
 		int maxWidth = 0;
 		for (int i = 0; i < shown.size(); i++) {
 			String line = rowText(shown.get(i), currentTerritory);
 			lines.add(line);
-			textWidths[i] = font.width(stripCodes(line));
-			maxWidth = Math.max(maxWidth, textWidths[i] + headsWidth(going.get(shown.get(i).territory())));
+			textWidths[i] = font.width(line);
+			int goersW = headsWidth(going.get(shown.get(i).territory()));
+			int rowW = TEXT_OFFSET_X + textWidths[i] + (goersW > 0 ? 4 + goersW : 0);
+			maxWidth = Math.max(maxWidth, rowW);
 		}
 		String footer = overflowWars > 0 ? "§7+" + overflowWars + " more war" + (overflowWars == 1 ? "" : "s") : null;
 		if (footer != null) {
-			maxWidth = Math.max(maxWidth, font.width(stripCodes(footer)));
+			maxWidth = Math.max(maxWidth, TEXT_OFFSET_X + font.width(footer));
 		}
 		int rows = shown.size() + (footer != null ? 1 : 0);
 		int width = maxWidth + 6;
@@ -367,21 +448,27 @@ public final class AttackTimerMenu {
 		panel.add(new RectangleElement(0, 0, width, height, PANEL_BG));
 		int relY = 3;
 		for (int i = 0; i < shown.size(); i++) {
-			panel.add(new TextElement(lines.get(i), 3, relY, 0xFFFFFFFF));
+			panel.add(new TextElement(lines.get(i), TEXT_OFFSET_X, relY, 0xFFFFFFFF));
 			clickBoxes.put(shown.get(i).territory(), new int[]{x, Math.round(y + (relY - 1) * scale), Math.round(x + width * scale), Math.round(y + (relY + ROW_HEIGHT - 1) * scale)});
 			relY += ROW_HEIGHT;
 		}
 		if (footer != null) {
-			panel.add(new TextElement(footer, 3, relY, 0xFFFFFFFF));
+			panel.add(new TextElement(footer, TEXT_OFFSET_X, relY, 0xFFFFFFFF));
 		}
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x, y);
 		graphics.pose().scale(scale, scale);
 		panel.draw(graphics);
-		// Heads draw over the panel, in the same transformed space, just past each row's text.
+
+		// Queuer heads (left) and goer heads (right) drawn over the panel.
 		relY = 3;
 		for (int i = 0; i < shown.size(); i++) {
-			drawHeads(graphics, font, 3 + textWidths[i] + 2, relY, going.get(shown.get(i).territory()), x, y, scale);
+			String terr = shown.get(i).territory();
+			WarQueuer queuer = queuers.get(terr);
+			if (queuer != null) {
+				drawQueuerHead(graphics, mc, QUEUER_HEAD_X, relY, queuer, x, y, scale);
+			}
+			drawHeads(graphics, font, TEXT_OFFSET_X + textWidths[i] + 4, relY, going.get(terr), x, y, scale);
 			relY += ROW_HEIGHT;
 		}
 		graphics.pose().popMatrix();
@@ -465,10 +552,21 @@ public final class AttackTimerMenu {
 		return new HeadBox(Math.round(originX + relX * scale), Math.round(originY + relY * scale), Math.round(originX + (relX + width) * scale), Math.round(originY + (relY + height) * scale), names);
 	}
 
+	private static void drawQueuerHead(GuiGraphics graphics, Minecraft mc, int relX, int relY, WarQueuer queuer, int originX, int originY, float scale) {
+		PlayerFaceRenderer.draw(graphics, skinFor(mc, queuer.uuid(), queuer.name()), relX, relY, HEAD_SIZE);
+		drawBorder(graphics, relX, relY, HEAD_SIZE, queuer.inside() ? BORDER_GREEN : BORDER_RED);
+		String name = nameFor(mc, queuer.uuid(), queuer.name());
+		headBoxes.add(headBox(relX, relY, HEAD_SIZE, HEAD_SIZE, originX, originY, scale, List.of(name + " (Queuer)")));
+	}
+
 	/** A goer's current IGN from the tab list (fresh after a rename), else the board name. */
 	private static String nameFor(Minecraft mc, WarGoer goer) {
+		return nameFor(mc, goer.uuid(), goer.name());
+	}
+
+	private static String nameFor(Minecraft mc, String uuidStr, String fallbackName) {
 		try {
-			UUID uuid = UUID.fromString(goer.uuid());
+			UUID uuid = UUID.fromString(uuidStr);
 			if (mc.getConnection() != null) {
 				PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
 				if (info != null) {
@@ -478,7 +576,7 @@ public final class AttackTimerMenu {
 		} catch (IllegalArgumentException ignored) {
 			// Fall through to the board-provided name.
 		}
-		return goer.name();
+		return fallbackName;
 	}
 
 	private static final EdenLogger LOGGER = EdenLogger.get();
@@ -498,18 +596,22 @@ public final class AttackTimerMenu {
 	});
 
 	/**
-	 * The skin to draw for a goer. A guildmate on our own world is in the player list with
+	 * The skin to draw for a player head. A guildmate on our own world is in the player list with
 	 * their skin already loaded (free). One on a <em>different</em> Wynncraft world instance
 	 * (routine during a war rush) isn't in our list, so their profile carries no textures and
 	 * the game would only give a default skin — we resolve those by uuid from Mojang in the
 	 * background (cached), showing the default until it lands.
 	 */
 	private static PlayerSkin skinFor(Minecraft mc, WarGoer goer) {
+		return skinFor(mc, goer.uuid(), goer.name());
+	}
+
+	private static PlayerSkin skinFor(Minecraft mc, String uuidStr, String fallbackName) {
 		UUID uuid;
 		try {
-			uuid = UUID.fromString(goer.uuid());
+			uuid = UUID.fromString(uuidStr);
 		} catch (IllegalArgumentException e) {
-			return DefaultPlayerSkin.get(UUID.nameUUIDFromBytes(goer.name().getBytes(StandardCharsets.UTF_8)));
+			return DefaultPlayerSkin.get(UUID.nameUUIDFromBytes(fallbackName.getBytes(StandardCharsets.UTF_8)));
 		}
 		if (mc.getConnection() != null) {
 			PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
@@ -521,7 +623,7 @@ public final class AttackTimerMenu {
 		if (resolved != null) {
 			return resolved;
 		}
-		fetchSkin(mc, uuid, goer.name());
+		fetchSkin(mc, uuid, fallbackName);
 		return DefaultPlayerSkin.get(uuid);
 	}
 
@@ -568,6 +670,9 @@ public final class AttackTimerMenu {
 					BridgeWebSocketClient socket = EdenModClient.instance().socket();
 					if (socket != null) {
 						socket.sendWarGoing(entry.getKey());
+						lastReportedInsideByTerritory.remove(entry.getKey());
+						pendingInsideByTerritory.remove(entry.getKey());
+						pendingSinceByTerritory.remove(entry.getKey());
 					}
 				} else {
 					int[] middle = TerritoryData.middle(entry.getKey());

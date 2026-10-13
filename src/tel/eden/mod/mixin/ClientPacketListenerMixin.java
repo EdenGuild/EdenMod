@@ -42,6 +42,10 @@ public class ClientPacketListenerMixin {
 		EdenModClient mod = EdenModClient.instance();
 		if (mod != null && mod.shouldMuteBackgroundMenuClick(packet.getSound().value(), packet.getSource())) {
 			ci.cancel();
+			return;
+		}
+		if (packet.getSound().value().location().getPath().contains("ender_dragon.growl")) {
+			tel.eden.mod.war.AttackMenuScraper.onAttackSound();
 		}
 	}
 
@@ -124,6 +128,11 @@ public class ClientPacketListenerMixin {
 			return;
 		}
 		if (mod != null && mod.config().hideEconomyMessages && EconomyMessageFilter.isEconomyMessage(packet.content())) {
+			ci.cancel();
+			return;
+		}
+		if (tel.eden.mod.chat.RaidPartyTracker.isExpectingPartyList() && tel.eden.mod.chat.RaidPartyTracker.handlePartyListChat(packet.content())) {
+			tel.eden.mod.chat.PlayerNameResolver.observeMessage(packet.content());
 			ci.cancel();
 			return;
 		}

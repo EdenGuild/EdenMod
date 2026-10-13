@@ -37,6 +37,52 @@ public final class AttackMenuScraper {
 	private static String lastObservedDefense = "";
 	private static String lastSentTerritory = "";
 	private static String lastSentDefense = "";
+	private static volatile String pendingAttackTerritory;
+	private static volatile long pendingAttackTime;
+
+	/**
+	 * Called when a container slot is clicked. If in "Attacking: <territory>" and slot is
+	 * the attack slot, record a pending attack attempt for confirmation.
+	 */
+	public static void onContainerClick(int slot) {
+		Minecraft mc = Minecraft.getInstance();
+		if (!(mc.screen instanceof AbstractContainerScreen<?> screen)) {
+			return;
+		}
+		String territory = attackTargetTitle(screen);
+		if (territory == null) {
+			return;
+		}
+		if (slot == DEFENSE_SLOT) {
+			pendingAttackTerritory = territory;
+			pendingAttackTime = System.currentTimeMillis();
+		}
+	}
+
+	/**
+	 * Called when the client receives an entity.ender_dragon.growl sound packet,
+	 * which Wynncraft plays upon a successful attack commit.
+	 */
+	public static void onAttackSound() {
+		String territory = pendingAttackTerritory;
+		if (territory != null && System.currentTimeMillis() - pendingAttackTime < 3000L) {
+			pendingAttackTerritory = null;
+			confirmAttack(territory);
+		}
+	}
+
+	private static void confirmAttack(String territory) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player != null) {
+			net.minecraft.core.BlockPos pos = mc.player.blockPosition();
+			boolean inside = territory.equals(TerritoryData.territoryAt(pos.getX(), pos.getZ()));
+			AttackTimerMenu.reportQueued(territory, mc.player.getGameProfile().name(), mc.player.getUUID().toString());
+			BridgeWebSocketClient socket = EdenModClient.instance().socket();
+			if (socket != null) {
+				socket.sendWarQueued(territory, inside);
+			}
+		}
+	}
 
 	/** Client-thread tick: if the attack menu is open, scrape + relay slot 13's defence. */
 	public static void onTick(Minecraft mc) {
