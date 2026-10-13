@@ -14,6 +14,7 @@ import net.minecraft.network.protocol.game.ClientboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
+import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -51,6 +52,17 @@ public class ClientPacketListenerMixin {
 			EdenModClient mod = EdenModClient.instance();
 			if (mod != null) {
 				mod.onGuildLogContainerClosed(packet.getContainerId());
+			}
+		}
+	}
+
+	@Inject(method = "handleRespawn", at = @At("HEAD"))
+	private void edenBridge$onRespawn(ClientboundRespawnPacket packet, CallbackInfo ci) {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft.isSameThread()) {
+			EdenModClient mod = EdenModClient.instance();
+			if (mod != null) {
+				mod.onWorldRespawn();
 			}
 		}
 	}

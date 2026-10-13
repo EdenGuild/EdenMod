@@ -34,6 +34,7 @@ import tel.eden.mod.chat.ShoutParser;
 import tel.eden.mod.chat.TerritoryDefendedEvent;
 import tel.eden.mod.chat.TerritoryDefendedTracker;
 import tel.eden.mod.config.BridgeConfig;
+import tel.eden.mod.guild.GuildAllyManager;
 import tel.eden.mod.guild.GuildLogSync;
 import tel.eden.mod.guild.GuildMenuScraper;
 import tel.eden.mod.guild.GuildRewardStorageSnapshot;
@@ -47,6 +48,7 @@ import tel.eden.mod.gui.PartyManageScreen;
 import tel.eden.mod.item.DecodedItem;
 import tel.eden.mod.item.ItemCardRenderer;
 import tel.eden.mod.item.ItemStringDetector;
+import tel.eden.mod.net.AllyActivityEntry;
 import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.net.PartyInfo;
 import tel.eden.mod.net.GiveawayCandidate;
@@ -175,6 +177,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private final BackgroundContainerSession backgroundContainers = new BackgroundContainerSession();
 	private final GuildRewards guildRewards = new GuildRewards(backgroundContainers);
 	private final GuildLogSync guildLogSync = new GuildLogSync(backgroundContainers);
+	private final GuildAllyManager guildAllyManager = new GuildAllyManager(backgroundContainers);
 	private final List<TrackedCommandKeybind> trackedCommandKeybinds = new ArrayList<>();
 	private KeyMapping openConfigKey;
 	private KeyMapping createPartyKey;
@@ -492,6 +495,31 @@ public final class EdenModClient implements ClientModInitializer {
 		return guildLogSync;
 	}
 
+	public GuildAllyManager guildAllyManager() {
+		return guildAllyManager;
+	}
+
+	/**
+	 * Whether the player is a Chief, Owner, or Strategist according to the bridge or Wynncraft.
+	 * If rank has not yet been fetched/verified, defaults to true so legitimate Strategists
+	 * are not locked out; the in-game diplomacy menu validates permissions definitively.
+	 */
+	public boolean isChiefOwnerOrStrategist() {
+		if (liveGuildRank != null && !liveGuildRank.isBlank()) {
+			return liveGuildRank.equalsIgnoreCase("owner") || liveGuildRank.equalsIgnoreCase("chief") || liveGuildRank.equalsIgnoreCase("strategist");
+		}
+		if (guildRewards.hasKnownRank()) {
+			return guildRewards.isChiefOwnerOrStrategist();
+		}
+		guildRewards.ensureFresh(playerName());
+		return true;
+	}
+
+	public void onWorldRespawn() {
+		enteredWynnGameWorld = true;
+		guildLogSync.onWorldJoin();
+	}
+
 	/** Packet hooks for the invisible guild-log query (mirrors Wynntils' query path). */
 	public boolean onGuildLogOpenScreen(ClientboundOpenScreenPacket packet) {
 		return guildLogSync.onOpenScreen(packet);
@@ -635,6 +663,7 @@ public final class EdenModClient implements ClientModInitializer {
 			GuildMenuScraper.reset();
 			AttackTimerMenu.reset();
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
+			guildAllyManager.requestCancel();
 			// Connect if applicable; the backend reports link/membership standing via
 			// authOk (handleAuthStatus), which drives any "please link" prompt.
 			evaluateGating(client);
@@ -671,7 +700,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
+			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
 				requestWarCounts(ctx.getSource(), 7);
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
@@ -1093,6 +1122,12 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
+				public void onAllyActivity(java.util.List<AllyActivityEntry> entries) {
+					boolean canManage = isChiefOwnerOrStrategist();
+					display(() -> DiscordChatFormatter.allyActivity(entries, canManage));
+				}
+
+				@Override
 				public void onAuthStatus(boolean linked, boolean member, String guildRank, String discordRank) {
 					handleAuthStatus(linked, member, guildRank, discordRank);
 				}
@@ -1297,6 +1332,40 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 		sendDeduct(rewardKind, member, amount);
 		return 1;
+	}
+
+	/** Build {@code /eden ally (view | add <name> | remove <name>)}. */
+	private LiteralArgumentBuilder<FabricClientCommandSource> buildAllyCommand() {
+		return ClientCommandManager.literal("ally").executes(ctx -> {
+			requestAllyView(ctx.getSource());
+			return 1;
+		}).then(ClientCommandManager.literal("view").executes(ctx -> {
+			requestAllyView(ctx.getSource());
+			return 1;
+		})).then(ClientCommandManager.literal("add").then(ClientCommandManager.argument("name", StringArgumentType.greedyString()).executes(ctx -> {
+			if (!isChiefOwnerOrStrategist()) {
+				ctx.getSource().sendFeedback(Component.literal(tel.eden.mod.guild.GuildAllyManager.PERMISSION_ERROR).withStyle(ChatFormatting.RED));
+				return 0;
+			}
+			guildAllyManager.addAlly(StringArgumentType.getString(ctx, "name"));
+			return 1;
+		}))).then(ClientCommandManager.literal("remove").then(ClientCommandManager.argument("name", StringArgumentType.greedyString()).executes(ctx -> {
+			if (!isChiefOwnerOrStrategist()) {
+				ctx.getSource().sendFeedback(Component.literal(tel.eden.mod.guild.GuildAllyManager.PERMISSION_ERROR).withStyle(ChatFormatting.RED));
+				return 0;
+			}
+			guildAllyManager.removeAlly(StringArgumentType.getString(ctx, "name"));
+			return 1;
+		})));
+	}
+
+	private void requestAllyView(FabricClientCommandSource source) {
+		BridgeWebSocketClient current = socket;
+		if (current == null) {
+			source.sendFeedback(notConnected());
+			return;
+		}
+		current.sendAllyActivityRequest();
 	}
 
 	private CompletableFuture<Suggestions> suggestMembers(CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
@@ -2116,7 +2185,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -2302,6 +2371,7 @@ public final class EdenModClient implements ClientModInitializer {
 		PartyHealthTracker.reset();
 		ChatReplyManager.reset();
 		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();
+		guildAllyManager.requestCancel();
 		territoryDefendedTracker.clear();
 		// Before the socket goes: an outstanding deduct must not outlive the session that
 		// made it, or it resurfaces at the next connect naming a player from another
@@ -2348,6 +2418,7 @@ public final class EdenModClient implements ClientModInitializer {
 	public void handleSystemChat(Component message) {
 		PlayerNameResolver.observeMessage(message);
 		handleRewardFeedback(message);
+		guildAllyManager.onSystemChat(message.getString());
 		// A real chat line breaks any in-progress Discord emblem block, so the next
 		// relayed Discord message starts with a fresh shield (like guild chat).
 		DiscordChatFormatter.onServerChatLine();
@@ -2361,6 +2432,7 @@ public final class EdenModClient implements ClientModInitializer {
 				WarTracker.onChat(warLine);
 				WarDPS.onChat(warLine);
 				tel.eden.mod.war.radiance.RadianceTracker.onChat(warLine);
+				tel.eden.mod.war.TerritoryLossTracker.onChat(warLine);
 			});
 			// Auto /stream sits above the socket guard on purpose: it is a local
 			// convenience and has nothing to do with the bridge, so it keeps working

@@ -50,10 +50,10 @@ public final class GuildMenuScraper {
 		if (!(mc.screen instanceof AbstractContainerScreen<?> screen)) {
 			return;
 		}
-		GuildRewards guildRewards = EdenModClient.instance().guildRewards();
-		if (!guildRewards.isChiefOwnerOrStrategist()) {
+		if (!EdenModClient.instance().isChiefOwnerOrStrategist()) {
 			return;
 		}
+		GuildRewards guildRewards = EdenModClient.instance().guildRewards();
 		String title = stripCodes(screen.getTitle().getString()).trim();
 		AbstractContainerMenu menu = screen.getMenu();
 		int logIndex = title.indexOf("Log: ");
