@@ -1,13 +1,18 @@
 package tel.eden.mod.emote;
 
+import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
+import net.minecraft.sounds.SoundEvents;
 import org.lwjgl.glfw.GLFW;
+import tel.eden.mod.EdenModClient;
+import tel.eden.mod.config.BridgeConfig;
 
 /**
  * The radial emote-wheel overlay (avomod2 port). Draws {@value EmoteWheel#SLOTS} emote
@@ -25,11 +30,24 @@ public final class EmoteWheelScreen extends Screen {
 	private static final int COLOR_ACTIVE = 0xFF808080;
 	private static final int COLOR_TEXT = 0xFFFFFFFF;
 
-	private final List<String> emotes = EmoteWheel.favorites();
+	private List<String> emotes;
 	private int hoveredSector = -1;
+	private int currentPage;
+	private int totalPages;
 
 	public EmoteWheelScreen() {
 		super(Component.literal("Emote Wheel"));
+		EdenModClient client = EdenModClient.instance();
+		BridgeConfig config = client != null ? client.config() : null;
+		if (config != null) {
+			EmoteWheel.ensurePages(config);
+			this.currentPage = config.emoteWheelActivePage;
+			this.totalPages = config.emoteWheelPages.size();
+		} else {
+			this.currentPage = 0;
+			this.totalPages = 1;
+		}
+		this.emotes = EmoteWheel.favoritesForPage(this.currentPage);
 	}
 
 	@Override
@@ -43,10 +61,28 @@ public final class EmoteWheelScreen extends Screen {
 			int squareX = pos[0] - SQUARE_SIZE / 2;
 			int squareY = pos[1] - SQUARE_SIZE / 2;
 			graphics.fill(squareX, squareY, squareX + SQUARE_SIZE, squareY + SQUARE_SIZE, hoveredSector == i ? COLOR_ACTIVE : COLOR_IDLE);
-			String label = emotes.get(i);
+			String label = (i < emotes.size()) ? emotes.get(i) : "";
 			graphics.drawCenteredString(this.font, Component.literal(label.isEmpty() ? "-" : label), pos[0], pos[1] - 4, COLOR_TEXT);
 			graphics.drawCenteredString(this.font, Component.literal(Integer.toString(i + 1)), squareX + 6, squareY + 4, COLOR_TEXT);
 		}
+		if (totalPages > 1) {
+			graphics.drawCenteredString(this.font, Component.literal("Page " + (currentPage + 1) + "/" + totalPages), centerX, centerY - 4, COLOR_TEXT);
+		}
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		if (scrollY != 0 && totalPages > 1) {
+			int next = currentPage + (scrollY > 0 ? -1 : 1);
+			if (next < 0) {
+				next = totalPages - 1;
+			} else if (next >= totalPages) {
+				next = 0;
+			}
+			switchToPage(next);
+			return true;
+		}
+		return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
 	}
 
 	@Override
@@ -61,7 +97,47 @@ public final class EmoteWheelScreen extends Screen {
 			playAndClose(event.key() - GLFW.GLFW_KEY_1);
 			return true;
 		}
+		if (totalPages > 1) {
+			if (event.key() == GLFW.GLFW_KEY_LEFT || event.key() == GLFW.GLFW_KEY_A) {
+				switchToPage((currentPage - 1 + totalPages) % totalPages);
+				return true;
+			}
+			if (event.key() == GLFW.GLFW_KEY_RIGHT || event.key() == GLFW.GLFW_KEY_D) {
+				switchToPage((currentPage + 1) % totalPages);
+				return true;
+			}
+		}
 		return super.keyPressed(event);
+	}
+
+	private boolean pageChanged = false;
+
+	private void switchToPage(int page) {
+		this.currentPage = page;
+		this.pageChanged = true;
+		EdenModClient client = EdenModClient.instance();
+		BridgeConfig config = client != null ? client.config() : null;
+		if (config != null) {
+			config.emoteWheelActivePage = page;
+			config.emoteWheelFavorites = new ArrayList<>(config.emoteWheelPages.get(page));
+		}
+		this.emotes = EmoteWheel.favoritesForPage(page);
+		Minecraft mc = Minecraft.getInstance();
+		if (mc != null && mc.getSoundManager() != null) {
+			mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.2f));
+		}
+	}
+
+	@Override
+	public void onClose() {
+		if (pageChanged) {
+			EdenModClient client = EdenModClient.instance();
+			BridgeConfig config = client != null ? client.config() : null;
+			if (config != null) {
+				config.save();
+			}
+		}
+		super.onClose();
 	}
 
 	@Override
