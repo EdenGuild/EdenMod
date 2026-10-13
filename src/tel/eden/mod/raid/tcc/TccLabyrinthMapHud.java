@@ -150,7 +150,7 @@ public final class TccLabyrinthMapHud {
 	}
 
 	private static void drawConfirmedExitCircle(GuiGraphics graphics, int cx, int cy) {
-		graphics.fill(cx - 1, cy - 1, cx + 1, cy + 1, 0xFFFFFFFF);
+		graphics.fill(cx - 2, cy - 2, cx + 3, cy + 3, 0xFFFFFFFF);
 	}
 
 	private static void drawPlayer(GuiGraphics graphics, Minecraft mc, TccLabyrinthTracker.PlayerEntry p, int sx, int sy, boolean fallbackRedDot) {
