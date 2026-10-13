@@ -82,6 +82,10 @@ public final class WarTracker {
 		weeklyWars = wars;
 	}
 
+	public static boolean isCapturing() {
+		return capturing;
+	}
+
 	/** The battle-start line opens the capture window. Called on the client thread. */
 	public static void onChat(String rawLine) {
 		if (WarDPS.clean(rawLine).contains(WAR_START_PHRASE)) {

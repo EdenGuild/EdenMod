@@ -21,5 +21,6 @@ public final class WarHud {
 		AttackTimerMenu.render(config, graphics);
 		WarDPS.render(config, graphics);
 		WarTracker.renderChip(config, graphics);
+		tel.eden.mod.war.radiance.RadianceTracker.render(config, graphics);
 	}
 }

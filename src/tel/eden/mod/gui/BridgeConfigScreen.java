@@ -2,6 +2,7 @@ package tel.eden.mod.gui;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import net.minecraft.client.gui.GuiGraphics;
@@ -159,6 +160,29 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow(Category.WAR, "Territory loss sound", () -> config.territoryLossSound, v -> config.territoryLossSound = v, "On", "Off", false);
 		addToggleRow(Category.WAR, "Territory loss blacklist", () -> config.territoryLossBlacklistEnabled, v -> config.territoryLossBlacklistEnabled = v, "On", "Off", true);
 		addButtonRow(Category.WAR, "Territory blacklist", () -> Component.literal("Edit (" + config.territoryLossBlacklist.size() + ")"), () -> this.minecraft.setScreen(new TerritoryLossBlacklistScreen(this, config)), () -> config.territoryLossBlacklist = new ArrayList<>(BridgeConfig.DEFAULT_TERRITORY_LOSS_BLACKLIST));
+		addToggleRow(Category.WAR, "Radiance tracker", () -> config.radianceTracker, v -> {
+			config.radianceTracker = v;
+			EdenModClient.syncRadianceGroup(config);
+		}, "On", "Off", false);
+		addCycleRow(Category.WAR, "Radiance aspect", () -> radianceAspectLabel(config.radianceSelfTier), () -> config.radianceSelfTier = (config.radianceSelfTier + 1) % 4, () -> config.radianceSelfTier = 0);
+		DoubleConfigSlider graceSlider = new DoubleConfigSlider(CONTROL_W, 20, 0.0, 3.0, 0.25, () -> config.radianceAdvanceNoticeSeconds, v -> config.radianceAdvanceNoticeSeconds = v, v -> Component.literal(formatGraceSeconds(v)));
+		addSliderRow(Category.WAR, "Radiance grace", graceSlider, graceSlider::syncFromConfig, () -> config.radianceAdvanceNoticeSeconds = 1.25);
+		addToggleRow(Category.WAR, "Radiance require war", () -> config.radianceRequireWar, v -> config.radianceRequireWar = v, "On", "Off", true);
+		addToggleRow(Category.WAR, "Radiance audio ping", () -> config.radiancePing, v -> config.radiancePing = v, "On", "Off", true);
+		EditBox radianceKeyBox = new EditBox(this.font, 0, 0, CONTROL_W, 20, Component.literal("Radiance group key"));
+		radianceKeyBox.setMaxLength(64);
+		radianceKeyBox.setValue(config.radianceGroupKey);
+		radianceKeyBox.setResponder(value -> config.radianceGroupKey = value.trim());
+		addRow(Category.WAR, "Radiance group key", radianceKeyBox, () -> {
+			if (!radianceKeyBox.isFocused() && !radianceKeyBox.getValue().equals(config.radianceGroupKey)) {
+				radianceKeyBox.setValue(config.radianceGroupKey);
+			}
+		}, () -> {
+			config.radianceGroupKey = "";
+			radianceKeyBox.setValue("");
+			config.save();
+			EdenModClient.syncRadianceGroup(config);
+		});
 
 		// Visuals & QoL
 		if (config.isSecretUnlocked(BridgeConfig.SECRET_BABY_PLAYERS)) {
@@ -513,6 +537,7 @@ public final class BridgeConfigScreen extends Screen {
 	@Override
 	public void onClose() {
 		config.save();
+		EdenModClient.syncRadianceGroup(config);
 		this.minecraft.setScreen(parent);
 	}
 
@@ -604,6 +629,15 @@ public final class BridgeConfigScreen extends Screen {
 		}
 	}
 
+	private static String radianceAspectLabel(int tier) {
+		return switch (tier) {
+			case 1 -> "Tier 1 (+1.0s)";
+			case 2 -> "Tier 2 (+1.65s)";
+			case 3 -> "Tier 3 (+2.0s)";
+			default -> "None (8.0s)";
+		};
+	}
+
 	private final class IntConfigSlider extends AbstractSliderButton {
 		private final int min;
 		private final int max;
@@ -642,6 +676,64 @@ public final class BridgeConfigScreen extends Screen {
 			}
 			snapped = Math.max(min, Math.min(max, snapped));
 			if (snapped != getter.get()) {
+				setter.accept(snapped);
+				config.save();
+			}
+			updateMessage();
+		}
+	}
+
+	private static String formatGraceSeconds(double sec) {
+		if (sec <= 0.001) {
+			return "0s";
+		}
+		if (Math.abs(sec - Math.round(sec)) < 0.001) {
+			return String.format(Locale.ROOT, "%.0fs", sec);
+		}
+		if (Math.abs(sec * 10 - Math.round(sec * 10)) < 0.001) {
+			return String.format(Locale.ROOT, "%.1fs", sec);
+		}
+		return String.format(Locale.ROOT, "%.2fs", sec);
+	}
+
+	private final class DoubleConfigSlider extends AbstractSliderButton {
+		private final double min;
+		private final double max;
+		private final double step;
+		private final Supplier<Double> getter;
+		private final Consumer<Double> setter;
+		private final java.util.function.Function<Double, Component> labeler;
+
+		private DoubleConfigSlider(int width, int height, double min, double max, double step, Supplier<Double> getter, Consumer<Double> setter, java.util.function.Function<Double, Component> labeler) {
+			super(0, 0, width, height, Component.empty(), 0.0d);
+			this.min = min;
+			this.max = max;
+			this.step = step;
+			this.getter = getter;
+			this.setter = setter;
+			this.labeler = labeler;
+			syncFromConfig();
+		}
+
+		private void syncFromConfig() {
+			double current = Math.max(min, Math.min(max, getter.get()));
+			this.value = (max > min) ? (current - min) / (max - min) : 0.0d;
+			updateMessage();
+		}
+
+		@Override
+		protected void updateMessage() {
+			setMessage(labeler.apply(getter.get()));
+		}
+
+		@Override
+		protected void applyValue() {
+			double raw = min + this.value * (max - min);
+			double snapped = Math.round((raw - min) / step) * step + min;
+			snapped = Math.max(min, Math.min(max, snapped));
+			snapped = Math.round(snapped * 100.0) / 100.0;
+			this.value = (max > min) ? (snapped - min) / (max - min) : 0.0d;
+			if (Double.compare(snapped, getter.get()) != 0) {
 				setter.accept(snapped);
 				config.save();
 			}

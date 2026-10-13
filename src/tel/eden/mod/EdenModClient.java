@@ -662,6 +662,7 @@ public final class EdenModClient implements ClientModInitializer {
 			AllianceMenuScraper.reset();
 			GuildMenuScraper.reset();
 			AttackTimerMenu.reset();
+			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
 			guildAllyManager.requestCancel();
 			// Connect if applicable; the backend reports link/membership standing via
 			// authOk (handleAuthStatus), which drives any "please link" prompt.
@@ -756,6 +757,7 @@ public final class EdenModClient implements ClientModInitializer {
 			TerritoryOutlineRenderer.onTick(client);
 			WarDPS.onTick(config);
 			WarTracker.onTick();
+			tel.eden.mod.war.radiance.RadianceTracker.onClientTick(config, client);
 			RaidPartyTracker.onTick();
 			RaidReadyTracker.onClientTick();
 			PartyHealthTracker.tick();
@@ -1047,6 +1049,39 @@ public final class EdenModClient implements ClientModInitializer {
 					// only touched there (render + the menu scraper), so this keeps all
 					// access single-threaded (this callback runs on the websocket thread).
 					Minecraft.getInstance().execute(() -> AttackTimerMenu.updateBoard(entries));
+				}
+
+				@Override
+				public void onRadianceGroupCount(String groupKey, int count) {
+					String key = groupKey != null ? groupKey.trim() : "";
+					if (key.isEmpty()) {
+						Minecraft.getInstance().execute(() -> tel.eden.mod.war.radiance.RadianceTracker.setGroupMemberCount(0));
+						return;
+					}
+					if (config.radianceGroupKey != null && config.radianceGroupKey.trim().equalsIgnoreCase(key)) {
+						Minecraft.getInstance().execute(() -> tel.eden.mod.war.radiance.RadianceTracker.setGroupMemberCount(count));
+					}
+				}
+
+				@Override
+				public void onRadianceCast(String sender, String senderUuid, String groupKey, int tier, long remainingMs, long timestamp) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						if (mc.player == null) {
+							return;
+						}
+						String myUuid = mc.player.getUUID().toString().replace("-", "");
+						String cleanSenderUuid = senderUuid != null ? senderUuid.replace("-", "").trim() : "";
+						if (!cleanSenderUuid.isEmpty() && cleanSenderUuid.equalsIgnoreCase(myUuid)) {
+							return;
+						}
+						if (sender != null && !sender.isBlank()) {
+							if (sender.equalsIgnoreCase(mc.player.getGameProfile().name()) || sender.equalsIgnoreCase(mc.player.getName().getString())) {
+								return;
+							}
+						}
+						tel.eden.mod.war.radiance.RadianceTracker.onRemoteCast(config, groupKey, tier, remainingMs, System.currentTimeMillis(), 0L);
+					});
 				}
 
 				@Override
@@ -2207,6 +2242,9 @@ public final class EdenModClient implements ClientModInitializer {
 		BridgeWebSocketClient current = socket;
 		if (current != null && onWynncraft) {
 			current.sendPresence(active);
+			if (active) {
+				syncRadianceGroup(config);
+			}
 		}
 	}
 
@@ -2290,6 +2328,24 @@ public final class EdenModClient implements ClientModInitializer {
 				current.sendPresence(inGameWorld); // send whatever state we already detected
 			}
 		}
+		syncRadianceGroup(config);
+	}
+
+	public static void syncRadianceGroup(BridgeConfig config) {
+		if (config == null || instance == null) {
+			return;
+		}
+		BridgeWebSocketClient current = instance.socket;
+		if (current != null) {
+			if (config.radianceTracker && config.radianceGroupKey != null && !config.radianceGroupKey.isBlank()) {
+				current.sendRadianceGroup(config.radianceGroupKey);
+			} else {
+				tel.eden.mod.war.radiance.RadianceTracker.setGroupMemberCount(0);
+				current.sendRadianceGroup("");
+			}
+		} else {
+			tel.eden.mod.war.radiance.RadianceTracker.setGroupMemberCount(0);
+		}
 	}
 
 	private synchronized void disconnect() {
@@ -2314,6 +2370,7 @@ public final class EdenModClient implements ClientModInitializer {
 		RaidReadyTracker.reset();
 		PartyHealthTracker.reset();
 		ChatReplyManager.reset();
+		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();
 		guildAllyManager.requestCancel();
 		territoryDefendedTracker.clear();
 		// Before the socket goes: an outstanding deduct must not outlive the session that
@@ -2374,6 +2431,7 @@ public final class EdenModClient implements ClientModInitializer {
 			Minecraft.getInstance().execute(() -> {
 				WarTracker.onChat(warLine);
 				WarDPS.onChat(warLine);
+				tel.eden.mod.war.radiance.RadianceTracker.onChat(warLine);
 				tel.eden.mod.war.TerritoryLossTracker.onChat(warLine);
 			});
 			// Auto /stream sits above the socket guard on purpose: it is a local

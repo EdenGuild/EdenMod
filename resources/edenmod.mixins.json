@@ -27,6 +27,7 @@
     "ItemRenderMixin",
     "LivingEntityRendererMixin",
     "OptionsMixin",
+    "PlayerTabOverlayAccessor",
     "TitleScreenMixin"
   ],
   "injectors": {
