@@ -88,7 +88,7 @@ public final class EmoteWheelScreen extends Screen {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		playAndClose(activeSector((int) event.x(), (int) event.y(), this.width / 2, this.height / 2));
-		return super.mouseClicked(event, doubleClick);
+		return true;
 	}
 
 	@Override
