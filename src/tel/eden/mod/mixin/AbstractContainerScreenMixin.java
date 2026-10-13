@@ -50,14 +50,14 @@ public abstract class AbstractContainerScreenMixin {
 					AbstractContainerMenu menu = getMenu();
 					if (RaidGambitSafety.isRaidReadyMenu(menu) && !RaidGambitSafety.isPlayerAlreadyReadied(menu)) {
 						List<Component> warnings = new ArrayList<>();
-						if (config.requireGuildRaid && !RaidGambitSafety.isGuildRaidAvailable(menu)) {
-							warnings.add(RaidGambitSafety.getGuildRaidTooltipWarning());
-						}
 						if (config.raidGambitSafety && config.raidGambitMinimum > 0) {
 							int enabled = RaidGambitSafety.countEnabledGambits(menu);
 							if (enabled < config.raidGambitMinimum) {
 								warnings.add(RaidGambitSafety.getTooltipWarning(config.raidGambitMinimum));
 							}
+						}
+						if (config.requireGuildRaid && !RaidGambitSafety.isGuildRaidAvailable(menu)) {
+							warnings.add(RaidGambitSafety.getGuildRaidTooltipWarning());
 						}
 						if (!warnings.isEmpty()) {
 							List<Component> base = cir.getReturnValue();
