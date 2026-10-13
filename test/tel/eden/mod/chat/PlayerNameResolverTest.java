@@ -87,4 +87,10 @@ class PlayerNameResolverTest {
 		PlayerNameResolver.learnFromText("KnownUser/NickBuddy joined!");
 		assertEquals(Optional.of("KnownUser"), PlayerNameResolver.resolveKnown("NickBuddy"));
 	}
+
+	@Test
+	void resolveHandlesNullMessageSafely() {
+		assertEquals("SomePlayer", PlayerNameResolver.resolve(null, "SomePlayer"));
+		assertEquals(null, PlayerNameResolver.resolve(null, null));
+	}
 }

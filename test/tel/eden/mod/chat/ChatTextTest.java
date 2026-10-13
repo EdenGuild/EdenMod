@@ -83,6 +83,18 @@ class ChatTextTest {
 	}
 
 	@Test
+	void resolveRealNameHandlesNullMessageSafely() {
+		assertEquals("Asthae", ChatText.resolveRealName(null, "Asthae"));
+		assertNull(ChatText.resolveRealName(null, "some weird nickname"));
+		assertNull(ChatText.resolveRealName(null, null));
+	}
+
+	@Test
+	void resolveRealNameAnywhereHandlesNullMessageSafely() {
+		assertNull(ChatText.resolveRealNameAnywhere(null, "plain"));
+	}
+
+	@Test
 	void resolveClickTargetNamePeelsANickSlashRealSuffix() {
 		Component message = Component.literal("catboy/FadeDave");
 
