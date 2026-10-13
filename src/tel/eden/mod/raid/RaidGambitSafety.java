@@ -165,9 +165,31 @@ public final class RaidGambitSafety {
 		return false;
 	}
 
+	/** Checks if the raid preparation menu has a guild raid available. */
+	public static boolean isGuildRaidAvailable(AbstractContainerMenu menu) {
+		if (menu == null) {
+			return false;
+		}
+		for (int i = 0; i < Math.min(CONTAINER_SLOTS, menu.slots.size()); i++) {
+			ItemStack stack = menu.getSlot(i).getItem();
+			if (!stack.isEmpty()) {
+				String name = ChatFormatting.stripFormatting(stack.getHoverName().getString()).trim();
+				if (name.equalsIgnoreCase("Guild Raid Available") || name.contains("Guild Raid Available")) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	/** Evaluates whether a ready click should be blocked based on active gambits and settings. */
 	public static boolean evaluateSafetyBlock(int slotIndex, boolean isRaidMenu, boolean isAlreadyReadied, int enabledGambits, ClickType clickType, boolean shiftHeld, BridgeConfig config) {
-		if (config == null || !config.raidGambitSafety || config.raidGambitMinimum <= 0) {
+		return evaluateSafetyBlock(slotIndex, isRaidMenu, isAlreadyReadied, enabledGambits, true, clickType, shiftHeld, config);
+	}
+
+	/** Evaluates whether a ready click should be blocked based on active gambits, guild raid status, and settings. */
+	public static boolean evaluateSafetyBlock(int slotIndex, boolean isRaidMenu, boolean isAlreadyReadied, int enabledGambits, boolean isGuildRaid, ClickType clickType, boolean shiftHeld, BridgeConfig config) {
+		if (config == null) {
 			return false;
 		}
 		if (slotIndex < READY_SLOT_MIN || slotIndex > READY_SLOT_MAX) {
@@ -179,16 +201,26 @@ public final class RaidGambitSafety {
 		if (isAlreadyReadied) {
 			return false;
 		}
-		if (enabledGambits >= config.raidGambitMinimum) {
+		boolean isShift = (clickType == ClickType.QUICK_MOVE || shiftHeld);
+		if (isShift) {
 			return false;
 		}
-		boolean isShift = (clickType == ClickType.QUICK_MOVE || shiftHeld);
-		return !isShift;
+		if (config.requireGuildRaid && !isGuildRaid) {
+			return true;
+		}
+		if (config.raidGambitSafety && config.raidGambitMinimum > 0 && enabledGambits < config.raidGambitMinimum) {
+			return true;
+		}
+		return false;
 	}
 
 	/** Determines whether the clicked slot should be blocked from readying up. */
 	public static boolean shouldBlockReadyClick(AbstractContainerMenu menu, Slot slot, ClickType clickType, BridgeConfig config) {
-		if (config == null || !config.raidGambitSafety || config.raidGambitMinimum <= 0) {
+		if (config == null) {
+			return false;
+		}
+		boolean gambitActive = config.raidGambitSafety && config.raidGambitMinimum > 0;
+		if (!gambitActive && !config.requireGuildRaid) {
 			return false;
 		}
 		if (!isReadyClickSlot(slot)) {
@@ -201,7 +233,8 @@ public final class RaidGambitSafety {
 			return false;
 		}
 		int enabled = countEnabledGambits(menu);
-		return evaluateSafetyBlock(slot.index, true, false, enabled, clickType, isShiftKeyDown(), config);
+		boolean isGuildRaid = isGuildRaidAvailable(menu);
+		return evaluateSafetyBlock(slot.index, true, false, enabled, isGuildRaid, clickType, isShiftKeyDown(), config);
 	}
 
 	/** Generates the user-facing warning message with correct singular/plural phrasing. */
@@ -213,6 +246,16 @@ public final class RaidGambitSafety {
 	/** Generates the colored tooltip warning component. */
 	public static Component getTooltipWarning(int minRequired) {
 		return Component.literal("§c" + getWarningMessage(minRequired));
+	}
+
+	/** Generates the user-facing warning message for non-guild raid readying. */
+	public static String getGuildRaidWarningMessage() {
+		return "This raid is not a Guild Raid, Shift-Click to ready up anyways.";
+	}
+
+	/** Generates the colored tooltip warning component for non-guild raid readying. */
+	public static Component getGuildRaidTooltipWarning() {
+		return Component.literal("§c" + getGuildRaidWarningMessage());
 	}
 
 	/** Plays rejection sound when a ready click is blocked. */

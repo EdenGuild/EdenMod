@@ -139,4 +139,38 @@ class RaidGambitSafetyTest {
 		// 3 gambits (plural)
 		assertEquals("You have less than 3 gambits selected, Shift-Click to ready up anyways.", RaidGambitSafety.getWarningMessage(3));
 	}
+
+	@Test
+	void guildRaidSafetyBlocksWhenNotGuildRaid() {
+		config.requireGuildRaid = true;
+		config.raidGambitSafety = false;
+
+		// Not a guild raid -> blocked on normal click
+		boolean blocked = RaidGambitSafety.evaluateSafetyBlock(33, true, false, 0, false, ClickType.PICKUP, false, config);
+		assertTrue(blocked, "Normal click must be blocked when requireGuildRaid is true and raid is not a guild raid");
+
+		// Shift click -> allowed
+		boolean shiftAllowed = RaidGambitSafety.evaluateSafetyBlock(33, true, false, 0, false, ClickType.QUICK_MOVE, false, config);
+		assertFalse(shiftAllowed, "Shift-click must be allowed even when raid is not a guild raid");
+
+		// Is a guild raid -> allowed
+		boolean graidAllowed = RaidGambitSafety.evaluateSafetyBlock(33, true, false, 0, true, ClickType.PICKUP, false, config);
+		assertFalse(graidAllowed, "Normal click must be allowed when raid is a guild raid");
+	}
+
+	@Test
+	void guildRaidSafetyDisabledByDefault() {
+		assertFalse(config.requireGuildRaid, "requireGuildRaid must be false by default");
+
+		// Even when not a guild raid, if requireGuildRaid is false, it does not block
+		config.raidGambitSafety = false;
+		boolean blocked = RaidGambitSafety.evaluateSafetyBlock(33, true, false, 0, false, ClickType.PICKUP, false, config);
+		assertFalse(blocked, "Must not block when requireGuildRaid is disabled");
+	}
+
+	@Test
+	void generatesGuildRaidWarningMessage() {
+		assertEquals("This raid is not a Guild Raid, Shift-Click to ready up anyways.", RaidGambitSafety.getGuildRaidWarningMessage());
+		assertEquals("§cThis raid is not a Guild Raid, Shift-Click to ready up anyways.", RaidGambitSafety.getGuildRaidTooltipWarning().getString());
+	}
 }
