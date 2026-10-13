@@ -254,6 +254,12 @@ public final class BridgeConfig {
 	/** Delay in seconds before alerting that teammates are waiting (range 10-300, default 60). */
 	public int raidReadyReminderSeconds = 60;
 
+	/** Require shift-clicking to ready up in the raid menu if fewer than the minimum gambits are selected. */
+	public boolean raidGambitSafety = true;
+
+	/** Minimum number of gambits required to ready up normally (range 0-3, default 1). */
+	public int raidGambitMinimum = 1;
+
 	/** Custom palette for the 10 party slots. Defaults to PartyHighlightManager.DEFAULT_PALETTE. */
 	public List<Integer> partyColors = new ArrayList<>(tel.eden.mod.party.PartyHighlightManager.DEFAULT_PALETTE);
 
@@ -435,6 +441,7 @@ public final class BridgeConfig {
 					config.partyHealthBarScale = Math.max(50, Math.min(200, config.partyHealthBarScale));
 					config.partyHealthBarDistanceScale = Math.max(0, Math.min(200, config.partyHealthBarDistanceScale));
 					config.raidReadyReminderSeconds = Math.max(10, Math.min(300, config.raidReadyReminderSeconds));
+					config.raidGambitMinimum = Math.max(0, Math.min(3, config.raidGambitMinimum));
 					if (config.radianceGroupKey == null) {
 						config.radianceGroupKey = "";
 					}
