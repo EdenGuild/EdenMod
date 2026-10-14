@@ -3,6 +3,7 @@ package tel.eden.mod.mixin;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -33,12 +34,30 @@ public abstract class AbstractContainerScreenMixin {
 	private void edenmod$onSlotClicked(Slot slot, int slotId, int mouseButton, ClickType clickType, CallbackInfo ci) {
 		try {
 			BridgeConfig config = EdenModClient.instance().config();
-			if (RaidGambitSafety.shouldBlockReadyClick(getMenu(), slot, clickType, config)) {
+			List<String> reasons = RaidGambitSafety.getActiveBlockReasons(getMenu(), slot, clickType, config);
+			if (!reasons.isEmpty()) {
 				ci.cancel();
 				RaidGambitSafety.notifyBlocked(Minecraft.getInstance(), config.raidGambitMinimum);
+				RaidGambitSafety.showPopupWarning(reasons);
 			}
 		} catch (Throwable ignored) {
 		}
+	}
+
+	@Inject(method = "render", at = @At("RETURN"))
+	private void edenmod$renderSafetyPopup(GuiGraphics graphics, int mouseX, int mouseY, float delta, CallbackInfo ci) {
+		try {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc != null && mc.font != null && mc.getWindow() != null) {
+				RaidGambitSafety.renderPopupWarning(graphics, mc.font, mc.getWindow().getGuiScaledWidth());
+			}
+		} catch (Throwable ignored) {
+		}
+	}
+
+	@Inject(method = "removed", at = @At("TAIL"))
+	private void edenmod$onContainerScreenRemoved(CallbackInfo ci) {
+		RaidGambitSafety.clearPopupWarning();
 	}
 
 	@Inject(method = "getTooltipFromContainerItem(Lnet/minecraft/world/item/ItemStack;)Ljava/util/List;", at = @At("RETURN"), cancellable = true)
