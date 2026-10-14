@@ -33,7 +33,7 @@ public final class PlayerSkinResolver {
 			if (name != null && !name.isBlank()) {
 				uuid = UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8));
 			} else {
-				uuid = UUID.randomUUID();
+				return DefaultPlayerSkin.getDefaultSkin();
 			}
 		}
 		if (mc != null && mc.getConnection() != null) {

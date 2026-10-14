@@ -229,12 +229,6 @@ public final class BridgeConfig {
 	/** The emote-wheel favorites, one per slot (empty string = unused slot). */
 	public List<String> emoteWheelFavorites = new ArrayList<>();
 
-	/** Pages of emote-wheel favorites (each page is a list of up to 8 emote names). */
-	public List<List<String>> emoteWheelPages = new ArrayList<>();
-
-	/** The active page index for the emote wheel (0-based). */
-	public int emoteWheelActivePage = 0;
-
 	/** Emotes detected as unlocked from Wynncraft's emotes menu (for the favorites picker). */
 	public List<String> emoteUnlocked = new ArrayList<>();
 
@@ -427,20 +421,6 @@ public final class BridgeConfig {
 					if (config.emoteWheelFavorites == null) {
 						config.emoteWheelFavorites = new ArrayList<>();
 					}
-					if (config.emoteWheelPages == null) {
-						config.emoteWheelPages = new ArrayList<>();
-					}
-					if (config.emoteWheelPages.isEmpty()) {
-						if (!config.emoteWheelFavorites.isEmpty()) {
-							config.emoteWheelPages.add(new ArrayList<>(config.emoteWheelFavorites));
-						} else {
-							config.emoteWheelPages.add(new ArrayList<>());
-						}
-					}
-					if (config.emoteWheelActivePage < 0 || config.emoteWheelActivePage >= config.emoteWheelPages.size()) {
-						config.emoteWheelActivePage = 0;
-					}
-					config.emoteWheelFavorites = new ArrayList<>(config.emoteWheelPages.get(config.emoteWheelActivePage));
 					if (config.emoteUnlocked == null) {
 						config.emoteUnlocked = new ArrayList<>();
 					}
@@ -520,11 +500,6 @@ public final class BridgeConfig {
 	/** Persist this config to disk. */
 	public synchronized void save() {
 		try {
-			if (emoteWheelPages != null && !emoteWheelPages.isEmpty()) {
-				if (emoteWheelActivePage >= 0 && emoteWheelActivePage < emoteWheelPages.size()) {
-					emoteWheelFavorites = new ArrayList<>(emoteWheelPages.get(emoteWheelActivePage));
-				}
-			}
 			Files.createDirectories(PATH.getParent());
 			Files.writeString(PATH, GSON.toJson(this), StandardCharsets.UTF_8);
 		} catch (IOException e) {
