@@ -31,12 +31,15 @@ public final class PlayerNameResolver {
 
 	/** Resolve a rendered player name and retain any hover-provided nickname mapping. */
 	public static String resolve(Component message, String displayed) {
+		if (displayed == null) {
+			return null;
+		}
 		// A reward/bank line can contain several player names. Resolving from every
 		// hover in the whole component made the receiver inherit the giver's hover
 		// (e.g. a catboy/FadeDave hover turned every recipient into FadeDave). Only
 		// accept metadata attached to this displayed span; a previously learned alias
 		// is the safe fallback when the server omits that span's hover.
-		String resolved = ChatText.resolveRealName(message, displayed);
+		String resolved = message != null ? ChatText.resolveRealName(message, displayed) : null;
 		if (resolved == null) {
 			resolved = canonicalize(displayed);
 		}
