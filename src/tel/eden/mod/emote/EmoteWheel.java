@@ -46,12 +46,59 @@ public final class EmoteWheel {
 		}
 	}
 
-	/** The 8 favorite emote names, padded with empty strings to a full wheel. */
+	/** The 8 favorite emote names for the active page, padded with empty strings to a full wheel. */
 	public static List<String> favorites() {
-		List<String> favorites = new ArrayList<>(EdenModClient.instance().config().emoteWheelFavorites);
+		EdenModClient client = EdenModClient.instance();
+		tel.eden.mod.config.BridgeConfig config = client != null ? client.config() : null;
+		if (config == null) {
+			List<String> empty = new ArrayList<>();
+			while (empty.size() < SLOTS) {
+				empty.add("");
+			}
+			return empty;
+		}
+		ensurePages(config);
+		return favoritesForPage(config.emoteWheelActivePage);
+	}
+
+	/** The 8 favorite emote names for the given page index, padded with empty strings to a full wheel. */
+	public static List<String> favoritesForPage(int pageIndex) {
+		EdenModClient client = EdenModClient.instance();
+		tel.eden.mod.config.BridgeConfig config = client != null ? client.config() : null;
+		if (config == null) {
+			List<String> empty = new ArrayList<>();
+			while (empty.size() < SLOTS) {
+				empty.add("");
+			}
+			return empty;
+		}
+		ensurePages(config);
+		int idx = Math.max(0, Math.min(pageIndex, config.emoteWheelPages.size() - 1));
+		List<String> page = config.emoteWheelPages.get(idx);
+		List<String> favorites = new ArrayList<>(page);
 		while (favorites.size() < SLOTS) {
 			favorites.add("");
 		}
 		return favorites.subList(0, SLOTS);
+	}
+
+	public static void ensurePages(tel.eden.mod.config.BridgeConfig config) {
+		if (config == null) {
+			return;
+		}
+		if (config.emoteWheelPages == null) {
+			config.emoteWheelPages = new ArrayList<>();
+		}
+		if (config.emoteWheelPages.isEmpty()) {
+			if (config.emoteWheelFavorites != null && !config.emoteWheelFavorites.isEmpty()) {
+				config.emoteWheelPages.add(new ArrayList<>(config.emoteWheelFavorites));
+			} else {
+				config.emoteWheelPages.add(new ArrayList<>());
+			}
+		}
+		if (config.emoteWheelActivePage < 0 || config.emoteWheelActivePage >= config.emoteWheelPages.size()) {
+			config.emoteWheelActivePage = 0;
+		}
+		config.emoteWheelFavorites = new ArrayList<>(config.emoteWheelPages.get(config.emoteWheelActivePage));
 	}
 }
