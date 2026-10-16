@@ -158,6 +158,17 @@ public final class BridgeWebSocketClient {
 		default void onRadianceGroupCount(String groupKey, int count) {
 		}
 
+		/** TCC Room 2 Labyrinth position from party member. */
+		default void onTccMapPos(String sender, String senderUuid, double x, double y, double z, float yaw, boolean isWings) {
+		}
+
+		/** TCC Room 2 Golem defeated notice. */
+		default void onTccGolemDefeated(String sender, String golemId) {
+		}
+
+		/** TCC Room 2 Exit reached notice. */
+		default void onTccExitReached(String sender, String path, double x, double z) {
+		}
 		/**
 		 * The Mojang session was verified ({@code authOk}); {@code linked} and
 		 * {@code member} report this player's backend standing. Both true means full
@@ -193,6 +204,7 @@ public final class BridgeWebSocketClient {
 	});
 
 	private volatile WebSocket socket;
+	private volatile boolean authenticated = false;
 	// Tail of the serialized outbound send queue — see enqueueSend().
 	private CompletableFuture<?> sendChain = CompletableFuture.completedFuture(null);
 	private volatile boolean running;
@@ -243,10 +255,26 @@ public final class BridgeWebSocketClient {
 		running = false;
 		WebSocket current = socket;
 		socket = null;
+		authenticated = false;
 		if (current != null) {
 			current.sendClose(WebSocket.NORMAL_CLOSURE, "client closing");
 		}
 		scheduler.shutdownNow();
+	}
+
+	/** Whether the WebSocket connection is currently active and authenticated. */
+	public boolean isConnected() {
+		return socket != null && authenticated;
+	}
+
+	/** Whether raw WebSocket connection is open (even if still authenticating). */
+	public boolean isSocketOpen() {
+		return socket != null;
+	}
+
+	/** Whether the Mojang session verification has completed. */
+	public boolean isAuthenticated() {
+		return socket != null && authenticated;
 	}
 
 	/**
@@ -561,6 +589,74 @@ public final class BridgeWebSocketClient {
 	/** Ask the backend to roll a die and announce who rolled it + the result. */
 	public void sendDiceroll() {
 		sendType("diceroll");
+	}
+
+	/** Broadcast player position for TCC Room 2 Labyrinth. */
+	public void sendTccMapPos(double x, double y, double z, float yaw, boolean isWings) {
+		sendTccMapPos(x, y, z, yaw, isWings, null);
+	}
+
+	public void sendTccMapPos(double x, double y, double z, float yaw, boolean isWings, java.util.List<String> partyMembers) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "tccMapPos");
+		obj.addProperty("x", x);
+		obj.addProperty("y", y);
+		obj.addProperty("z", z);
+		obj.addProperty("yaw", yaw);
+		obj.addProperty("isWings", isWings);
+		if (partyMembers != null && !partyMembers.isEmpty()) {
+			JsonArray arr = new JsonArray();
+			for (String member : partyMembers) {
+				if (member != null && !member.isBlank()) {
+					arr.add(member);
+				}
+			}
+			obj.add("party", arr);
+		}
+		enqueueSend(current, obj.toString());
+	}
+
+	/** Broadcast defeated golem notice for TCC Room 2 Labyrinth. */
+	public void sendTccGolemDefeated(String golemId) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "tccGolemDefeated");
+		obj.addProperty("golemId", golemId);
+		enqueueSend(current, obj.toString());
+	}
+
+	/** Broadcast exit reached notice for TCC Room 2 Labyrinth. */
+	public void sendTccExitReached(String path, double x, double z) {
+		sendTccExitReached(path, x, z, null);
+	}
+
+	public void sendTccExitReached(String path, double x, double z, java.util.List<String> partyMembers) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "tccExitReached");
+		obj.addProperty("path", path);
+		obj.addProperty("x", x);
+		obj.addProperty("z", z);
+		if (partyMembers != null && !partyMembers.isEmpty()) {
+			JsonArray arr = new JsonArray();
+			for (String member : partyMembers) {
+				if (member != null && !member.isBlank()) {
+					arr.add(member);
+				}
+			}
+			obj.add("party", arr);
+		}
+		enqueueSend(current, obj.toString());
 	}
 
 	/**
@@ -1032,6 +1128,7 @@ public final class BridgeWebSocketClient {
 			return;
 		}
 		socket = null;
+		authenticated = false;
 		if (!running || reconnectScheduled) {
 			return;
 		}
@@ -1058,6 +1155,7 @@ public final class BridgeWebSocketClient {
 			running = false;
 			current = socket;
 			socket = null;
+			authenticated = false;
 			scheduler.shutdownNow();
 		}
 		if (current != null) {
@@ -1078,6 +1176,7 @@ public final class BridgeWebSocketClient {
 					authChallengeSeen.set(false);
 					pendingAuthUsername = null;
 					socket = webSocket;
+					authenticated = false;
 				}
 			}
 			if (!accepted) {
@@ -1136,8 +1235,12 @@ public final class BridgeWebSocketClient {
 				case "warBoard" -> sink.onWarBoard(parseWarBoard(obj));
 				case "radianceGroupCount" -> sink.onRadianceGroupCount(get(obj, "groupKey"), getInt(obj, "count", 0));
 				case "radianceCast" -> sink.onRadianceCast(get(obj, "sender"), get(obj, "senderUuid"), get(obj, "groupKey"), getInt(obj, "tier", 0), getLong(obj, "remainingMs", 0L), getLong(obj, "timestamp", System.currentTimeMillis()));
+				case "tccMapPos" -> sink.onTccMapPos(get(obj, "sender"), get(obj, "senderUuid"), getDouble(obj, "x", 0.0), getDouble(obj, "y", 0.0), getDouble(obj, "z", 0.0), getFloat(obj, "yaw", 0.0f), getBool(obj, "isWings"));
+				case "tccGolemDefeated" -> sink.onTccGolemDefeated(get(obj, "sender"), get(obj, "golemId"));
+				case "tccExitReached" -> sink.onTccExitReached(get(obj, "sender"), get(obj, "path"), getDouble(obj, "x", 0.0), getDouble(obj, "z", 0.0));
 				case "authChallenge" -> handleAuthChallenge(get(obj, "serverId"));
 				case "authOk" -> {
+					authenticated = true;
 					// Session verified: reset backoff and hand the backend-reported
 					// standing (linked/member/ranks) to the sink, which begins the session
 					// on full access or prompts the player otherwise.
@@ -1260,6 +1363,22 @@ public final class BridgeWebSocketClient {
 	private static long getLong(JsonObject obj, String key, long fallback) {
 		try {
 			return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsLong() : fallback;
+		} catch (RuntimeException e) {
+			return fallback;
+		}
+	}
+
+	private static double getDouble(JsonObject obj, String key, double fallback) {
+		try {
+			return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsDouble() : fallback;
+		} catch (RuntimeException e) {
+			return fallback;
+		}
+	}
+
+	private static float getFloat(JsonObject obj, String key, float fallback) {
+		try {
+			return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsFloat() : fallback;
 		} catch (RuntimeException e) {
 			return fallback;
 		}
