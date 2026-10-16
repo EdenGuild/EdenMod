@@ -3,6 +3,7 @@ package tel.eden.mod.mixin;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -33,12 +34,30 @@ public abstract class AbstractContainerScreenMixin {
 	private void edenmod$onSlotClicked(Slot slot, int slotId, int mouseButton, ClickType clickType, CallbackInfo ci) {
 		try {
 			BridgeConfig config = EdenModClient.instance().config();
-			if (RaidGambitSafety.shouldBlockReadyClick(getMenu(), slot, clickType, config)) {
+			List<String> reasons = RaidGambitSafety.getActiveBlockReasons(getMenu(), slot, clickType, config);
+			if (!reasons.isEmpty()) {
 				ci.cancel();
 				RaidGambitSafety.notifyBlocked(Minecraft.getInstance(), config.raidGambitMinimum);
+				RaidGambitSafety.showPopupWarning(reasons);
 			}
 		} catch (Throwable ignored) {
 		}
+	}
+
+	@Inject(method = "render", at = @At("RETURN"))
+	private void edenmod$renderSafetyPopup(GuiGraphics graphics, int mouseX, int mouseY, float delta, CallbackInfo ci) {
+		try {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc != null && mc.font != null && mc.getWindow() != null) {
+				RaidGambitSafety.renderPopupWarning(graphics, mc.font, mc.getWindow().getGuiScaledWidth());
+			}
+		} catch (Throwable ignored) {
+		}
+	}
+
+	@Inject(method = "removed", at = @At("TAIL"))
+	private void edenmod$onContainerScreenRemoved(CallbackInfo ci) {
+		RaidGambitSafety.clearPopupWarning();
 	}
 
 	@Inject(method = "getTooltipFromContainerItem(Lnet/minecraft/world/item/ItemStack;)Ljava/util/List;", at = @At("RETURN"), cancellable = true)
@@ -46,15 +65,39 @@ public abstract class AbstractContainerScreenMixin {
 		try {
 			if (this.hoveredSlot != null && RaidGambitSafety.isReadyClickSlot(this.hoveredSlot)) {
 				BridgeConfig config = EdenModClient.instance().config();
-				if (config != null && config.raidGambitSafety && config.raidGambitMinimum > 0) {
+				if (config != null) {
 					AbstractContainerMenu menu = getMenu();
 					if (RaidGambitSafety.isRaidReadyMenu(menu) && !RaidGambitSafety.isPlayerAlreadyReadied(menu)) {
-						int enabled = RaidGambitSafety.countEnabledGambits(menu);
-						if (enabled < config.raidGambitMinimum) {
+						List<Component> warnings = new ArrayList<>();
+						if (config.raidGambitSafety && config.raidGambitMinimum > 0) {
+							int enabled = RaidGambitSafety.countEnabledGambits(menu);
+							if (enabled < config.raidGambitMinimum) {
+								warnings.add(RaidGambitSafety.getTooltipWarning(config.raidGambitMinimum));
+							}
+						}
+						if (config.requireGuildRaid && !RaidGambitSafety.isGuildRaidAvailable(menu)) {
+							warnings.add(RaidGambitSafety.getGuildRaidTooltipWarning());
+						}
+						if (!warnings.isEmpty()) {
 							List<Component> base = cir.getReturnValue();
 							List<Component> tooltip = new ArrayList<>(base != null ? base : List.of());
-							tooltip.add(Component.empty());
-							tooltip.add(RaidGambitSafety.getTooltipWarning(config.raidGambitMinimum));
+							int insertIdx = -1;
+							for (int i = 0; i < tooltip.size(); i++) {
+								String text = net.minecraft.ChatFormatting.stripFormatting(tooltip.get(i).getString()).trim();
+								if (text.contains("Click to Ready Up") || text.equalsIgnoreCase("Click to Ready Up")) {
+									insertIdx = i;
+									break;
+								}
+							}
+							if (insertIdx != -1) {
+								for (Component w : warnings) {
+									tooltip.add(insertIdx++, w);
+								}
+								tooltip.add(insertIdx, Component.empty());
+							} else {
+								tooltip.add(Component.empty());
+								tooltip.addAll(warnings);
+							}
 							cir.setReturnValue(tooltip);
 						}
 					}
