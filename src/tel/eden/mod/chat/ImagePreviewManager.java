@@ -621,6 +621,8 @@ public class ImagePreviewManager {
 				"media.tenor.com", "media1.tenor.com", "c.tenor.com",
 				// Giphy
 				"media.giphy.com", "i.giphy.com", "media0.giphy.com", "media1.giphy.com", "media2.giphy.com", "media3.giphy.com", "media4.giphy.com",
+				// Klipy (Discord GIF picker)
+				"static.klipy.com", "static1.klipy.com", "static2.klipy.com",
 				// Wynncraft
 				"cdn.wynncraft.com");
 
@@ -630,9 +632,9 @@ public class ImagePreviewManager {
 	 * page and pulls the real media URL out of its {@code og:image} tag before the
 	 * normal download path runs.
 	 *
-	 * <p>Klipy is deliberately not included here: its share pages sit behind a
-	 * Cloudflare bot-management challenge that always 403s a plain HTTP fetch, so
-	 * there's nothing to resolve — those links stay plain clickable text instead.
+	 * <p>Klipy share pages sit behind a Cloudflare bot-management challenge that
+	 * always 403s a direct client fetch; EdenBot resolves those to direct
+	 * static.klipy.com media links server-side before relaying.
 	 */
 	private static final java.util.Set<String> SHARE_HOSTS = java.util.Set.of("tenor.com", "www.tenor.com");
 
@@ -647,8 +649,8 @@ public class ImagePreviewManager {
 			if (TRUSTED_HOSTS.contains(host)) {
 				return true;
 			}
-			// Allow any subdomain of Discord's CDN (e.g. images-ext-1.discordapp.net).
-			return host.endsWith(".discordapp.com") || host.endsWith(".discordapp.net");
+			// Allow any subdomain of Discord's or Klipy's CDN (e.g. images-ext-1.discordapp.net).
+			return host.endsWith(".discordapp.com") || host.endsWith(".discordapp.net") || host.endsWith(".klipy.com");
 		} catch (IllegalArgumentException e) {
 			return false;
 		}
