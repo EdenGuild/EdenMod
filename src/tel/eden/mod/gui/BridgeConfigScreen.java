@@ -184,6 +184,7 @@ public final class BridgeConfigScreen extends Screen {
 			config.save();
 			EdenModClient.syncRadianceGroup(config);
 		});
+		addToggleRow(Category.WAR, "Territory preset helper", () -> config.territoryMenuSuite, v -> config.territoryMenuSuite = v, "On", "Off", true);
 
 		// Visuals & QoL
 		if (config.isSecretUnlocked(BridgeConfig.SECRET_BABY_PLAYERS)) {
