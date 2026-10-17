@@ -39,7 +39,6 @@ public final class TerritoryMenuPanel {
 	}
 
 	private static boolean dropdownOpen = false;
-	private static final Set<Screen> registeredScreens = Collections.newSetFromMap(new java.util.WeakHashMap<>());
 
 	public static void init() {
 		ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
@@ -49,14 +48,12 @@ public final class TerritoryMenuPanel {
 			String name = screen.getClass().getName();
 			if (name.endsWith("TerritoryManagementScreen")) {
 				dropdownOpen = false;
-				if (registeredScreens.add(screen)) {
-					ScreenEvents.afterRender(screen).register((scr, graphics, mouseX, mouseY, tickDelta) -> {
-						renderWynntilsOverlay(scr, graphics, mouseX, mouseY);
-					});
-					ScreenMouseEvents.allowMouseClick(screen).register((scr, event) -> {
-						return handleWynntilsMouseClick(scr, event.x(), event.y(), event.button());
-					});
-				}
+				ScreenEvents.afterRender(screen).register((scr, graphics, mouseX, mouseY, tickDelta) -> {
+					renderWynntilsOverlay(scr, graphics, mouseX, mouseY);
+				});
+				ScreenMouseEvents.allowMouseClick(screen).register((scr, event) -> {
+					return handleWynntilsMouseClick(scr, event.x(), event.y(), event.button());
+				});
 			}
 		});
 	}
