@@ -25,11 +25,11 @@ public final class TccLabyrinthMapHud {
 	public static final String PANEL = "tccLabyrinthMap";
 	public static final float DEFAULT_X = 0.02f;
 	public static final float DEFAULT_Y = 0.05f;
-	public static final int PANEL_W = 148;
-	public static final int PANEL_H = 195;
+	public static final int PANEL_W = 130;
+	public static final int PANEL_H = 180;
 
-	private static final int INSET_X = 14;
-	private static final int INSET_Y = 14;
+	private static final int INSET_X = 5;
+	private static final int INSET_Y = 6;
 	private static final int VIEWPORT_W = 120;
 	private static final int VIEWPORT_H = 167;
 
@@ -134,8 +134,8 @@ public final class TccLabyrinthMapHud {
 			drawPlayer(graphics, mc, p, sx, sy, !connected && p.isLocal());
 		}
 
-		// 6. Minimap Ornate Frame overlay (164 x 155 source)
-		graphics.blit(RenderPipelines.GUI_TEXTURED, FRAME_TEXTURE, 0, 0, 0.0f, 0.0f, PANEL_W, PANEL_H, 164, 155, 164, 155);
+		// 6. Minimap Ornate Frame overlay (144 x 143 visible frame cropped from 164 x 155 source at u=13, v=6)
+		graphics.blit(RenderPipelines.GUI_TEXTURED, FRAME_TEXTURE, 0, 0, 13.0f, 6.0f, PANEL_W, PANEL_H, 144, 143, 164, 155);
 	}
 
 	private static float[] projectMapPixel(float mapPixelX, float mapPixelY) {
