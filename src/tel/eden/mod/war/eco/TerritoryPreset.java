@@ -14,7 +14,25 @@ public record TerritoryPreset(String name, String notes, Set<String> excludedTer
 		name = (name == null || name.isBlank()) ? "Unnamed Preset" : name.trim();
 		notes = (notes == null) ? "" : notes.trim();
 		excludedTerritories = (excludedTerritories == null) ? Set.of() : Set.copyOf(excludedTerritories);
-		territories = (territories == null) ? Map.of() : Collections.unmodifiableMap(new java.util.LinkedHashMap<>(territories));
+		Map<String, TerritoryLoadout> cleanTerrs = new java.util.LinkedHashMap<>();
+		if (territories != null) {
+			Map<String, TerritoryLoadout> caseInsensitive = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+			for (Map.Entry<String, TerritoryLoadout> entry : territories.entrySet()) {
+				if (entry.getKey() == null)
+					continue;
+				String clean = entry.getKey().trim();
+				if (clean.endsWith("(HQ)")) {
+					clean = clean.substring(0, clean.length() - 4).trim();
+				}
+				if (!clean.isEmpty()) {
+					if (!caseInsensitive.containsKey(clean) || Character.isUpperCase(clean.charAt(0))) {
+						caseInsensitive.put(clean, entry.getValue());
+					}
+				}
+			}
+			cleanTerrs.putAll(caseInsensitive);
+		}
+		territories = Collections.unmodifiableMap(cleanTerrs);
 	}
 
 	public static TerritoryPreset empty(String name) {

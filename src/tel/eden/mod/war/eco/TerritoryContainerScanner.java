@@ -198,16 +198,6 @@ public final class TerritoryContainerScanner {
 				return slot;
 			}
 		}
-		for (Slot slot : menu.slots) {
-			if (!isContainerSlot(menu, slot) || !slot.hasItem()) {
-				continue;
-			}
-			for (String line : getLoreLines(slot.getItem())) {
-				if (line.toLowerCase().contains(target)) {
-					return slot;
-				}
-			}
-		}
 		return null;
 	}
 
@@ -358,14 +348,30 @@ public final class TerritoryContainerScanner {
 		return null;
 	}
 
+	public static String cleanTerritoryTitle(String raw) {
+		if (raw == null || raw.isBlank()) {
+			return null;
+		}
+		String clean = ChatFormatting.stripFormatting(raw).trim();
+		if (clean.endsWith("(HQ)")) {
+			clean = clean.substring(0, clean.length() - 4).trim();
+		}
+		Matcher m = CLEAN_NAME_PATTERN.matcher(clean);
+		if (m.find()) {
+			return m.group(1).trim();
+		}
+		return clean;
+	}
+
 	public static boolean isUpgradeOrBonusMenu(AbstractContainerMenu menu, String title) {
-		if (menu == null) {
+		if (menu == null || title == null) {
 			return false;
 		}
-		if (title != null && (title.contains("Upgrades") || title.contains("Bonuses") || title.contains("Bonus"))) {
-			return true;
+		if (title.contains("󏿰")) {
+			return false;
 		}
-		if (title != null && title.contains("󏿰")) {
+		String terr = parseTerritoryFromUpgradeTitle(title);
+		if (terr == null || !TerritoryGuideController.isKnownTerritory(terr)) {
 			return false;
 		}
 		return !scanUpgradeMenu(menu).isEmpty();
@@ -379,6 +385,13 @@ public final class TerritoryContainerScanner {
 		int idx = clean.lastIndexOf(':');
 		if (idx > 0) {
 			clean = clean.substring(0, idx).trim();
+		} else {
+			for (String suffix : new String[]{" Guild Tower", " Upgrades", " Bonuses", " Bonus", " Manage"}) {
+				if (clean.toLowerCase().endsWith(suffix.toLowerCase())) {
+					clean = clean.substring(0, clean.length() - suffix.length()).trim();
+					break;
+				}
+			}
 		}
 		Matcher m = CLEAN_NAME_PATTERN.matcher(clean);
 		if (m.find()) {

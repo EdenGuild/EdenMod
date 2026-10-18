@@ -3,6 +3,7 @@ package tel.eden.mod.war.eco;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -26,6 +27,51 @@ public class TerritoryScannerTest {
 		// Clean territory overview title (no colon)
 		assertEquals("Path to Talor", TerritoryContainerScanner.parseTerritoryFromUpgradeTitle("Path to Talor"));
 		assertEquals("Dark Forest Village", TerritoryContainerScanner.parseTerritoryFromUpgradeTitle("Dark Forest Village"));
+
+		// Submenu titles without colons
+		assertEquals("Twisted Ridge", TerritoryContainerScanner.parseTerritoryFromUpgradeTitle("Twisted Ridge Guild Tower"));
+		assertEquals("Twisted Ridge", TerritoryContainerScanner.parseTerritoryFromUpgradeTitle("Twisted Ridge Bonus"));
+		assertEquals("Cinfras Outskirts", TerritoryContainerScanner.parseTerritoryFromUpgradeTitle("\u00C0Cinfras Outskirts (HQ) Guild Tower"));
+		assertEquals("Mesquis Tower", TerritoryContainerScanner.parseTerritoryFromUpgradeTitle("Mesquis Tower Guild Tower"));
+		assertEquals("Mesquis Tower", TerritoryContainerScanner.parseTerritoryFromUpgradeTitle("Mesquis Tower Bonus"));
+		assertEquals("Mesquis Tower", TerritoryContainerScanner.parseTerritoryFromUpgradeTitle("Mesquis Tower"));
+	}
+
+	@Test
+	public void testFakeMediumAndHighAbsoluteMatching() {
+		// Exact Fake Medium
+		TerritoryPreset.TerritoryLoadout exactMed = new TerritoryPreset.TerritoryLoadout(2, 2, 3, 2, Map.of("Tower Aura", 1, "Tower Volley", 1));
+		assertTrue(TerritoryGuideController.isFakeMedium(exactMed));
+
+		// Fake Medium stats with extra economy bonus -> MUST NOT match Fake Medium
+		TerritoryPreset.TerritoryLoadout medWithEco = new TerritoryPreset.TerritoryLoadout(2, 2, 3, 2, Map.of("Tower Aura", 1, "Tower Volley", 1, "Larger Resource Storage", 2));
+		assertFalse(TerritoryGuideController.isFakeMedium(medWithEco));
+
+		// Exact Fake High
+		TerritoryPreset.TerritoryLoadout exactHigh = new TerritoryPreset.TerritoryLoadout(5, 4, 5, 5, Map.of("Tower Aura", 1, "Tower Volley", 3));
+		assertTrue(TerritoryGuideController.isFakeHigh(exactHigh));
+
+		// Fake High stats with extra bonus -> MUST NOT match Fake High
+		TerritoryPreset.TerritoryLoadout highWithEco = new TerritoryPreset.TerritoryLoadout(5, 4, 5, 5, Map.of("Tower Aura", 1, "Tower Volley", 3, "Emerald Rate", 3));
+		assertFalse(TerritoryGuideController.isFakeHigh(highWithEco));
+	}
+
+	@Test
+	public void testBidirectionalRemainingClicks() {
+		TerritoryPreset.TerritoryLoadout target = new TerritoryPreset.TerritoryLoadout(2, 2, 3, 2, Map.of("Tower Aura", 1));
+
+		// Current has higher damage (needs right-click downgrade from 7 to 2 = 5 clicks)
+		TerritoryPreset.TerritoryLoadout overLeveled = new TerritoryPreset.TerritoryLoadout(7, 2, 3, 2, Map.of("Tower Aura", 1));
+		assertEquals(5, TerritoryGuideController.remainingClicks(overLeveled, target));
+
+		// Current has unwanted bonus (needs right-click downgrade from 3 to 0 = 3 clicks)
+		TerritoryPreset.TerritoryLoadout extraBonus = new TerritoryPreset.TerritoryLoadout(2, 2, 3, 2, Map.of("Tower Aura", 1, "Tome Seeking", 3));
+		assertEquals(3, TerritoryGuideController.remainingClicks(extraBonus, target));
+
+		// Both upgrade and downgrade needed
+		TerritoryPreset.TerritoryLoadout mixed = new TerritoryPreset.TerritoryLoadout(7, 1, 3, 2, Map.of("Tower Aura", 1, "Tome Seeking", 2));
+		// Damage -5, Attack +1, Tome Seeking -2 -> 5 + 1 + 2 = 8
+		assertEquals(8, TerritoryGuideController.remainingClicks(mixed, target));
 	}
 
 	@Test
@@ -334,5 +380,88 @@ public class TerritoryScannerTest {
 		TerritoryGuideController.GuideStep step4 = TerritoryGuideController.evaluate(Map.of(), Set.of(), "Eden's Territory Loadouts", false);
 		assertFalse(step4.action() == TerritoryGuideController.ActionType.CLICK_FAKE_MEDIUM_OPTION, "Should not re-prompt Fake Medium after applying!");
 		assertEquals(TerritoryGuideController.ActionType.ALL_COMPLETE, step4.action());
+	}
+
+	@Test
+	public void testPresetSecurityLimits() throws Exception {
+		// 1. Rejects codes > 64 KB (MAX_INPUT_CHARS)
+		String hugeCode = TerritoryPresetCodec.PREFIX + "A".repeat(TerritoryPresetCodec.MAX_INPUT_CHARS + 10);
+		assertThrows(IllegalArgumentException.class, () -> TerritoryPresetCodec.parse(hugeCode));
+
+		// 2. Rejects zip bomb expanding to > 1 MB
+		java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+		java.util.zip.Deflater deflater = new java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION);
+		try (java.util.zip.DeflaterOutputStream dos = new java.util.zip.DeflaterOutputStream(baos, deflater); java.io.DataOutputStream out = new java.io.DataOutputStream(dos)) {
+			out.writeByte(1);
+			out.writeUTF("Bomb");
+			byte[] payload = new byte[1_200_000]; // 1.2 MB > 1 MB limit
+			java.util.Arrays.fill(payload, (byte) 'A');
+			out.writeInt(payload.length);
+			out.write(payload);
+		} finally {
+			deflater.end();
+		}
+		String bombCode = TerritoryPresetCodec.PREFIX + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(baos.toByteArray());
+		assertThrows(IllegalArgumentException.class, () -> TerritoryPresetCodec.decodeBase64(bombCode));
+
+		// 3. Rejects presets with > 500 territories
+		java.io.ByteArrayOutputStream baos2 = new java.io.ByteArrayOutputStream();
+		java.util.zip.Deflater deflater2 = new java.util.zip.Deflater();
+		try (java.util.zip.DeflaterOutputStream dos = new java.util.zip.DeflaterOutputStream(baos2, deflater2); java.io.DataOutputStream out = new java.io.DataOutputStream(dos)) {
+			out.writeByte(1);
+			out.writeUTF("TooMany");
+			out.writeUTF("");
+			out.writeShort(0);
+			out.writeShort(501); // 501 > 500 max
+		} finally {
+			deflater2.end();
+		}
+		String tooManyCode = TerritoryPresetCodec.PREFIX + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(baos2.toByteArray());
+		assertThrows(IllegalArgumentException.class, () -> TerritoryPresetCodec.decodeBase64(tooManyCode));
+	}
+
+	@Test
+	public void testUniquePresetNaming() {
+		Map<String, String> existing = new java.util.LinkedHashMap<>();
+		existing.put("Default", "code1");
+		existing.put("Claim Oct 18 12:37", "code2");
+		existing.put("Claim Oct 18 12:37 (2)", "code3");
+
+		// Non-conflicting name remains unchanged
+		assertEquals("My Preset", TerritoryGuideController.getUniquePresetName(existing, "My Preset"));
+
+		// Conflicting name appends (2)
+		assertEquals("Default (2)", TerritoryGuideController.getUniquePresetName(existing, "Default"));
+
+		// Case-insensitive conflict
+		assertEquals("Default (2)", TerritoryGuideController.getUniquePresetName(existing, "default"));
+
+		// Multiple conflicts increment counter
+		assertEquals("Claim Oct 18 12:37 (3)", TerritoryGuideController.getUniquePresetName(existing, "Claim Oct 18 12:37"));
+	}
+
+	@Test
+	public void testKnownTerritoryAndMenuDetection() {
+		TerritoryPreset preset = new TerritoryPreset("Test", "", Set.of(), Map.of("Cinfras Outskirts", new TerritoryPreset.TerritoryLoadout(0, 0, 0, 0, Map.of()), "Mesquis Tower", new TerritoryPreset.TerritoryLoadout(0, 0, 0, 0, Map.of())));
+		TerritoryGuideController.setActivePreset(preset);
+
+		// Preset territories are known
+		assertTrue(TerritoryGuideController.isKnownTerritory("Cinfras Outskirts"));
+		assertTrue(TerritoryGuideController.isKnownTerritory("Mesquis Tower"));
+		assertTrue(TerritoryGuideController.isKnownTerritory("mesquis tower"));
+
+		// Clean territory title removes (HQ) and special chars
+		assertEquals("Cinfras Outskirts", TerritoryContainerScanner.cleanTerritoryTitle("§f§lÀCinfras Outskirts (HQ)"));
+		assertEquals("Mesquis Tower", TerritoryContainerScanner.cleanTerritoryTitle("Mesquis Tower"));
+
+		// Unrelated menus and chests are NOT known territories
+		assertFalse(TerritoryGuideController.isKnownTerritory("Chest"));
+		assertFalse(TerritoryGuideController.isKnownTerritory("Large Chest"));
+		assertFalse(TerritoryGuideController.isKnownTerritory("Bank"));
+		assertFalse(TerritoryGuideController.isKnownTerritory("Daily Login"));
+		assertFalse(TerritoryGuideController.isKnownTerritory("Bonus"));
+		assertFalse(TerritoryGuideController.isKnownTerritory("Guild Tower"));
+		assertFalse(TerritoryGuideController.isKnownTerritory(""));
+		assertFalse(TerritoryGuideController.isKnownTerritory(null));
 	}
 }

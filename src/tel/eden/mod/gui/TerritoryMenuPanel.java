@@ -9,9 +9,11 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.Set;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
@@ -21,6 +23,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -39,6 +42,14 @@ public final class TerritoryMenuPanel {
 	}
 
 	private static boolean dropdownOpen = false;
+
+	public static boolean isDropdownOpen() {
+		return dropdownOpen;
+	}
+
+	public static void closeDropdown() {
+		dropdownOpen = false;
+	}
 
 	public static void init() {
 		ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
@@ -79,6 +90,24 @@ public final class TerritoryMenuPanel {
 	private static Field mapRenderWidthField = null;
 	private static Field mapRenderHeightField = null;
 	private static boolean mapFieldsInit = false;
+
+	private static Method poiGetNameMethod = null;
+	private static Method poiGetLocationMethod = null;
+	private static Method locGetXMethod = null;
+	private static Method locGetZMethod = null;
+	private static boolean poiMethodsInit = false;
+
+	private static Field widgetTerritoryItemField = null;
+	private static Method tiGetNameMethod = null;
+	private static boolean widgetFieldInit = false;
+
+	private static Method holderTerritoryItemsMethod = null;
+	private static Method pairAMethod = null;
+	private static Method pairBMethod = null;
+	private static Method tiIsSelectedMethod = null;
+	private static Method tiIsPendingMethod = null;
+	private static Method holderIsSelectionModeMethod = null;
+	private static boolean holderMethodsInit = false;
 
 	private static Object getHolder(Screen screen) {
 		if (!holderFieldInit) {
@@ -198,17 +227,40 @@ public final class TerritoryMenuPanel {
 			float rW = mapRenderWidthField.getFloat(screen);
 			float rH = mapRenderHeightField.getFloat(screen);
 
-			for (Object poiObj : pois) {
-				String name = (String) poiObj.getClass().getMethod("getName").invoke(poiObj);
-				if (matchesTarget(targets, name)) {
-					Object loc = poiObj.getClass().getMethod("getLocation").invoke(poiObj);
-					int worldX = (Integer) loc.getClass().getMethod("getX").invoke(loc);
-					int worldZ = (Integer) loc.getClass().getMethod("getZ").invoke(loc);
-					float px = cX + (worldX - mX) * zoom;
-					float pz = cZ + (worldZ - mZ) * zoom;
+			if (!poiMethodsInit && !pois.isEmpty()) {
+				poiMethodsInit = true;
+				try {
+					Object samplePoi = pois.iterator().next();
+					poiGetNameMethod = samplePoi.getClass().getMethod("getName");
+					poiGetNameMethod.setAccessible(true);
+					poiGetLocationMethod = samplePoi.getClass().getMethod("getLocation");
+					poiGetLocationMethod.setAccessible(true);
+					Object sampleLoc = poiGetLocationMethod.invoke(samplePoi);
+					if (sampleLoc != null) {
+						locGetXMethod = sampleLoc.getClass().getMethod("getX");
+						locGetXMethod.setAccessible(true);
+						locGetZMethod = sampleLoc.getClass().getMethod("getZ");
+						locGetZMethod.setAccessible(true);
+					}
+				} catch (Throwable ignored) {
+				}
+			}
 
-					if (px >= rX && px <= rX + rW && pz >= rY && pz <= rY + rH) {
-						TerritoryUpgradeGuideOverlay.renderTargetPulse(graphics, Math.round(px) - 8, Math.round(pz) - 8, 16, 16);
+			if (poiGetNameMethod != null && poiGetLocationMethod != null && locGetXMethod != null && locGetZMethod != null) {
+				for (Object poiObj : pois) {
+					String name = (String) poiGetNameMethod.invoke(poiObj);
+					if (matchesTarget(targets, name)) {
+						Object loc = poiGetLocationMethod.invoke(poiObj);
+						if (loc != null) {
+							int worldX = (Integer) locGetXMethod.invoke(loc);
+							int worldZ = (Integer) locGetZMethod.invoke(loc);
+							float px = cX + (worldX - mX) * zoom;
+							float pz = cZ + (worldZ - mZ) * zoom;
+
+							if (px >= rX && px <= rX + rW && pz >= rY && pz <= rY + rH) {
+								TerritoryUpgradeGuideOverlay.renderTargetPulse(graphics, Math.round(px) - 8, Math.round(pz) - 8, 16, 16);
+							}
+						}
 					}
 				}
 			}
@@ -299,11 +351,20 @@ public final class TerritoryMenuPanel {
 								String label = ChatFormatting.stripFormatting(widget.getMessage().getString()).trim();
 								if (label.isEmpty()) {
 									try {
-										Field tf = widget.getClass().getDeclaredField("territoryItem");
-										tf.setAccessible(true);
-										Object ti = tf.get(widget);
-										if (ti != null) {
-											label = (String) ti.getClass().getMethod("getName").invoke(ti);
+										if (!widgetFieldInit) {
+											widgetFieldInit = true;
+											widgetTerritoryItemField = widget.getClass().getDeclaredField("territoryItem");
+											widgetTerritoryItemField.setAccessible(true);
+										}
+										if (widgetTerritoryItemField != null) {
+											Object ti = widgetTerritoryItemField.get(widget);
+											if (ti != null) {
+												if (tiGetNameMethod == null) {
+													tiGetNameMethod = ti.getClass().getMethod("getName");
+													tiGetNameMethod.setAccessible(true);
+												}
+												label = (String) tiGetNameMethod.invoke(ti);
+											}
 										}
 									} catch (Throwable ignored) {
 									}
@@ -358,23 +419,63 @@ public final class TerritoryMenuPanel {
 				liveSelectedOut.addAll(holderSelected);
 			}
 
-			Method mItems = holder.getClass().getMethod("territoryItems");
-			Collection<?> items = (Collection<?>) mItems.invoke(holder);
-			if (items != null) {
-				for (Object pair : items) {
-					ItemStack stack = (ItemStack) pair.getClass().getMethod("a").invoke(pair);
-					Object territoryItem = pair.getClass().getMethod("b").invoke(pair);
-					String name = (String) territoryItem.getClass().getMethod("getName").invoke(territoryItem);
-					boolean selected = (Boolean) territoryItem.getClass().getMethod("isSelected").invoke(territoryItem);
-					boolean pending = false;
-					try {
-						pending = (Boolean) territoryItem.getClass().getMethod("isPending").invoke(territoryItem);
-					} catch (Throwable ignored) {
-					}
-					if (name != null) {
-						loadouts.put(name, TerritoryContainerScanner.parseLoadout(stack));
-						if (liveSelectedOut != null && ((selected && !pending) || (holderSelected != null && holderSelected.contains(name)))) {
-							liveSelectedOut.add(name);
+			if (!holderMethodsInit) {
+				holderMethodsInit = true;
+				try {
+					holderTerritoryItemsMethod = holder.getClass().getMethod("territoryItems");
+					holderTerritoryItemsMethod.setAccessible(true);
+					holderIsSelectionModeMethod = holder.getClass().getMethod("isSelectionMode");
+					holderIsSelectionModeMethod.setAccessible(true);
+				} catch (Throwable ignored) {
+				}
+			}
+
+			if (holderTerritoryItemsMethod != null) {
+				Collection<?> items = (Collection<?>) holderTerritoryItemsMethod.invoke(holder);
+				if (items != null) {
+					for (Object pair : items) {
+						if (pairAMethod == null) {
+							pairAMethod = pair.getClass().getMethod("a");
+							pairAMethod.setAccessible(true);
+							pairBMethod = pair.getClass().getMethod("b");
+							pairBMethod.setAccessible(true);
+						}
+						ItemStack stack = (ItemStack) pairAMethod.invoke(pair);
+						Object territoryItem = pairBMethod.invoke(pair);
+						if (territoryItem != null) {
+							if (tiGetNameMethod == null) {
+								tiGetNameMethod = territoryItem.getClass().getMethod("getName");
+								tiGetNameMethod.setAccessible(true);
+							}
+							if (tiIsSelectedMethod == null) {
+								tiIsSelectedMethod = territoryItem.getClass().getMethod("isSelected");
+								tiIsSelectedMethod.setAccessible(true);
+							}
+							if (tiIsPendingMethod == null) {
+								try {
+									tiIsPendingMethod = territoryItem.getClass().getMethod("isPending");
+									tiIsPendingMethod.setAccessible(true);
+								} catch (Throwable ignored) {
+								}
+							}
+							String name = (String) tiGetNameMethod.invoke(territoryItem);
+							boolean selected = (Boolean) tiIsSelectedMethod.invoke(territoryItem);
+							boolean pending = false;
+							if (tiIsPendingMethod != null) {
+								try {
+									pending = (Boolean) tiIsPendingMethod.invoke(territoryItem);
+								} catch (Throwable ignored) {
+								}
+							}
+							if (name != null) {
+								String clean = TerritoryGuideController.canonicalTerritoryName(name);
+								if (!clean.isEmpty()) {
+									loadouts.put(clean, TerritoryContainerScanner.parseLoadout(stack));
+									if (liveSelectedOut != null && ((selected && !pending) || (holderSelected != null && (holderSelected.contains(name) || holderSelected.contains(clean))))) {
+										liveSelectedOut.add(clean);
+									}
+								}
+							}
 						}
 					}
 				}
@@ -389,29 +490,20 @@ public final class TerritoryMenuPanel {
 			return false;
 		}
 		try {
-			return (Boolean) holder.getClass().getMethod("isSelectionMode").invoke(holder);
+			if (holderIsSelectionModeMethod == null) {
+				holderIsSelectionModeMethod = holder.getClass().getMethod("isSelectionMode");
+				holderIsSelectionModeMethod.setAccessible(true);
+			}
+			return (Boolean) holderIsSelectionModeMethod.invoke(holder);
 		} catch (Throwable ignored) {
 			return false;
 		}
 	}
 
-	private static void renderWynntilsOverlay(Screen screen, GuiGraphics graphics, int mouseX, int mouseY) {
-		BridgeConfig config = EdenModClient.instance().config();
-		if (config == null || !config.territoryMenuSuite) {
-			return;
-		}
-
-		Object holder = getHolder(screen);
-		Set<String> liveSelected = new HashSet<>();
-		Map<String, TerritoryPreset.TerritoryLoadout> currentLoadouts = readLiveLoadouts(holder, liveSelected);
-		boolean selectionMode = isSelectionMode(holder);
-		String title = screen.getTitle().getString();
-
-		TerritoryGuideController.GuideStep step = TerritoryGuideController.evaluate(currentLoadouts, liveSelected, title, selectionMode);
-
+	public static void renderHudBar(Screen screen, GuiGraphics graphics, int mouseX, int mouseY, TerritoryGuideController.GuideStep step) {
 		Minecraft mc = Minecraft.getInstance();
 		Font font = mc.font;
-		if (font == null) {
+		if (font == null || screen == null) {
 			return;
 		}
 
@@ -477,7 +569,7 @@ public final class TerritoryMenuPanel {
 		renderButton(graphics, font, btnUnselX, btnUnselY, btnUnselW, btnUnselH, "Unselect", mouseX, mouseY);
 
 		// 8. [Skip] (visible during all active instructions)
-		boolean showSkip = TerritoryGuideController.hasActivePreset() && (step.action() != TerritoryGuideController.ActionType.NONE && step.action() != TerritoryGuideController.ActionType.ALL_COMPLETE);
+		boolean showSkip = TerritoryGuideController.hasActivePreset() && (step != null && step.action() != TerritoryGuideController.ActionType.NONE && step.action() != TerritoryGuideController.ActionType.ALL_COMPLETE);
 		int btnSkipX = btnUnselX + btnUnselW + 3;
 		int btnSkipY = barY + 3;
 		int btnSkipW = 34;
@@ -489,19 +581,34 @@ public final class TerritoryMenuPanel {
 		// Instruction label
 		int textX = showSkip ? (btnSkipX + btnSkipW + 6) : (btnUnselX + btnUnselW + 6);
 		int textMaxW = (barX + barWidth - 4) - textX;
-		String instruction = TerritoryGuideController.hasActivePreset() ? step.instruction() : "§7No preset active. Select or paste a preset.";
+		String instruction = (TerritoryGuideController.hasActivePreset() && step != null) ? step.instruction() : "§7No preset active. Select or paste a preset.";
 		if (font.width(instruction) > textMaxW) {
 			instruction = font.plainSubstrByWidth(instruction, textMaxW - 10) + "...";
 		}
 		graphics.drawString(font, instruction, textX, barY + 8, 0xFFFFFFFF);
 
-		// Highlights
-		highlightWidgets(screen, graphics, step);
-
 		// Render Dropdown if open (on top of everything)
 		if (dropdownOpen) {
 			renderPresetDropdown(graphics, font, btnSelX, btnSelY + btnSelH + 2, mouseX, mouseY);
 		}
+	}
+
+	private static void renderWynntilsOverlay(Screen screen, GuiGraphics graphics, int mouseX, int mouseY) {
+		BridgeConfig config = EdenModClient.instance().config();
+		if (config == null || !config.territoryMenuSuite) {
+			return;
+		}
+
+		Object holder = getHolder(screen);
+		Set<String> liveSelected = new HashSet<>();
+		Map<String, TerritoryPreset.TerritoryLoadout> currentLoadouts = readLiveLoadouts(holder, liveSelected);
+		boolean selectionMode = isSelectionMode(holder);
+		String title = screen.getTitle().getString();
+
+		TerritoryGuideController.GuideStep step = TerritoryGuideController.evaluate(currentLoadouts, liveSelected, title, selectionMode);
+
+		renderHudBar(screen, graphics, mouseX, mouseY, step);
+		highlightWidgets(screen, graphics, step);
 	}
 
 	private static void renderPresetDropdown(GuiGraphics graphics, Font font, int x, int y, int mouseX, int mouseY) {
@@ -577,7 +684,7 @@ public final class TerritoryMenuPanel {
 		graphics.drawString(font, text, textX, textY, hovered ? 0xFF55FFFF : 0xFFDDDDDD);
 	}
 
-	private static boolean handleWynntilsMouseClick(Screen screen, double mouseX, double mouseY, int button) {
+	public static boolean handleMouseClick(Screen screen, double mouseX, double mouseY, int button, Map<String, TerritoryPreset.TerritoryLoadout> fallbackLoadouts) {
 		BridgeConfig config = EdenModClient.instance().config();
 		if (config == null || !config.territoryMenuSuite || (button != 0 && button != 1)) {
 			return true;
@@ -672,10 +779,16 @@ public final class TerritoryMenuPanel {
 					}
 					// Delete button [X]
 					if (mouseX >= dropX + dropW - 20 && mouseX < dropX + dropW && mouseY >= curY && mouseY < curY + rowH) {
-						TerritoryGuideController.deleteSavedPreset(pName);
-						if (mc.gui != null) {
-							mc.gui.getChat().addMessage(Component.literal("§e[Eden] Deleted preset: " + pName));
-						}
+						dropdownOpen = false;
+						mc.setScreen(new ConfirmScreen(confirmed -> {
+							if (confirmed) {
+								TerritoryGuideController.deleteSavedPreset(pName);
+								if (mc.gui != null) {
+									mc.gui.getChat().addMessage(Component.literal("§e[Eden] Deleted preset: " + pName));
+								}
+							}
+							mc.setScreen(screen);
+						}, Component.literal("Delete Territory Preset"), Component.literal("Are you sure you want to delete preset '§e" + pName + "§r'?")));
 						return false;
 					}
 					// Row select
@@ -695,6 +808,12 @@ public final class TerritoryMenuPanel {
 				// + Import
 				if (mouseX >= dropX + 4 && mouseX < dropX + 4 + btnW && mouseY >= curY + 2 && mouseY < curY + 18) {
 					String clip = mc.keyboardHandler.getClipboard();
+					if (clip != null && clip.length() > TerritoryPresetCodec.MAX_INPUT_CHARS) {
+						if (mc.gui != null) {
+							mc.gui.getChat().addMessage(Component.literal("§c[Eden] Preset code in clipboard is too large (max 64 KB)."));
+						}
+						return false;
+					}
 					try {
 						TerritoryPreset p = TerritoryPresetCodec.parse(clip);
 						TerritoryGuideController.savePresetToStorage(p.name(), clip);
@@ -712,20 +831,34 @@ public final class TerritoryMenuPanel {
 				// + Save Live
 				if (mouseX >= dropX + 8 + btnW && mouseX < dropX + dropW && mouseY >= curY + 2 && mouseY < curY + 18) {
 					Object holder = getHolder(screen);
-					Map<String, TerritoryPreset.TerritoryLoadout> currentLoadouts = readLiveLoadouts(holder, null);
+					Map<String, TerritoryPreset.TerritoryLoadout> currentLoadouts = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+					currentLoadouts.putAll(TerritoryGuideController.sessionLoadouts());
+					if (fallbackLoadouts != null) {
+						currentLoadouts.putAll(fallbackLoadouts);
+					}
+					if (holder != null) {
+						currentLoadouts.putAll(readLiveLoadouts(holder, null));
+					}
 					if (currentLoadouts.isEmpty()) {
 						if (mc.gui != null) {
-							mc.gui.getChat().addMessage(Component.literal("§c[Eden] No territories loaded yet from Wynntils."));
+							mc.gui.getChat().addMessage(Component.literal("§c[Eden] No territories loaded yet. Wait for menu to load."));
 						}
 					} else {
+						Map<String, TerritoryPreset.TerritoryLoadout> cleanMap = new LinkedHashMap<>();
+						for (Map.Entry<String, TerritoryPreset.TerritoryLoadout> entry : currentLoadouts.entrySet()) {
+							String clean = TerritoryGuideController.canonicalTerritoryName(entry.getKey());
+							if (!clean.isEmpty()) {
+								cleanMap.put(clean, entry.getValue());
+							}
+						}
 						String stamp = new SimpleDateFormat("MMM d HH:mm", Locale.US).format(new Date());
-						String pName = "Claim " + stamp;
-						TerritoryPreset p = new TerritoryPreset(pName, "", Set.of(), currentLoadouts);
+						String pName = TerritoryGuideController.getUniquePresetName(presets, "Claim " + stamp);
+						TerritoryPreset p = new TerritoryPreset(pName, "", Set.of(), cleanMap);
 						String code = TerritoryPresetCodec.encodeBase64(p);
 						TerritoryGuideController.savePresetToStorage(pName, code);
 						dropdownOpen = false;
 						if (mc.gui != null) {
-							mc.gui.getChat().addMessage(Component.literal("§a[Eden] Saved live claim as '" + pName + "' (" + currentLoadouts.size() + " terrs)"));
+							mc.gui.getChat().addMessage(Component.literal("§a[Eden] Saved live claim as '" + pName + "' (" + cleanMap.size() + " terrs)"));
 						}
 					}
 					return false;
@@ -734,9 +867,7 @@ public final class TerritoryMenuPanel {
 			} else {
 				// Clicked outside dropdown
 				dropdownOpen = false;
-				if (mouseX >= btnSelX && mouseX < btnSelX + btnSelW && mouseY >= btnSelY && mouseY < btnSelY + btnSelH) {
-					return false;
-				}
+				return false;
 			}
 		}
 
@@ -767,20 +898,34 @@ public final class TerritoryMenuPanel {
 		// Handle [Copy Preset]
 		if (mouseX >= btnCopyX && mouseX < btnCopyX + btnCopyW && mouseY >= btnCopyY && mouseY < btnCopyY + btnCopyH) {
 			Object holder = getHolder(screen);
-			Map<String, TerritoryPreset.TerritoryLoadout> currentLoadouts = readLiveLoadouts(holder, null);
+			Map<String, TerritoryPreset.TerritoryLoadout> currentLoadouts = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+			currentLoadouts.putAll(TerritoryGuideController.sessionLoadouts());
+			if (fallbackLoadouts != null) {
+				currentLoadouts.putAll(fallbackLoadouts);
+			}
+			if (holder != null) {
+				currentLoadouts.putAll(readLiveLoadouts(holder, null));
+			}
 			if (currentLoadouts.isEmpty()) {
 				if (mc.gui != null) {
-					mc.gui.getChat().addMessage(Component.literal("§c[Eden] No territories loaded yet from Wynntils. Wait for page load."));
+					mc.gui.getChat().addMessage(Component.literal("§c[Eden] No territories loaded yet. Wait for menu to load."));
 				}
 			} else {
+				Map<String, TerritoryPreset.TerritoryLoadout> cleanMap = new LinkedHashMap<>();
+				for (Map.Entry<String, TerritoryPreset.TerritoryLoadout> entry : currentLoadouts.entrySet()) {
+					String clean = TerritoryGuideController.canonicalTerritoryName(entry.getKey());
+					if (!clean.isEmpty()) {
+						cleanMap.put(clean, entry.getValue());
+					}
+				}
 				String stamp = new SimpleDateFormat("MMM d HH:mm", Locale.US).format(new Date());
-				String pName = "Claim " + stamp;
-				TerritoryPreset preset = new TerritoryPreset(pName, "", Set.of(), currentLoadouts);
+				String pName = TerritoryGuideController.getUniquePresetName(TerritoryGuideController.savedPresets(), "Claim " + stamp);
+				TerritoryPreset preset = new TerritoryPreset(pName, "", Set.of(), cleanMap);
 				String code = TerritoryPresetCodec.encodeBase64(preset);
 				mc.keyboardHandler.setClipboard(code);
 				TerritoryGuideController.savePresetToStorage(pName, code);
 				if (mc.gui != null) {
-					mc.gui.getChat().addMessage(Component.literal("§a[Eden] Copied preset to clipboard & saved as '" + pName + "' (" + currentLoadouts.size() + " territories)!"));
+					mc.gui.getChat().addMessage(Component.literal("§a[Eden] Copied preset to clipboard & saved as '" + pName + "' (" + cleanMap.size() + " territories)!"));
 				}
 			}
 			return false;
@@ -789,6 +934,12 @@ public final class TerritoryMenuPanel {
 		// Handle [Paste Preset]
 		if (mouseX >= btnPasteX && mouseX < btnPasteX + btnPasteW && mouseY >= btnPasteY && mouseY < btnPasteY + btnPasteH) {
 			String clipboard = mc.keyboardHandler.getClipboard();
+			if (clipboard != null && clipboard.length() > TerritoryPresetCodec.MAX_INPUT_CHARS) {
+				if (mc.gui != null) {
+					mc.gui.getChat().addMessage(Component.literal("§c[Eden] Preset code in clipboard is too large (max 64 KB)."));
+				}
+				return false;
+			}
 			try {
 				TerritoryPreset preset = TerritoryPresetCodec.parse(clipboard);
 				if (preset != null && !preset.territories().isEmpty()) {
@@ -848,5 +999,9 @@ public final class TerritoryMenuPanel {
 		}
 
 		return true;
+	}
+
+	private static boolean handleWynntilsMouseClick(Screen screen, double mouseX, double mouseY, int button) {
+		return handleMouseClick(screen, mouseX, mouseY, button, null);
 	}
 }

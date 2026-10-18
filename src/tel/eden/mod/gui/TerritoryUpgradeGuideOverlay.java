@@ -1,5 +1,7 @@
 package tel.eden.mod.gui;
 
+import java.util.HashSet;
+import java.util.Set;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -40,19 +42,21 @@ public final class TerritoryUpgradeGuideOverlay {
 		}
 	}
 
-	public static void renderClickBadge(GuiGraphics graphics, Font font, int slotX, int slotY, int remainingClicks, boolean matches) {
-		if (matches) {
+	public static void renderClickBadge(GuiGraphics graphics, Font font, int slotX, int slotY, int diff, boolean matches) {
+		if (matches || diff == 0) {
 			// Checkmark badge in slot corner
 			graphics.drawString(font, "§a✓", slotX + 10, slotY - 2, 0xFF55FF55);
-		} else if (remainingClicks > 0) {
-			String badge = "+" + remainingClicks;
+		} else {
+			String badge = (diff > 0) ? ("+" + diff) : String.valueOf(diff);
+			int color = (diff > 0) ? 0xFFFFAA00 : 0xFFFF5555;
+			String prefix = (diff > 0) ? "§6" : "§c";
 			int bw = font.width(badge) + 4;
 			int bx = slotX + 16 - bw;
 			int by = slotY;
 
 			graphics.fill(bx, by, bx + bw, by + 9, 0xEE111111);
-			graphics.renderOutline(bx, by, bw, 9, 0xFFFFAA00);
-			graphics.drawString(font, "§6" + badge, bx + 2, by + 1, 0xFFFFAA00);
+			graphics.renderOutline(bx, by, bw, 9, color);
+			graphics.drawString(font, prefix + badge, bx + 2, by + 1, color);
 		}
 	}
 
@@ -82,13 +86,15 @@ public final class TerritoryUpgradeGuideOverlay {
 					case "Defence" -> target.defence();
 					default -> target.bonus(up.upgradeName());
 				};
-				int remaining = Math.max(0, targetLvl - up.currentLevel());
-				if (remaining > 0) {
-					totalClicksNeeded += remaining;
+				int diff = targetLvl - up.currentLevel();
+				if (diff != 0) {
+					totalClicksNeeded += Math.abs(diff);
 					if (sb.length() > 0) {
 						sb.append(", ");
 					}
-					sb.append(up.upgradeName()).append(" (+").append(remaining).append(")");
+					String clickType = (diff > 0) ? "L-Click" : "R-Click";
+					String sign = (diff > 0) ? ("+" + diff) : String.valueOf(diff);
+					sb.append(up.upgradeName()).append(" (").append(sign).append(" ").append(clickType).append(")");
 				}
 			}
 		}
@@ -96,9 +102,33 @@ public final class TerritoryUpgradeGuideOverlay {
 		String typeLabel = isBonusView ? "Bonuses" : "Upgrades";
 		String header = "§b[Eden Guide] §f" + territory + " §8(" + typeLabel + " • Preset: §6" + preset.name() + "§8)";
 
+		Set<String> seenUpgrades = new HashSet<>();
+		if (upgrades != null) {
+			for (tel.eden.mod.war.eco.TerritoryContainerScanner.UpgradeSlotInfo up : upgrades) {
+				seenUpgrades.add(up.upgradeName());
+			}
+		}
+		boolean allRequiredSeen;
+		if (isBonusView) {
+			boolean allPresetBonusesSeen = true;
+			if (target != null && target.bonuses() != null) {
+				for (java.util.Map.Entry<String, Integer> b : target.bonuses().entrySet()) {
+					if (b.getValue() > 0 && !seenUpgrades.contains(b.getKey())) {
+						allPresetBonusesSeen = false;
+						break;
+					}
+				}
+			}
+			allRequiredSeen = allPresetBonusesSeen && !seenUpgrades.isEmpty();
+		} else {
+			allRequiredSeen = seenUpgrades.contains("Damage") && seenUpgrades.contains("Attack") && seenUpgrades.contains("Health") && seenUpgrades.contains("Defence");
+		}
+
 		String status;
-		if (totalClicksNeeded > 0) {
-			status = "§eClick highlighted: " + sb.toString() + " §7(§6+" + totalClicksNeeded + " clicks left§7)";
+		if (upgrades == null || upgrades.isEmpty() || !allRequiredSeen) {
+			status = "§eScanning " + typeLabel + "...";
+		} else if (totalClicksNeeded > 0) {
+			status = "§eAdjust highlighted: " + sb.toString() + " §7(§6" + totalClicksNeeded + " clicks left§7)";
 		} else {
 			status = "§a✔ " + typeLabel + " match preset! No further clicks needed.";
 		}
