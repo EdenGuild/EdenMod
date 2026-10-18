@@ -74,6 +74,19 @@ class RaidReadyTrackerTest {
 	}
 
 	@Test
+	void ignoresPlayerChatContainingReadyPhrases() {
+		RaidReadyTracker.onSystemChat(Component.literal("YoureMomGood is ready!"));
+		assertEquals(1, RaidReadyTracker.readyPlayersForTesting().size());
+
+		// Guild/party chat is "name: message"; none of these may count or reset anything.
+		RaidReadyTracker.onSystemChat(Component.literal("[Eden] Bob: dinner is ready!"));
+		RaidReadyTracker.onSystemChat(Component.literal("Alice: I would like to start The Canyon Colossus!"));
+		RaidReadyTracker.onSystemChat(Component.literal("Carol: YoureMomGood is no longer ready!"));
+		assertEquals(1, RaidReadyTracker.readyPlayersForTesting().size());
+		assertTrue(RaidReadyTracker.readyPlayersForTesting().contains("youremomgood"));
+	}
+
+	@Test
 	void parsesPawnComponentColorsCorrectly() {
 		// 2 ready (green), 1 unready (gray), 1 empty (dark gray)
 		Component component = Component.empty().append(Component.literal("- Players: ")).append(Component.literal("♙").withStyle(ChatFormatting.GREEN)).append(Component.literal("♙").withStyle(ChatFormatting.GREEN)).append(Component.literal("♙").withStyle(ChatFormatting.GRAY)).append(Component.literal("♙").withStyle(ChatFormatting.DARK_GRAY));
