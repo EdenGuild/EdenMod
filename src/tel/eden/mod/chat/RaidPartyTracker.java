@@ -69,6 +69,9 @@ public final class RaidPartyTracker {
 	private static final Pattern IGN = Pattern.compile("^[A-Za-z0-9_]{3,16}$");
 	private static final Pattern COLOR_CODE = Pattern.compile("[§&][0-9a-fk-orA-FK-OR]");
 	private static final Pattern PARTY_MEMBERS_PATTERN = Pattern.compile("^Party members:\\s*(.+)", Pattern.CASE_INSENSITIVE);
+	// Matched whole-line: while a reply is expected every system line passes through here
+	// and a matched one is hidden and never relayed, so a loose word match ate guild chat.
+	private static final Pattern NO_PARTY_PATTERN = Pattern.compile("^(?:You must be in a party to use this|You are not (?:currently )?in a party)\\.?$", Pattern.CASE_INSENSITIVE);
 	// A raid instance is compact and the party has to stay together to clear it, so this only
 	// has to reach across a room. Kept near the war radius for the same reason: wide enough to
 	// hold the group, tight enough that a lobby crowd does not all land in the tally.
@@ -226,8 +229,7 @@ public final class RaidPartyTracker {
 			if (!expectingPartyList) {
 				return false;
 			}
-			String lower = plain.toLowerCase(Locale.ROOT);
-			if ((lower.contains("not") && lower.contains("party")) || lower.contains("must be in a party")) {
+			if (NO_PARTY_PATTERN.matcher(plain).matches()) {
 				expectingPartyList = false;
 				return true;
 			}
