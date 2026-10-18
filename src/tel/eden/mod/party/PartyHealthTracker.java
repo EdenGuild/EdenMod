@@ -93,6 +93,16 @@ public final class PartyHealthTracker {
 		return HEALTH_BY_UUID.get(uuid);
 	}
 
+	public static List<String> getTrackedPartyNames() {
+		List<String> names = new ArrayList<>();
+		for (PlayerHealthData data : HEALTH_BY_UUID.values()) {
+			if (data.name() != null && !data.name().isBlank()) {
+				names.add(data.name());
+			}
+		}
+		return names;
+	}
+
 	public static void tick() {
 		tickCounter++;
 		if (tickCounter % 5 != 0) {

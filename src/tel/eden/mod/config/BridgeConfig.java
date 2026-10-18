@@ -280,6 +280,9 @@ public final class BridgeConfig {
 	/** Disallow readying up in the raid menu if the raid is not a guild raid. */
 	public boolean requireGuildRaid = false;
 
+	/** Witness cooldown HUD timer for Orphion's Nexus of Light Room 2. */
+	public boolean witnessCooldownTracker = true;
+
 	/** Custom palette for the 10 party slots. Defaults to PartyHighlightManager.DEFAULT_PALETTE. */
 	public List<Integer> partyColors = new ArrayList<>(tel.eden.mod.party.PartyHighlightManager.DEFAULT_PALETTE);
 

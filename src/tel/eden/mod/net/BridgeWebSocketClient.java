@@ -158,6 +158,10 @@ public final class BridgeWebSocketClient {
 		default void onRadianceGroupCount(String groupKey, int count) {
 		}
 
+		/** A raid party member or group peer reported an Athanatic Witness kill. */
+		default void onWitnessKill(String sender, String senderUuid, long timestamp) {
+		}
+
 		/**
 		 * The Mojang session was verified ({@code authOk}); {@code linked} and
 		 * {@code member} report this player's backend standing. Both true means full
@@ -659,6 +663,34 @@ public final class BridgeWebSocketClient {
 	}
 
 	/**
+	 * Broadcast an Athanatic Witness kill to raid/party members or group key peers.
+	 *
+	 * @return whether the message was queued on a connected socket
+	 */
+	public boolean sendWitnessKill(java.util.List<String> partyMembers, String groupKey) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "witnessKill");
+		if (partyMembers != null && !partyMembers.isEmpty()) {
+			com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+			for (String member : partyMembers) {
+				if (member != null && !member.isBlank()) {
+					arr.add(member.trim());
+				}
+			}
+			obj.add("party", arr);
+		}
+		if (groupKey != null && !groupKey.isBlank()) {
+			obj.addProperty("groupKey", groupKey.trim());
+		}
+		enqueueSend(current, obj.toString());
+		return true;
+	}
+
+	/**
 	 * Toggle this player's "heading to {@code territory}" marker (right-click on a timer
 	 * row). One assignment per player: marking a new territory moves them, re-marking the
 	 * current one clears it. The backend broadcasts the updated board to everyone.
@@ -1136,6 +1168,7 @@ public final class BridgeWebSocketClient {
 				case "warBoard" -> sink.onWarBoard(parseWarBoard(obj));
 				case "radianceGroupCount" -> sink.onRadianceGroupCount(get(obj, "groupKey"), getInt(obj, "count", 0));
 				case "radianceCast" -> sink.onRadianceCast(get(obj, "sender"), get(obj, "senderUuid"), get(obj, "groupKey"), getInt(obj, "tier", 0), getLong(obj, "remainingMs", 0L), getLong(obj, "timestamp", System.currentTimeMillis()));
+				case "witnessKill" -> sink.onWitnessKill(get(obj, "sender"), get(obj, "senderUuid"), getLong(obj, "timestamp", System.currentTimeMillis()));
 				case "authChallenge" -> handleAuthChallenge(get(obj, "serverId"));
 				case "authOk" -> {
 					// Session verified: reset backoff and hand the backend-reported

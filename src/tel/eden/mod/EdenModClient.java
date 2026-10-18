@@ -232,6 +232,10 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private boolean onWynncraft;
+
+	public boolean onWynncraft() {
+		return onWynncraft;
+	}
 	// Mutated on the inbound-message path and read from GUI screens on the render
 	// thread. Each change publishes one immutable snapshot through this volatile field,
 	// so readers cannot observe the remove/add or clear/addAll halves of an update.
@@ -518,6 +522,7 @@ public final class EdenModClient implements ClientModInitializer {
 	public void onWorldRespawn() {
 		enteredWynnGameWorld = true;
 		guildLogSync.onWorldJoin();
+		tel.eden.mod.raid.WitnessCooldownTracker.reset();
 	}
 
 	/** Packet hooks for the invisible guild-log query (mirrors Wynntils' query path). */
@@ -639,6 +644,7 @@ public final class EdenModClient implements ClientModInitializer {
 		HudRenderCallback.EVENT.register((graphics, tickCounter) -> {
 			if (onWynncraft) {
 				WarHud.render(config, graphics);
+				tel.eden.mod.raid.WitnessCooldownTracker.render(config, graphics);
 			}
 		});
 		// War-suite territory outlines, added to the per-frame gizmo collector during
@@ -663,6 +669,7 @@ public final class EdenModClient implements ClientModInitializer {
 			AllianceMenuScraper.reset();
 			GuildMenuScraper.reset();
 			AttackTimerMenu.onWorldJoin();
+			tel.eden.mod.raid.WitnessCooldownTracker.reset();
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
 			guildAllyManager.requestCancel();
 			// Connect if applicable; the backend reports link/membership standing via
@@ -1082,6 +1089,27 @@ public final class EdenModClient implements ClientModInitializer {
 							}
 						}
 						tel.eden.mod.war.radiance.RadianceTracker.onRemoteCast(config, groupKey, tier, remainingMs, System.currentTimeMillis(), 0L);
+					});
+				}
+
+				@Override
+				public void onWitnessKill(String sender, String senderUuid, long timestamp) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						if (mc.player == null) {
+							return;
+						}
+						String myUuid = mc.player.getUUID().toString().replace("-", "");
+						String cleanSenderUuid = senderUuid != null ? senderUuid.replace("-", "").trim() : "";
+						if (!cleanSenderUuid.isEmpty() && cleanSenderUuid.equalsIgnoreCase(myUuid)) {
+							return;
+						}
+						if (sender != null && !sender.isBlank()) {
+							if (sender.equalsIgnoreCase(mc.player.getGameProfile().name()) || sender.equalsIgnoreCase(mc.player.getName().getString())) {
+								return;
+							}
+						}
+						tel.eden.mod.raid.WitnessCooldownTracker.onRemoteWitnessKill(sender, timestamp);
 					});
 				}
 
@@ -2371,6 +2399,7 @@ public final class EdenModClient implements ClientModInitializer {
 		RaidReadyTracker.reset();
 		PartyHealthTracker.reset();
 		ChatReplyManager.reset();
+		tel.eden.mod.raid.WitnessCooldownTracker.reset();
 		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();
 		guildAllyManager.requestCancel();
 		territoryDefendedTracker.clear();
@@ -2425,6 +2454,7 @@ public final class EdenModClient implements ClientModInitializer {
 		DiscordChatFormatter.onServerChatLine();
 		if (onWynncraft) {
 			RaidReadyTracker.onSystemChat(message);
+			tel.eden.mod.raid.WitnessCooldownTracker.onMessage(message);
 			// War chat cues (start countdown → attendance capture; end → HUD summary)
 			// work even while the bridge socket is down. Keep these deferred until after
 			// this packet handler returns, alongside the rest of the client-tick state.
@@ -2452,6 +2482,7 @@ public final class EdenModClient implements ClientModInitializer {
 			// needs a new bounded startup-recovery window for it.
 			guildLogSync.onWorldJoin();
 			territoryDefendedTracker.clear();
+			tel.eden.mod.raid.WitnessCooldownTracker.reset();
 			setInGameWorld(true);
 		}
 		BridgeWebSocketClient current = socket;
