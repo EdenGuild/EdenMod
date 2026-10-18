@@ -107,6 +107,37 @@ public class TccLabyrinthTrackerTest {
 	}
 
 	@Test
+	public void testPartyFallsBackToRaidPartyTrackerWithoutWynntils() {
+		// Wynntils isn't loaded in tests, exactly the case the fallback is for.
+		tel.eden.mod.chat.RaidPartyTracker.reset();
+		assertTrue(TccLabyrinthTracker.getRaidPartyMembers().isEmpty());
+		try {
+			tel.eden.mod.chat.RaidPartyTracker.addPartyMemberForTesting("Alice");
+			tel.eden.mod.chat.RaidPartyTracker.addPartyMemberForTesting("Bob");
+			assertEquals(java.util.List.of("Alice", "Bob"), TccLabyrinthTracker.getRaidPartyMembers());
+		} finally {
+			tel.eden.mod.chat.RaidPartyTracker.reset();
+		}
+	}
+
+	@Test
+	public void testFightingAgainstTheBarrierDoesNotTrigger() {
+		UUID fighter = UUID.randomUUID();
+
+		// B1's barrier point is 10996, 3477 and its hallway runs east, away from spawn. Standing
+		// against the bars (slightly before, on, or just under a block past the point) while the
+		// golem is still alive must not mark it dead.
+		for (double x : new double[]{10995.9, 10996.0, 10996.5, 10996.9}) {
+			TccLabyrinthTracker.onPeerPosition("Fighter", fighter.toString(), x, 45.0, 3477, 0f, false);
+			assertFalse(TccLabyrinthTracker.getDefeatedGolems().contains("B1"), "triggered at x=" + x);
+		}
+
+		// Over a block past the barrier is only reachable once it has opened.
+		TccLabyrinthTracker.onPeerPosition("Fighter", fighter.toString(), 10997.2, 45.0, 3477, 0f, false);
+		assertTrue(TccLabyrinthTracker.getDefeatedGolems().contains("B1"));
+	}
+
+	@Test
 	public void testExitTitleDetectionWithoutAutoReporting() {
 		assertFalse(TccLabyrinthTracker.hasExitTitle());
 		assertFalse(TccLabyrinthTracker.isExitReached());

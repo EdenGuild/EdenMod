@@ -608,28 +608,47 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("z", z);
 		obj.addProperty("yaw", yaw);
 		obj.addProperty("isWings", isWings);
-		if (partyMembers != null && !partyMembers.isEmpty()) {
-			JsonArray arr = new JsonArray();
-			for (String member : partyMembers) {
-				if (member != null && !member.isBlank()) {
-					arr.add(member);
-				}
-			}
-			obj.add("party", arr);
-		}
+		addParty(obj, partyMembers);
 		enqueueSend(current, obj.toString());
 	}
 
 	/** Broadcast defeated golem notice for TCC Room 2 Labyrinth. */
 	public void sendTccGolemDefeated(String golemId) {
+		sendTccGolemDefeated(golemId, null);
+	}
+
+	/**
+	 * Broadcast a defeated golem to this raid party. Without a party list the backend relays
+	 * it to every Eden member active in Room 2, marking it on other groups' maps too.
+	 */
+	public void sendTccGolemDefeated(String golemId, java.util.List<String> partyMembers) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
 		}
+		enqueueSend(current, tccGolemDefeatedPayload(golemId, partyMembers).toString());
+	}
+
+	static JsonObject tccGolemDefeatedPayload(String golemId, java.util.List<String> partyMembers) {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "tccGolemDefeated");
 		obj.addProperty("golemId", golemId);
-		enqueueSend(current, obj.toString());
+		addParty(obj, partyMembers);
+		return obj;
+	}
+
+	/** Attach the raid party (blank names dropped) that the backend scopes TCC relays to. */
+	private static void addParty(JsonObject obj, java.util.List<String> partyMembers) {
+		if (partyMembers == null || partyMembers.isEmpty()) {
+			return;
+		}
+		JsonArray arr = new JsonArray();
+		for (String member : partyMembers) {
+			if (member != null && !member.isBlank()) {
+				arr.add(member);
+			}
+		}
+		obj.add("party", arr);
 	}
 
 	/** Broadcast exit reached notice for TCC Room 2 Labyrinth. */
@@ -647,15 +666,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("path", path);
 		obj.addProperty("x", x);
 		obj.addProperty("z", z);
-		if (partyMembers != null && !partyMembers.isEmpty()) {
-			JsonArray arr = new JsonArray();
-			for (String member : partyMembers) {
-				if (member != null && !member.isBlank()) {
-					arr.add(member);
-				}
-			}
-			obj.add("party", arr);
-		}
+		addParty(obj, partyMembers);
 		enqueueSend(current, obj.toString());
 	}
 

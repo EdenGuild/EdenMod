@@ -414,6 +414,17 @@ public final class RaidPartyTracker {
 		return out;
 	}
 
+	/**
+	 * The current raid's party as last read from Wynntils or the hidden {@code /party list}
+	 * reply (real IGNs where they could be resolved). Empty outside a raid or before the
+	 * reply arrives.
+	 */
+	public static List<String> partyMembers() {
+		synchronized (LOCK) {
+			return new ArrayList<>(partyMembers);
+		}
+	}
+
 	public static Set<String> partyMembersForTesting() {
 		synchronized (LOCK) {
 			return new LinkedHashSet<>(partyMembers);

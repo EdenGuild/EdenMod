@@ -84,6 +84,10 @@ public final class TccLabyrinthTracker {
 		public static final double SPAWN_X = 10934.0;
 		public static final double SPAWN_Z = 3479.0;
 		public static final double MAX_TRIGGER_DIST_SQ = 56.25;
+		// How far past the barrier point (away from spawn) a ground player must be before the
+		// golem counts as dead. Players fighting it stand right against the bars, so a
+		// threshold at or just before the barrier marked golems dead mid-fight.
+		public static final double CLEAR_DISTANCE = 1.0;
 
 		public final String id;
 		public final String path;
@@ -110,7 +114,8 @@ public final class TccLabyrinthTracker {
 
 		/**
 		 * Checks whether the given coordinate has crossed this barrier moving away from spawn.
-		 * The trigger zone extends strictly away from spawn into the hallway (not towards spawn).
+		 * The trigger zone starts {@link #CLEAR_DISTANCE} past the barrier and extends into the
+		 * hallway beyond it (never towards spawn).
 		 */
 		public boolean isPastBarrier(double px, double pz) {
 			double dx = px - worldX;
@@ -121,7 +126,7 @@ public final class TccLabyrinthTracker {
 			}
 			double projOut = dx * dirX + dz * dirZ;
 			double projLat = Math.abs(dx * (-dirZ) + dz * dirX);
-			return projOut >= -0.2 && projOut <= 7.0 && projLat <= 4.5;
+			return projOut >= CLEAR_DISTANCE && projOut <= 7.0 && projLat <= 4.5;
 		}
 
 		public static Golem fromId(String id) {
@@ -392,7 +397,7 @@ public final class TccLabyrinthTracker {
 		String id = golemId.toUpperCase();
 		if (DEFEATED_GOLEMS.add(id)) {
 			if (socket != null && socket.isConnected()) {
-				socket.sendTccGolemDefeated(id);
+				socket.sendTccGolemDefeated(id, getRaidPartyMembers());
 			}
 		}
 	}
@@ -531,11 +536,19 @@ public final class TccLabyrinthTracker {
 		lastReportKeyMs = ms;
 	}
 
+	/**
+	 * The raid party the backend scopes TCC relays to. Wynntils is the primary source; without
+	 * it (or before it knows the party) fall back to the party RaidPartyTracker read from the
+	 * hidden {@code /party list} reply, otherwise this player's map events would reach nobody.
+	 */
 	public static java.util.List<String> getRaidPartyMembers() {
 		java.util.Set<String> members = new java.util.LinkedHashSet<>();
 		java.util.List<String> wynntilsMembers = tel.eden.mod.party.WynntilsPartyBridge.getPartyMembers();
 		if (wynntilsMembers != null) {
 			members.addAll(wynntilsMembers);
+		}
+		if (members.isEmpty()) {
+			members.addAll(tel.eden.mod.chat.RaidPartyTracker.partyMembers());
 		}
 		Minecraft mc = Minecraft.getInstance();
 		if (mc != null && mc.player != null) {
