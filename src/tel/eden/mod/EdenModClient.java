@@ -161,6 +161,8 @@ public final class EdenModClient implements ClientModInitializer {
 	// Invalidates delayed party commands when the client changes server/world, so invites
 	// queued for one session can never be delivered to the next connection.
 	private final java.util.concurrent.atomic.AtomicInteger partyCommandGeneration = new java.util.concurrent.atomic.AtomicInteger();
+	private final java.util.concurrent.atomic.AtomicLong allyViewRequestId = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong allyViewPendingId = new java.util.concurrent.atomic.AtomicLong();
 	// Deterministic per-occurrence index so rapid identical bank events stay distinct.
 	// Short window: only the current burst counts, so stale earlier deposits can't
 	// make different clients assign divergent seqs (which duplicated Discord posts).
@@ -1124,6 +1126,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 				@Override
 				public void onAllyActivity(java.util.List<AllyActivityEntry> entries) {
+					allyViewPendingId.set(0);
 					boolean canManage = isChiefOwnerOrStrategist();
 					display(() -> DiscordChatFormatter.allyActivity(entries, canManage));
 				}
@@ -1363,10 +1366,17 @@ public final class EdenModClient implements ClientModInitializer {
 	private void requestAllyView(FabricClientCommandSource source) {
 		BridgeWebSocketClient current = socket;
 		if (current == null) {
-			source.sendFeedback(notConnected());
+			source.sendFeedback(DiscordChatFormatter.systemLine("Unable to fetch ally info, try again later.", ChatFormatting.RED));
 			return;
 		}
+		long id = allyViewRequestId.incrementAndGet();
+		allyViewPendingId.set(id);
 		current.sendAllyActivityRequest();
+		partyCommandExecutor.schedule(() -> {
+			if (allyViewPendingId.compareAndSet(id, 0)) {
+				display(() -> DiscordChatFormatter.systemLine("Unable to fetch ally info, try again later.", ChatFormatting.RED));
+			}
+		}, 5, TimeUnit.SECONDS);
 	}
 
 	private CompletableFuture<Suggestions> suggestMembers(CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
