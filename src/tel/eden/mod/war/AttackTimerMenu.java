@@ -84,6 +84,18 @@ public final class AttackTimerMenu {
 	private static final Map<String, Boolean> defenseConflict = new HashMap<>();
 	/** Who queued each attack (from the {@code warBoard} broadcast or local detection). */
 	private static final Map<String, WarQueuer> queuers = new HashMap<>();
+	/**
+	 * Territories whose queuer only this client knows of (a chat report, or an attack the
+	 * board hasn't echoed yet). Board-owned queuers follow the board; these are kept across
+	 * board updates until the board names a queuer for them or they go stale.
+	 */
+	private static final java.util.Set<String> localQueuers = new java.util.HashSet<>();
+	// When each local-only queuer was first seen with no attack timer on the sidebar.
+	private static final Map<String, Long> localQueuerNoTimerSince = new HashMap<>();
+	// How long a local-only queuer may sit with no attack timer before it is dropped: the
+	// timer appears on the sidebar as soon as an attack is queued, so one that never shows
+	// (or has since ended unseen) was never a real queue.
+	private static final long LOCAL_QUEUER_NO_TIMER_MS = 30_000L;
 	/** Who is heading to each territory (from the {@code warBoard} broadcast). */
 	private static final Map<String, List<WarGoer>> going = new HashMap<>();
 	/** Territories that had an attack timer last tick, to detect when one ends. */
@@ -161,6 +173,7 @@ public final class AttackTimerMenu {
 			inside = territory.equals(TerritoryData.territoryAt(pos.getX(), pos.getZ()));
 		}
 		queuers.put(territory, new WarQueuer(name, uuid, inside));
+		localQueuers.add(territory);
 	}
 
 	/**
@@ -221,7 +234,15 @@ public final class AttackTimerMenu {
 		going.clear();
 		scrapedDefenses.clear();
 		defenseConflict.clear();
-		Map<String, WarQueuer> oldQueuers = new HashMap<>(queuers);
+		// Only local-only queuers survive a board update; a board-owned one the board no
+		// longer lists was dropped by the backend (its timer ended) and must go here too.
+		Map<String, WarQueuer> localOnly = new HashMap<>();
+		for (String territory : localQueuers) {
+			WarQueuer queuer = queuers.get(territory);
+			if (queuer != null) {
+				localOnly.put(territory, queuer);
+			}
+		}
 		queuers.clear();
 		for (WarBoardEntry entry : entries) {
 			if (!entry.defense().isEmpty()) {
@@ -237,7 +258,11 @@ public final class AttackTimerMenu {
 				queuers.put(entry.territory(), entry.queuer());
 			}
 		}
-		oldQueuers.forEach(queuers::putIfAbsent);
+		// A territory the board now names a queuer for is board-owned from here on.
+		localOnly.keySet().removeIf(queuers::containsKey);
+		localQueuers.retainAll(localOnly.keySet());
+		localQueuerNoTimerSince.keySet().retainAll(localQueuers);
+		queuers.putAll(localOnly);
 	}
 
 	/**
@@ -277,6 +302,8 @@ public final class AttackTimerMenu {
 			missingSince.remove(territory);
 			chatDefenses.remove(territory);
 			queuers.remove(territory);
+			localQueuers.remove(territory);
+			localQueuerNoTimerSince.remove(territory);
 			lastReportedInsideByTerritory.remove(territory);
 			pendingInsideByTerritory.remove(territory);
 			pendingSinceByTerritory.remove(territory);
@@ -285,7 +312,29 @@ public final class AttackTimerMenu {
 			}
 		}
 		previousActive = active;
+		dropStaleLocalQueuers(current, now);
 		reportInside(socket);
+	}
+
+	/**
+	 * Drop a local-only queuer once its territory has shown no attack timer for
+	 * {@link #LOCAL_QUEUER_NO_TIMER_MS}: a chat report for a territory nobody queued, or a
+	 * war that ended while this client was on another world, would otherwise never clear.
+	 */
+	private static void dropStaleLocalQueuers(java.util.Set<String> current, long now) {
+		for (java.util.Iterator<String> it = localQueuers.iterator(); it.hasNext();) {
+			String territory = it.next();
+			if (current.contains(territory)) {
+				localQueuerNoTimerSince.remove(territory);
+				continue;
+			}
+			long since = localQueuerNoTimerSince.computeIfAbsent(territory, t -> now);
+			if (now - since >= LOCAL_QUEUER_NO_TIMER_MS) {
+				it.remove();
+				localQueuerNoTimerSince.remove(territory);
+				queuers.remove(territory);
+			}
+		}
 	}
 
 	/**
@@ -374,13 +423,35 @@ public final class AttackTimerMenu {
 		return set;
 	}
 
-	/** Clear all local war-board state (on world change / disconnect). */
+	/**
+	 * A world swap keeps the bridge socket open, and the backend only sends the board to a
+	 * new connection, so the board state (queuers, goers, scraped defence) is kept here: the
+	 * live socket keeps it current. Only state read from this world's sidebar is cleared.
+	 * {@link #reset()} still clears everything on disconnect.
+	 */
+	public static void onWorldJoin() {
+		chatDefenses.clear();
+		previousActive.clear();
+		missingSince.clear();
+		localQueuerNoTimerSince.clear();
+		clickBoxes.clear();
+		headBoxes.clear();
+		soonestTerritory = null;
+		// Re-report inside status from this world's position.
+		lastReportedInsideByTerritory.clear();
+		pendingInsideByTerritory.clear();
+		pendingSinceByTerritory.clear();
+	}
+
+	/** Clear all local war-board state (on disconnect). */
 	public static void reset() {
 		chatDefenses.clear();
 		scrapedDefenses.clear();
 		defenseConflict.clear();
 		going.clear();
 		queuers.clear();
+		localQueuers.clear();
+		localQueuerNoTimerSince.clear();
 		previousActive.clear();
 		missingSince.clear();
 		clickBoxes.clear();
@@ -833,5 +904,22 @@ public final class AttackTimerMenu {
 
 	private static String stripCodes(String text) {
 		return text.replaceAll("§.", "");
+	}
+
+	static void putLocalQueuerForTesting(String territory, WarQueuer queuer) {
+		queuers.put(territory, queuer);
+		localQueuers.add(territory);
+	}
+
+	static WarQueuer queuerForTesting(String territory) {
+		return queuers.get(territory);
+	}
+
+	static List<WarGoer> goingForTesting(String territory) {
+		return going.get(territory);
+	}
+
+	static void dropStaleLocalQueuersForTesting(java.util.Set<String> current, long now) {
+		dropStaleLocalQueuers(current, now);
 	}
 }

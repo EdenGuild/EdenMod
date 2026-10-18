@@ -47,11 +47,15 @@ public final class RaidCompletionParser {
 	private static final Pattern HOVER_REAL_NAME_PATTERN = Pattern.compile("(?:'(?:s)? real (?:user)?name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
 	private static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
 	private static final Pattern COMMA = Pattern.compile("\\s*,\\s*");
+	private static final Pattern PUNCTUATION = Pattern.compile("[,:>]");
 
 	private RaidCompletionParser() {
 	}
 
 	private record Segment(String text, Style style, String hover) {
+	}
+
+	private record Masked(String text, Set<String> usernames) {
 	}
 
 	/** Cheap keyword gate so the regex/cleanup runs only for plausible raid lines. */
@@ -75,15 +79,22 @@ public final class RaidCompletionParser {
 			return Optional.empty();
 		}
 		String raidName = RAID_BY_KEYWORD.get(detect.group(1).toLowerCase(Locale.ROOT));
-		Matcher names = NAMES.matcher(cleaned);
-		if (raidName == null || !names.find()) {
+		// Player chat ("name: message") is rejected on the text as sent: substitution
+		// below could rewrite a name span that carries its own colon.
+		Matcher sent = NAMES.matcher(cleaned);
+		if (raidName == null || !sent.find() || sent.group(1).contains(":") || sent.group(1).contains(">")) {
+			return Optional.empty();
+		}
+		Masked masked = maskNamedSpans(message);
+		Matcher names = NAMES.matcher(ChatText.normalize(masked.text()).replace(",and ", ", and "));
+		if (!names.find()) {
 			return Optional.empty();
 		}
 		String namesGroup = names.group(1);
 		if (namesGroup.contains(":") || namesGroup.contains(">")) {
 			return Optional.empty();
 		}
-		List<String> party = resolveParty(splitNames(namesGroup), message);
+		List<String> party = resolveParty(splitNames(namesGroup), message, masked.usernames());
 		if (party.isEmpty() || party.size() > 4) {
 			return Optional.empty();
 		}
@@ -159,17 +170,81 @@ public final class RaidCompletionParser {
 	}
 
 	/**
+	 * The message text with each name span that carries its account name (hover, or an
+	 * IGN insertion) replaced by that account name, plus the names substituted.
+	 *
+	 * <p>A nickname is free text, so splitting the party on {@code ", "} and
+	 * {@code " and "} cut one containing " and " into extra "players" — "lightning and
+	 * the" came out as lightning + the, and "the" passes as a username. Substituting
+	 * first leaves only real separators to split on. Wynncraft wraps long announcements,
+	 * which can break one nickname across two spans carrying the same hover; a repeat of
+	 * the name just substituted, with only the wrap's whitespace and glyphs between, is
+	 * folded into it. Only the names before "finished" are touched, so the raid name and
+	 * loot stay as sent.
+	 */
+	private static Masked maskNamedSpans(Component message) {
+		StringBuilder out = new StringBuilder();
+		Set<String> usernames = new LinkedHashSet<>();
+		String lastName = null;
+		boolean onlyFillerSinceLast = false;
+		for (Segment seg : collect(message)) {
+			if (out.indexOf(" finished") >= 0) {
+				out.append(seg.text());
+				continue;
+			}
+			String real = hoverUsername(seg.hover());
+			if (real == null && isIgn(seg.style().getInsertion())) {
+				real = seg.style().getInsertion();
+			}
+			// A span carrying punctuation is more than a bare name; swapping it whole would
+			// drop the separator, so it keeps its text and the old split handles it.
+			if (real == null || seg.text().isBlank() || PUNCTUATION.matcher(seg.text()).find()) {
+				out.append(seg.text());
+				onlyFillerSinceLast &= isFiller(seg.text());
+				continue;
+			}
+			if (real.equals(lastName) && onlyFillerSinceLast) {
+				continue;
+			}
+			String text = seg.text();
+			int start = 0;
+			int end = text.length();
+			while (start < end && Character.isWhitespace(text.charAt(start))) {
+				start++;
+			}
+			while (end > start && Character.isWhitespace(text.charAt(end - 1))) {
+				end--;
+			}
+			out.append(text, 0, start).append(real).append(text, end, text.length());
+			usernames.add(real);
+			lastName = real;
+			onlyFillerSinceLast = true;
+		}
+		return new Masked(out.toString(), usernames);
+	}
+
+	/** Whether text is only whitespace and invisible glyphs, as a line wrap inserts. */
+	private static boolean isFiller(String text) {
+		return text.codePoints().allMatch(cp -> Character.isWhitespace(cp) || ChatText.isIgnorable(cp));
+	}
+
+	/**
 	 * Resolve each displayed party name to a real username using the hover/insertion
 	 * metadata carried on the style segments matching the name. Falls back to the
-	 * cleaned displayed name when it is already a valid username.
+	 * cleaned displayed name when it is already a valid username. Names already
+	 * substituted from their span's metadata ({@code known}) are taken as they are.
 	 */
-	private static List<String> resolveParty(List<String> displayed, Component message) {
+	private static List<String> resolveParty(List<String> displayed, Component message, Set<String> known) {
 		List<Segment> segments = collect(message);
 		Set<String> resolved = new LinkedHashSet<>();
 		Set<Integer> usedSegmentIndices = new java.util.HashSet<>();
 		for (String name : displayed) {
 			String cleanedName = cleanName(name);
 			if (cleanedName.isEmpty()) {
+				continue;
+			}
+			if (known.contains(cleanedName)) {
+				resolved.add(cleanedName);
 				continue;
 			}
 			String real = null;

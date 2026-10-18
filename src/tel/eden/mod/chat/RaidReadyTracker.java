@@ -68,7 +68,9 @@ public final class RaidReadyTracker {
 
 	public static void onSystemChat(Component message) {
 		String text = ChatText.normalizeWhitespace(message.getString());
-		if (text.isEmpty()) {
+		// Wynncraft's ready/start lines never contain a colon; player chat always does
+		// ("name: message"), so this keeps "food is ready!" in guild chat from counting.
+		if (text.isEmpty() || text.indexOf(':') >= 0) {
 			return;
 		}
 

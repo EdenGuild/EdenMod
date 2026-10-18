@@ -658,13 +658,14 @@ public final class EdenModClient implements ClientModInitializer {
 			guildLogSync.onWorldJoin();
 			partyCommandGeneration.incrementAndGet();
 			loginPending = true;
-			// Fresh connection: drop the packet-captured scoreboard and all war-board state
-			// so a previous world/session's timers, defence, and heads never linger.
+			// Fresh connection: drop the packet-captured scoreboard and this world's timer
+			// tracking. The war board itself survives a world swap (the bridge socket stays
+			// open and keeps it current); disconnect() clears it fully.
 			ScoreboardCapture.reset();
 			RaidPartyTracker.reset();
 			AllianceMenuScraper.reset();
 			GuildMenuScraper.reset();
-			AttackTimerMenu.reset();
+			AttackTimerMenu.onWorldJoin();
 			tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
 			guildAllyManager.requestCancel();
