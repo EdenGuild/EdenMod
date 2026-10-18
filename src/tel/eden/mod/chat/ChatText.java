@@ -41,6 +41,13 @@ public final class ChatText {
 	 * already a valid username, else null.
 	 */
 	static String resolveRealName(Component message, String displayed) {
+		if (displayed == null) {
+			return null;
+		}
+		if (message == null) {
+			String cleaned = displayed.replaceAll("[^a-zA-Z0-9_]", "");
+			return IGN.matcher(cleaned).matches() ? cleaned : null;
+		}
 		List<MetaChar> chars = flatten(message);
 		String text = text(chars);
 		int start = text.indexOf(displayed);
@@ -74,6 +81,9 @@ public final class ChatText {
 	 * no metadata is present (caller falls back to the displayed name).
 	 */
 	public static String resolveRealNameAnywhere(Component message, String displayed) {
+		if (message == null) {
+			return null;
+		}
 		Set<String> candidates = new LinkedHashSet<>();
 		message.visit((style, fragment) -> {
 			String hover = hoverRealName(style);
@@ -113,6 +123,9 @@ public final class ChatText {
 	}
 
 	private static List<MetaChar> flatten(Component message) {
+		if (message == null) {
+			return List.of();
+		}
 		List<MetaChar> out = new ArrayList<>();
 		message.visit((style, fragment) -> {
 			String hover = hoverRealName(style);

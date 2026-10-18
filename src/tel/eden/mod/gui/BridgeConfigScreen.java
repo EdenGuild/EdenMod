@@ -150,6 +150,7 @@ public final class BridgeConfigScreen extends Screen {
 		addSliderRow(Category.PARTY_RAIDS, "Minimum raid gambits", gambitSlider, gambitSlider::syncFromConfig, () -> config.raidGambitMinimum = 1);
 		addToggleRow(Category.PARTY_RAIDS, "TCC Labyrinth minimap (Map credits: kimchaewon)", () -> config.tccLabyrinthMap, v -> config.tccLabyrinthMap = v, "On", "Off", true);
 		addToggleRow(Category.PARTY_RAIDS, "TCC exit discovery ping", () -> config.tccExitPing, v -> config.tccExitPing = v, "On", "Off", true);
+		addToggleRow(Category.PARTY_RAIDS, "Require guild raid to ready", () -> config.requireGuildRaid, v -> config.requireGuildRaid = v, "On", "Off", false);
 
 		// War & Territory
 		addToggleRow(Category.WAR, "Attack timers HUD", () -> config.warAttackTimers, v -> config.warAttackTimers = v, "On", "Off", true);

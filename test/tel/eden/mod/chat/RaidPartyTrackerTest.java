@@ -74,6 +74,25 @@ class RaidPartyTrackerTest {
 	}
 
 	@Test
+	void doesNotSwallowChatMentioningNotAndParty() {
+		RaidPartyTracker.setExpectingPartyListForTesting(true);
+		Component msg = Component.literal("Lumeniia: party is not ready yet, wait");
+		boolean handled = RaidPartyTracker.handlePartyListChat(msg);
+
+		assertFalse(handled);
+		assertTrue(RaidPartyTracker.isExpectingPartyList());
+	}
+
+	@Test
+	void handlesMustBeInPartyMessage() {
+		RaidPartyTracker.setExpectingPartyListForTesting(true);
+		Component msg = Component.literal("You must be in a party to use this.");
+
+		assertTrue(RaidPartyTracker.handlePartyListChat(msg));
+		assertFalse(RaidPartyTracker.isExpectingPartyList());
+	}
+
+	@Test
 	void extraPlayersDeductsAnnouncedGuildMembersFromPartyRoster() {
 		RaidPartyTracker.setRaidingForTesting(true);
 		RaidPartyTracker.addPartyMemberForTesting("Alice");
