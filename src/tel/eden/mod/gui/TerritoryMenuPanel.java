@@ -530,7 +530,8 @@ public final class TerritoryMenuPanel {
 		int btnSelW = 114;
 		int btnSelH = 18;
 		String activeName = TerritoryGuideController.hasActivePreset() ? TerritoryGuideController.activePreset().name() : "None";
-		String displayPresetName = font.plainSubstrByWidth(activeName, btnSelW - 18) + " v";
+		String arrow = dropdownOpen ? "\u25B2" : "\u25BC";
+		String displayPresetName = font.plainSubstrByWidth(activeName, btnSelW - 18) + " " + arrow;
 		renderButton(graphics, font, btnSelX, btnSelY, btnSelW, btnSelH, displayPresetName, mouseX, mouseY);
 
 		// 3. [▶] Next Preset
@@ -617,8 +618,7 @@ public final class TerritoryMenuPanel {
 		int dropW = 210;
 		int headerH = 18;
 		int rowH = 16;
-		int footerH = 22;
-		int dropH = headerH + (1 + Math.max(1, count)) * rowH + footerH + 4;
+		int dropH = headerH + (1 + Math.max(1, count)) * rowH + 4;
 
 		graphics.fill(x, y, x + dropW, y + dropH, 0xF510141D);
 		graphics.renderOutline(x, y, dropW, dropH, 0xFF3E4A5B);
@@ -666,11 +666,6 @@ public final class TerritoryMenuPanel {
 				curY += rowH;
 			}
 		}
-
-		// Footer buttons
-		int btnW = (dropW - 12) / 2;
-		renderButton(graphics, font, x + 4, curY + 2, btnW, 16, "+ Import", mouseX, mouseY);
-		renderButton(graphics, font, x + 8 + btnW, curY + 2, btnW, 16, "+ Save Live", mouseX, mouseY);
 	}
 
 	private static void renderButton(GuiGraphics graphics, Font font, int x, int y, int w, int h, String text, int mouseX, int mouseY) {
@@ -752,8 +747,7 @@ public final class TerritoryMenuPanel {
 			int dropW = 210;
 			int headerH = 18;
 			int rowH = 16;
-			int footerH = 22;
-			int dropH = headerH + (1 + Math.max(1, count)) * rowH + footerH + 4;
+			int dropH = headerH + (1 + Math.max(1, count)) * rowH + 4;
 			int dropX = btnSelX;
 			int dropY = btnSelY + btnSelH + 2;
 
@@ -801,67 +795,6 @@ public final class TerritoryMenuPanel {
 						return false;
 					}
 					curY += rowH;
-				}
-
-				// Footer buttons
-				int btnW = (dropW - 12) / 2;
-				// + Import
-				if (mouseX >= dropX + 4 && mouseX < dropX + 4 + btnW && mouseY >= curY + 2 && mouseY < curY + 18) {
-					String clip = mc.keyboardHandler.getClipboard();
-					if (clip != null && clip.length() > TerritoryPresetCodec.MAX_INPUT_CHARS) {
-						if (mc.gui != null) {
-							mc.gui.getChat().addMessage(Component.literal("§c[Eden] Preset code in clipboard is too large (max 64 KB)."));
-						}
-						return false;
-					}
-					try {
-						TerritoryPreset p = TerritoryPresetCodec.parse(clip);
-						TerritoryGuideController.savePresetToStorage(p.name(), clip);
-						dropdownOpen = false;
-						if (mc.gui != null) {
-							mc.gui.getChat().addMessage(Component.literal("§a[Eden] Imported preset: " + p.name() + " (" + p.territories().size() + " terrs)"));
-						}
-					} catch (Exception e) {
-						if (mc.gui != null) {
-							mc.gui.getChat().addMessage(Component.literal("§c[Eden] Invalid preset in clipboard: " + e.getMessage()));
-						}
-					}
-					return false;
-				}
-				// + Save Live
-				if (mouseX >= dropX + 8 + btnW && mouseX < dropX + dropW && mouseY >= curY + 2 && mouseY < curY + 18) {
-					Object holder = getHolder(screen);
-					Map<String, TerritoryPreset.TerritoryLoadout> currentLoadouts = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-					currentLoadouts.putAll(TerritoryGuideController.sessionLoadouts());
-					if (fallbackLoadouts != null) {
-						currentLoadouts.putAll(fallbackLoadouts);
-					}
-					if (holder != null) {
-						currentLoadouts.putAll(readLiveLoadouts(holder, null));
-					}
-					if (currentLoadouts.isEmpty()) {
-						if (mc.gui != null) {
-							mc.gui.getChat().addMessage(Component.literal("§c[Eden] No territories loaded yet. Wait for menu to load."));
-						}
-					} else {
-						Map<String, TerritoryPreset.TerritoryLoadout> cleanMap = new LinkedHashMap<>();
-						for (Map.Entry<String, TerritoryPreset.TerritoryLoadout> entry : currentLoadouts.entrySet()) {
-							String clean = TerritoryGuideController.canonicalTerritoryName(entry.getKey());
-							if (!clean.isEmpty()) {
-								cleanMap.put(clean, entry.getValue());
-							}
-						}
-						String stamp = new SimpleDateFormat("MMM d HH:mm", Locale.US).format(new Date());
-						String pName = TerritoryGuideController.getUniquePresetName(presets, "Claim " + stamp);
-						TerritoryPreset p = new TerritoryPreset(pName, "", Set.of(), cleanMap);
-						String code = TerritoryPresetCodec.encodeBase64(p);
-						TerritoryGuideController.savePresetToStorage(pName, code);
-						dropdownOpen = false;
-						if (mc.gui != null) {
-							mc.gui.getChat().addMessage(Component.literal("§a[Eden] Saved live claim as '" + pName + "' (" + cleanMap.size() + " terrs)"));
-						}
-					}
-					return false;
 				}
 				return false;
 			} else {
