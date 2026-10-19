@@ -663,15 +663,20 @@ public final class BridgeWebSocketClient {
 	}
 
 	/**
-	 * Broadcast an Athanatic Witness kill to raid/party members or group key peers.
+	 * Broadcast an Athanatic Witness kill to the raid party.
 	 *
 	 * @return whether the message was queued on a connected socket
 	 */
-	public boolean sendWitnessKill(java.util.List<String> partyMembers, String groupKey) {
+	public boolean sendWitnessKill(java.util.List<String> partyMembers) {
 		WebSocket current = socket;
 		if (current == null) {
 			return false;
 		}
+		enqueueSend(current, witnessKillPayload(partyMembers).toString());
+		return true;
+	}
+
+	static JsonObject witnessKillPayload(java.util.List<String> partyMembers) {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "witnessKill");
 		if (partyMembers != null && !partyMembers.isEmpty()) {
@@ -683,11 +688,7 @@ public final class BridgeWebSocketClient {
 			}
 			obj.add("party", arr);
 		}
-		if (groupKey != null && !groupKey.isBlank()) {
-			obj.addProperty("groupKey", groupKey.trim());
-		}
-		enqueueSend(current, obj.toString());
-		return true;
+		return obj;
 	}
 
 	/**

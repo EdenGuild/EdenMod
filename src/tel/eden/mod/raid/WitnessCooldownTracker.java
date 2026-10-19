@@ -67,6 +67,18 @@ public final class WitnessCooldownTracker {
 		return CRYSTAL_PATTERN.matcher(cleanText).find();
 	}
 
+	/**
+	 * Server chat line. Player chat (guild, party, global) always reads {@code name: message},
+	 * so any line with a colon is someone typing the phrase, never the real pickup notice.
+	 */
+	public static void onChatMessage(Component message) {
+		if (message == null || message.getString().indexOf(':') >= 0) {
+			return;
+		}
+		onMessage(message);
+	}
+
+	/** Action bar or overlay text, which players cannot write into. */
 	public static void onMessage(Component message) {
 		if (message == null) {
 			return;
@@ -95,7 +107,12 @@ public final class WitnessCooldownTracker {
 		broadcastLocalKill();
 	}
 
-	public static void onRemoteWitnessKill(String sender, long timestamp) {
+	/**
+	 * A party member's kill, relayed by EdenBot. Timed from arrival rather than the bot's
+	 * timestamp: the relay is near-instant, while comparing the bot's clock to ours would
+	 * drop every remote kill for a player whose clock runs a few seconds fast.
+	 */
+	public static void onRemoteWitnessKill(String sender) {
 		BridgeConfig config = EdenModClient.instance() != null ? EdenModClient.instance().config() : null;
 		if (config != null && !config.witnessCooldownTracker) {
 			return;
@@ -104,12 +121,8 @@ public final class WitnessCooldownTracker {
 		if (now - lastTriggerMs < DEBOUNCE_WINDOW_MS) {
 			return;
 		}
-		long elapsed = Math.max(0, now - timestamp);
-		long remaining = Math.max(0, COOLDOWN_DURATION_MS - elapsed);
-		if (remaining > 0) {
-			lastTriggerMs = now;
-			cooldownExpiresAtMs = now + remaining;
-		}
+		lastTriggerMs = now;
+		cooldownExpiresAtMs = now + COOLDOWN_DURATION_MS;
 	}
 
 	private static void broadcastLocalKill() {
@@ -125,9 +138,9 @@ public final class WitnessCooldownTracker {
 		if (socket == null) {
 			return;
 		}
-		List<String> partyMembers = getRaidPartyMembers();
-		String groupKey = config != null ? config.radianceGroupKey : null;
-		socket.sendWitnessKill(partyMembers, groupKey);
+		// Party only: the Radiance group key is a war grouping, and matching on it would put
+		// this raid's timer on the screens of war teammates who aren't in the raid.
+		socket.sendWitnessKill(getRaidPartyMembers());
 	}
 
 	public static List<String> getRaidPartyMembers() {

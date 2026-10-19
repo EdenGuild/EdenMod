@@ -120,22 +120,31 @@ class WitnessCooldownTrackerTest {
 	}
 
 	@Test
-	void testRemoteWitnessKill() {
-		long packetTimestamp = currentTime.get() - 1000L; // 1.0s ago on remote sender
-		WitnessCooldownTracker.onRemoteWitnessKill("Ally", packetTimestamp);
+	void testRemoteWitnessKillTimedFromArrival() {
+		WitnessCooldownTracker.onRemoteWitnessKill("Ally");
 
-		// Elapsed is 1000ms -> remaining is 4000ms
-		assertEquals(currentTime.get() + 4000L, WitnessCooldownTracker.getCooldownExpiresAtMs());
-		assertEquals(4.0, WitnessCooldownTracker.getRemainingSeconds(currentTime.get()), 0.001);
-		assertEquals("Witness: 4.0s", WitnessCooldownTracker.getStatusText(currentTime.get()));
+		// The bot's timestamp is ignored, so a skewed clock on either side can't shorten or drop it
+		assertEquals(currentTime.get() + 5000L, WitnessCooldownTracker.getCooldownExpiresAtMs());
+		assertEquals("Witness: 5.0s", WitnessCooldownTracker.getStatusText(currentTime.get()));
 	}
 
 	@Test
-	void testRemoteWitnessKillExpiredIgnored() {
-		long packetTimestamp = currentTime.get() - 6000L; // 6.0s ago (stale)
-		WitnessCooldownTracker.onRemoteWitnessKill("Ally", packetTimestamp);
+	void testRemoteWitnessKillDebouncedAfterLocalKill() {
+		WitnessCooldownTracker.onCrystalAcquired();
+		currentTime.addAndGet(300L);
+		WitnessCooldownTracker.onRemoteWitnessKill("Ally");
 
-		assertEquals(0L, WitnessCooldownTracker.getCooldownExpiresAtMs(), "Stale remote kill should not activate cooldown");
+		assertEquals(105_000L, WitnessCooldownTracker.getCooldownExpiresAtMs(), "Relay of the same kill must not restart the timer");
+	}
+
+	@Test
+	void testChatLineWithColonIsPlayerChat() {
+		WitnessCooldownTracker.onChatMessage(Component.literal("[Eden] Bob: [+2 Light Crystal]"));
+		WitnessCooldownTracker.onChatMessage(Component.literal("Alice: lol [+2 Light Crystal]"));
+		assertEquals(0L, WitnessCooldownTracker.getCooldownExpiresAtMs());
+
+		WitnessCooldownTracker.onChatMessage(Component.literal("§a[+2 Light Crystal]"));
+		assertEquals(105_000L, WitnessCooldownTracker.getCooldownExpiresAtMs());
 	}
 
 	@Test

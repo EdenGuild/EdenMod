@@ -1109,7 +1109,7 @@ public final class EdenModClient implements ClientModInitializer {
 								return;
 							}
 						}
-						tel.eden.mod.raid.WitnessCooldownTracker.onRemoteWitnessKill(sender, timestamp);
+						tel.eden.mod.raid.WitnessCooldownTracker.onRemoteWitnessKill(sender);
 					});
 				}
 
@@ -2454,7 +2454,7 @@ public final class EdenModClient implements ClientModInitializer {
 		DiscordChatFormatter.onServerChatLine();
 		if (onWynncraft) {
 			RaidReadyTracker.onSystemChat(message);
-			tel.eden.mod.raid.WitnessCooldownTracker.onMessage(message);
+			tel.eden.mod.raid.WitnessCooldownTracker.onChatMessage(message);
 			// War chat cues (start countdown → attendance capture; end → HUD summary)
 			// work even while the bridge socket is down. Keep these deferred until after
 			// this packet handler returns, alongside the rest of the client-tick state.
