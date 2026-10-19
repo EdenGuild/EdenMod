@@ -378,7 +378,7 @@ public final class TccLabyrinthTracker {
 		}
 
 		java.util.List<String> party = getRaidPartyMembers();
-		if (party.isEmpty()) {
+		if (party.isEmpty() && !debugForceShow) {
 			mc.player.displayClientMessage(Component.literal("Unable to report exit, could not resolve party").withStyle(ChatFormatting.RED), true);
 			return;
 		}
@@ -559,9 +559,9 @@ public final class TccLabyrinthTracker {
 				}
 				mc.execute(() -> {
 					if (mc.gui != null) {
-						mc.gui.setTitle(msg);
-						mc.gui.setSubtitle(Component.empty());
 						mc.gui.setTimes(10, 70, 20);
+						mc.gui.setSubtitle(Component.empty());
+						mc.gui.setTitle(msg);
 					}
 				});
 			}

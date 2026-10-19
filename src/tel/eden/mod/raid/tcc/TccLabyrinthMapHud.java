@@ -157,10 +157,13 @@ public final class TccLabyrinthMapHud {
 		int color = (alpha << 24) | 0x00FFFFFF;
 
 		int rCeil = (int) Math.ceil(radius + 1.0f);
+		double rMinSq = (radius - 1.0) * (radius - 1.0);
+		double rMaxSq = (radius + 1.0) * (radius + 1.0);
 		for (int dx = -rCeil; dx <= rCeil; dx++) {
+			int dxSq = dx * dx;
 			for (int dy = -rCeil; dy <= rCeil; dy++) {
-				double d = Math.hypot(dx, dy);
-				if (d >= radius - 1.0 && d <= radius + 1.0) {
+				int distSq = dxSq + dy * dy;
+				if (distSq >= rMinSq && distSq <= rMaxSq) {
 					graphics.fill(cx + dx, cy + dy, cx + dx + 1, cy + dy + 1, color);
 				}
 			}
