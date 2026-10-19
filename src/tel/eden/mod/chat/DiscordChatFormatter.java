@@ -151,8 +151,8 @@ public final class DiscordChatFormatter {
 	 */
 	public static Component allyActivity(java.util.List<tel.eden.mod.net.AllyActivityEntry> entries, boolean canManage) {
 		MutableComponent out = Component.empty().append(prefix(SHIELD));
-		if (entries.isEmpty()) {
-			return out.append(Component.literal("No guild allies currently found.").withStyle(ChatFormatting.GOLD));
+		if (entries == null || entries.isEmpty()) {
+			return out.append(Component.literal("Unable to fetch ally info, try again later.").withStyle(ChatFormatting.RED));
 		}
 		out.append(Component.literal("Guild Allies (by inactivity):").withStyle(ChatFormatting.GREEN));
 		for (tel.eden.mod.net.AllyActivityEntry entry : entries) {
