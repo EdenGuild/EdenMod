@@ -23,23 +23,43 @@ import tel.eden.mod.net.BridgeWebSocketClient;
  * Room 2: The Labyrinth with zero entity scanning and zero world scanning.
  */
 public final class TccLabyrinthTracker {
+	public enum ExitColor {
+		RED("Red", ChatFormatting.RED, 0xFFFF5555), BLUE("Blue", ChatFormatting.AQUA, 0xFF55FFFF), YELLOW("Yellow", ChatFormatting.YELLOW, 0xFFFFFF55), GREEN("Green", ChatFormatting.GREEN, 0xFF55FF55);
+
+		public final String displayName;
+		public final ChatFormatting chatFormatting;
+		public final int argb;
+
+		ExitColor(String displayName, ChatFormatting chatFormatting, int argb) {
+			this.displayName = displayName;
+			this.chatFormatting = chatFormatting;
+			this.argb = argb;
+		}
+	}
+
 	public enum ExitPoint {
-		BLUE_TOP_RIGHT(1, "Blue Top Right", 399, 67), BLUE_TOP_MID(2, "Blue Top Mid", 345, 75), BLUE_TOP_LEFT(3, "Blue Top Left", 278, 83), BLUE_FAR_LEFT(4, "Blue Far Left", 256, 116), BLUE_FAR_RIGHT(5, "Blue Far Right", 407, 119),
+		RL(1, "RL", ExitColor.RED, 10839, 3512, 360, 644), RR2(2, "RR2", ExitColor.RED, 10804, 3449, 243, 713), RR3(3, "RR3", ExitColor.RED, 10827, 3396, 135, 668), RR4(4, "RR4", ExitColor.RED, 10857, 3370, 87, 599), RR5(5, "RR5", ExitColor.RED, 10829, 3348, 43, 669),
 
-		YELLOW_UPPER(6, "Yellow Upper", 441, 220), YELLOW_FAR_RIGHT(7, "Yellow Far Right", 509, 260), YELLOW_LOWER(8, "Yellow Lower", 441, 266),
+		BLUE_LEFT_1(6, "Blue left 1", ExitColor.BLUE, 11101, 3458, 256, 116), BLUE_LEFT_2(7, "Blue left 2", ExitColor.BLUE, 11117, 3474, 278, 83), BLUE_RIGHT_1(8, "Blue right 1", ExitColor.BLUE, 11119, 3500, 345, 75), BLUE_RIGHT_2(9, "Blue right 2", ExitColor.BLUE, 11127, 3531, 399, 67), BLUE_RIGHT_3(10, "Blue right 3", ExitColor.BLUE, 11103, 3532, 407, 119),
 
-		GREEN_UPPER(9, "Green Upper", 178, 516), GREEN_MID(10, "Green Mid", 207, 567), RED_UPPER_LEFT(11, "Red Upper Left", 87, 599), GREEN_LOWER(12, "Green Lower", 121, 599),
+		Y_LEFT(11, "Y left", ExitColor.YELLOW, 11023, 3549, 441, 266), Y_RIGHT(12, "Y right", ExitColor.YELLOW, 11029, 3580, 509, 260), Y_STRAIGHT(13, "Y straight", ExitColor.YELLOW, 11049, 3554, 441, 220),
 
-		RED_MID_EAST(13, "Red Mid East", 360, 644), RED_LOWER_MID(14, "Red Lower Mid", 135, 668), RED_FAR_SOUTHWEST(15, "Red Far Southwest", 43, 669), RED_BOTTOM(16, "Red Bottom", 243, 713);
+		G_LEFT(14, "G left", ExitColor.GREEN, 10901, 3416, 178, 516), G_RIGHT(15, "G right", ExitColor.GREEN, 10860, 3390, 121, 599), G_STRAIGHT(16, "G straight", ExitColor.GREEN, 10879, 3431, 207, 567);
 
 		public final int id;
 		public final String displayName;
+		public final ExitColor color;
+		public final int worldX;
+		public final int worldZ;
 		public final int mapPixelX;
 		public final int mapPixelY;
 
-		ExitPoint(int id, String displayName, int mapPixelX, int mapPixelY) {
+		ExitPoint(int id, String displayName, ExitColor color, int worldX, int worldZ, int mapPixelX, int mapPixelY) {
 			this.id = id;
 			this.displayName = displayName;
+			this.color = color;
+			this.worldX = worldX;
+			this.worldZ = worldZ;
 			this.mapPixelX = mapPixelX;
 			this.mapPixelY = mapPixelY;
 		}
@@ -59,16 +79,67 @@ public final class TccLabyrinthTracker {
 			return best;
 		}
 
+		public static ExitPoint findClosestLookedAt(double px, double pz, float yaw) {
+			double rad = Math.toRadians(yaw);
+			double lx = -Math.sin(rad);
+			double lz = Math.cos(rad);
+
+			ExitPoint best = null;
+			double bestScore = Double.MAX_VALUE;
+
+			for (ExitPoint ep : values()) {
+				double dx = ep.worldX - px;
+				double dz = ep.worldZ - pz;
+				double dist = Math.hypot(dx, dz);
+				double score;
+				if (dist <= 8.0) {
+					score = dist;
+				} else {
+					double forward = dx * lx + dz * lz;
+					double perp = Math.abs(dx * (-lz) + dz * lx);
+					if (forward > 0 && (forward / dist) >= 0.3) {
+						score = perp * 2.5 + forward * 0.5;
+					} else {
+						score = 10000.0 + dist;
+					}
+				}
+				if (score < bestScore) {
+					bestScore = score;
+					best = ep;
+				}
+			}
+			return best;
+		}
+
 		public static ExitPoint fromName(String name) {
-			if (name == null) {
+			if (name == null || name.isBlank()) {
 				return null;
 			}
+			String norm = name.trim().replace(" ", "_").toUpperCase();
 			for (ExitPoint ep : values()) {
-				if (ep.name().equalsIgnoreCase(name)) {
+				if (ep.name().equalsIgnoreCase(name) || ep.displayName.equalsIgnoreCase(name) || ep.name().equals(norm)) {
 					return ep;
 				}
 			}
-			return null;
+			return switch (norm) {
+				case "BLUE_TOP_RIGHT" -> BLUE_RIGHT_2;
+				case "BLUE_TOP_MID" -> BLUE_RIGHT_1;
+				case "BLUE_TOP_LEFT" -> BLUE_LEFT_2;
+				case "BLUE_FAR_LEFT" -> BLUE_LEFT_1;
+				case "BLUE_FAR_RIGHT" -> BLUE_RIGHT_3;
+				case "YELLOW_UPPER" -> Y_STRAIGHT;
+				case "YELLOW_FAR_RIGHT" -> Y_RIGHT;
+				case "YELLOW_LOWER" -> Y_LEFT;
+				case "GREEN_UPPER" -> G_LEFT;
+				case "GREEN_MID" -> G_STRAIGHT;
+				case "RED_UPPER_LEFT" -> RR4;
+				case "GREEN_LOWER" -> G_RIGHT;
+				case "RED_MID_EAST" -> RL;
+				case "RED_LOWER_MID" -> RR3;
+				case "RED_FAR_SOUTHWEST" -> RR5;
+				case "RED_BOTTOM" -> RR2;
+				default -> null;
+			};
 		}
 	}
 
@@ -272,72 +343,86 @@ public final class TccLabyrinthTracker {
 		}
 	}
 
+	public static boolean isLocalPlayerWings() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc == null || mc.player == null) {
+			return false;
+		}
+		if (wingsPlayerUUID != null && mc.player.getUUID().equals(wingsPlayerUUID)) {
+			return true;
+		}
+		return mc.player.getY() >= WINGS_THRESHOLD_Y;
+	}
+
+	public static ExitPoint findClosestLookedAt(double px, double pz, float yaw) {
+		return ExitPoint.findClosestLookedAt(px, pz, yaw);
+	}
+
 	public static void onReportExitKeybind(BridgeConfig config, BridgeWebSocketClient socket) {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc == null || mc.player == null) {
 			return;
 		}
 		if (!isInRoom2()) {
-			return;
-		}
-		if (!hasExitTitle) {
-			mc.player.displayClientMessage(Component.literal("Cannot report exit: you must reach the exit first (Waiting for players...).").withStyle(ChatFormatting.RED), true);
+			mc.player.displayClientMessage(Component.literal("Unable to report exit").withStyle(ChatFormatting.RED), true);
 			return;
 		}
 
 		long now = System.currentTimeMillis();
-		if (now - lastReportKeyMs < REPORT_COOLDOWN_MS) {
-			long remainingSec = (REPORT_COOLDOWN_MS - (now - lastReportKeyMs) + 999L) / 1000L;
-			mc.player.displayClientMessage(Component.literal("Exit report is on cooldown (" + remainingSec + "s)").withStyle(ChatFormatting.RED), true);
+		long cooldownMs = isLocalPlayerWings() ? 250L : 2500L;
+		if (now - lastReportKeyMs < cooldownMs) {
+			double remainingSec = (cooldownMs - (now - lastReportKeyMs)) / 1000.0;
+			String timeStr = String.format(java.util.Locale.ROOT, "%.1fs", remainingSec);
+			mc.player.displayClientMessage(Component.literal("Reporting exits on cooldown, try again in " + timeStr).withStyle(ChatFormatting.RED), true);
+			return;
+		}
+
+		java.util.List<String> party = getRaidPartyMembers();
+		if (party.isEmpty()) {
+			mc.player.displayClientMessage(Component.literal("Unable to report exit, could not resolve party").withStyle(ChatFormatting.RED), true);
 			return;
 		}
 
 		ExitPoint prev = confirmedExit;
 		double px = mc.player.getX();
 		double pz = mc.player.getZ();
-		ExitPoint ep = reportExit(px, pz, config, socket);
-		if (ep != null) {
-			lastReportKeyMs = now;
-			String myName = mc.player.getScoreboardName();
-			mc.player.displayClientMessage(Component.literal(myName + " has reported an exit!").withStyle(ChatFormatting.GREEN), false);
-			if (prev != null && prev != ep) {
-				mc.player.displayClientMessage(Component.literal("Corrected TCC Exit: " + ep.displayName).withStyle(ChatFormatting.YELLOW), true);
-			} else {
-				mc.player.displayClientMessage(Component.literal("Reported TCC Exit: " + ep.displayName).withStyle(ChatFormatting.GREEN), true);
-			}
-			if (prev == ep && config != null && config.tccExitPing) {
-				playDiscoveryPing();
-			}
+		float yaw = mc.player.getYRot();
+		ExitPoint ep = reportExit(px, pz, yaw, config, socket);
+		if (ep == null) {
+			mc.player.displayClientMessage(Component.literal("Unable to report exit").withStyle(ChatFormatting.RED), true);
+			return;
+		}
+
+		lastReportKeyMs = now;
+		String myName = mc.player.getScoreboardName();
+		mc.player.displayClientMessage(Component.literal(myName + " has reported an exit at " + ep.displayName).withStyle(ep.color.chatFormatting), false);
+		if (prev != null && prev != ep) {
+			mc.player.displayClientMessage(Component.literal("Corrected TCC Exit: " + ep.displayName).withStyle(ChatFormatting.YELLOW), true);
+		} else {
+			mc.player.displayClientMessage(Component.literal("Reported TCC Exit: " + ep.displayName).withStyle(ep.color.chatFormatting), true);
+		}
+		if (prev == ep && config != null && config.tccExitPing) {
+			playDiscoveryPing();
 		}
 	}
 
-	public static ExitPoint reportExit(double worldX, double worldZ, BridgeConfig config, BridgeWebSocketClient socket) {
+	public static ExitPoint reportExit(double worldX, double worldZ, float yaw, BridgeConfig config, BridgeWebSocketClient socket) {
 		if (!isInRoom2()) {
 			return null;
 		}
-		if (!hasExitTitle) {
-			return null;
-		}
-		float[] mapPix = worldToMapPixels(worldX, worldZ);
-		ExitPoint ep = ExitPoint.findClosest(mapPix[0], mapPix[1]);
+		ExitPoint ep = ExitPoint.findClosestLookedAt(worldX, worldZ, yaw);
 		if (ep != null) {
-			double dx = mapPix[0] - ep.mapPixelX;
-			double dy = mapPix[1] - ep.mapPixelY;
-			// 80 map pixels (~42 world blocks) max proximity to the exit location (spawn is 140+ pixels away)
-			if (dx * dx + dy * dy > 6400.0) {
-				Minecraft mc = Minecraft.getInstance();
-				if (mc != null && mc.player != null) {
-					mc.player.displayClientMessage(Component.literal("Cannot report exit: you are not near an exit location.").withStyle(ChatFormatting.RED), true);
-				}
-				return null;
-			}
 			confirmExit(ep, config);
 			if (socket != null && socket.isConnected()) {
 				java.util.List<String> party = getRaidPartyMembers();
-				socket.sendTccExitReached(ep.name(), worldX, worldZ, party);
+				socket.sendTccExitReached(ep.name(), ep.worldX, ep.worldZ, party);
 			}
 		}
 		return ep;
+	}
+
+	public static ExitPoint reportExit(double worldX, double worldZ, BridgeConfig config, BridgeWebSocketClient socket) {
+		return reportExit(worldX, worldZ, 0.0f, config, socket);
 	}
 
 	private static void checkTraversalGolems(double px, double pz, BridgeWebSocketClient socket) {
@@ -461,11 +546,24 @@ public final class TccLabyrinthTracker {
 				float[] mapPix = worldToMapPixels(x, z);
 				ep = ExitPoint.findClosest(mapPix[0], mapPix[1]);
 			}
+			if (ep == null) {
+				return;
+			}
 			confirmExit(ep, config);
 			Minecraft mc = Minecraft.getInstance();
-			if (mc != null && mc.player != null) {
+			if (mc != null) {
 				String reporter = (sender != null && !sender.isBlank()) ? sender : "A player";
-				mc.player.displayClientMessage(Component.literal(reporter + " has reported an exit!").withStyle(ChatFormatting.GREEN), false);
+				Component msg = Component.literal(reporter + " has reported an exit at " + ep.displayName).withStyle(ep.color.chatFormatting);
+				if (mc.player != null) {
+					mc.player.displayClientMessage(msg, false);
+				}
+				mc.execute(() -> {
+					if (mc.gui != null) {
+						mc.gui.setTitle(msg);
+						mc.gui.setSubtitle(Component.empty());
+						mc.gui.setTimes(10, 70, 20);
+					}
+				});
 			}
 		}
 	}
@@ -545,17 +643,44 @@ public final class TccLabyrinthTracker {
 		java.util.Set<String> members = new java.util.LinkedHashSet<>();
 		java.util.List<String> wynntilsMembers = tel.eden.mod.party.WynntilsPartyBridge.getPartyMembers();
 		if (wynntilsMembers != null) {
-			members.addAll(wynntilsMembers);
-		}
-		if (members.isEmpty()) {
-			members.addAll(tel.eden.mod.chat.RaidPartyTracker.partyMembers());
-		}
-		Minecraft mc = Minecraft.getInstance();
-		if (mc != null && mc.player != null) {
-			String myName = mc.player.getScoreboardName();
-			if (myName != null && !myName.isBlank()) {
-				members.add(myName);
+			for (String m : wynntilsMembers) {
+				String canon = tel.eden.mod.chat.PlayerNameResolver.canonicalize(m);
+				if (canon != null && !canon.isBlank()) {
+					members.add(canon);
+				}
 			}
+		}
+		for (String m : tel.eden.mod.chat.RaidPartyTracker.partyMembers()) {
+			String canon = tel.eden.mod.chat.PlayerNameResolver.canonicalize(m);
+			if (canon != null && !canon.isBlank()) {
+				members.add(canon);
+			}
+		}
+		for (PlayerEntry peer : PEERS.values()) {
+			String canon = tel.eden.mod.chat.PlayerNameResolver.canonicalize(peer.name());
+			if (canon != null && !canon.isBlank()) {
+				members.add(canon);
+			}
+		}
+
+		Minecraft mc = Minecraft.getInstance();
+		String myName = (mc != null && mc.player != null) ? mc.player.getScoreboardName() : null;
+		String myCanon = (myName != null) ? tel.eden.mod.chat.PlayerNameResolver.canonicalize(myName) : null;
+
+		boolean hasTeammate = false;
+		for (String m : members) {
+			if (myCanon == null || !m.equalsIgnoreCase(myCanon)) {
+				hasTeammate = true;
+				break;
+			}
+		}
+
+		if (!hasTeammate) {
+			return Collections.emptyList();
+		}
+
+		if (myCanon != null && !myCanon.isBlank()) {
+			members.add(myCanon);
 		}
 		return new java.util.ArrayList<>(members);
 	}

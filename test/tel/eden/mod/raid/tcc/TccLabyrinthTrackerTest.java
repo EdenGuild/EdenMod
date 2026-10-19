@@ -152,60 +152,65 @@ public class TccLabyrinthTrackerTest {
 	}
 
 	@Test
-	public void testReportExitRequiresTitle() {
-		// Simulates being in Room 2, but title not yet received
+	public void testReportExitDoesNotRequireTitle() {
 		TccLabyrinthTracker.setDebugForceShow(true);
 		TccLabyrinthTracker.setHasExitTitleForTest(false);
 
-		// Without title, reportExit returns null and does not confirm
-		assertNull(TccLabyrinthTracker.reportExit(11120.0, 3500.0, null, null));
-		assertNull(TccLabyrinthTracker.getConfirmedExit());
-		assertFalse(TccLabyrinthTracker.isExitReached());
-
-		// When title is received
-		TccLabyrinthTracker.onTitle(Component.literal("Waiting for players..."), null);
-		assertTrue(TccLabyrinthTracker.hasExitTitle());
-
-		// Standing at spawn (140+ pixels away from any exit) is rejected
-		assertNull(TccLabyrinthTracker.reportExit(10934.0, 3479.0, null, null));
-		assertNull(TccLabyrinthTracker.getConfirmedExit());
-
-		// Standing near an exit successfully reports it
-		TccLabyrinthTracker.ExitPoint reported = TccLabyrinthTracker.reportExit(11120.0, 3500.0, null, null);
+		// Without title, reportExit succeeds directly based on look direction
+		TccLabyrinthTracker.ExitPoint reported = TccLabyrinthTracker.reportExit(10827.0, 3396.0, 0f, null, null);
 		assertNotNull(reported);
+		assertEquals(TccLabyrinthTracker.ExitPoint.RR3, reported);
 		assertEquals(reported, TccLabyrinthTracker.getConfirmedExit());
 		assertTrue(TccLabyrinthTracker.isExitReached());
 	}
 
 	@Test
-	public void testReportExitCorrectionOnRepress() {
-		TccLabyrinthTracker.onTitle(Component.literal("Waiting for players..."), null);
-		assertTrue(TccLabyrinthTracker.hasExitTitle());
+	public void testLookBasedExitSelection() {
+		TccLabyrinthTracker.setDebugForceShow(true);
 
-		// Initially near Blue Top Right
-		TccLabyrinthTracker.ExitPoint first = TccLabyrinthTracker.reportExit(11120.0, 3500.0, null, null);
-		assertNotNull(first);
-		assertEquals(first, TccLabyrinthTracker.getConfirmedExit());
+		// 1. Player standing right at RR3 (10827, 3396)
+		TccLabyrinthTracker.ExitPoint atExit = TccLabyrinthTracker.findClosestLookedAt(10827.0, 3396.0, 180f);
+		assertEquals(TccLabyrinthTracker.ExitPoint.RR3, atExit);
 
-		// Player mislabeled or was near another exit (Yellow Upper / South)
-		TccLabyrinthTracker.ExitPoint corrected = TccLabyrinthTracker.reportExit(11050.0, 3570.0, null, null);
-		assertNotNull(corrected);
-		assertEquals(corrected, TccLabyrinthTracker.getConfirmedExit());
-		assertEquals(TccLabyrinthTracker.ExitPoint.YELLOW_UPPER, corrected);
-		assertTrue(first != corrected);
+		// 2. Wings / Center player (10934, 3479) looking East toward Blue (yaw = -90)
+		TccLabyrinthTracker.ExitPoint lookingBlue = TccLabyrinthTracker.findClosestLookedAt(10934.0, 3479.0, -90f);
+		assertNotNull(lookingBlue);
+		assertEquals(TccLabyrinthTracker.ExitColor.BLUE, lookingBlue.color);
+
+		// 3. Wings / Center player looking toward Yellow (South / South-East, yaw = -30)
+		TccLabyrinthTracker.ExitPoint lookingYellow = TccLabyrinthTracker.findClosestLookedAt(10934.0, 3479.0, -30f);
+		assertNotNull(lookingYellow);
+		assertEquals(TccLabyrinthTracker.ExitColor.YELLOW, lookingYellow.color);
+
+		// 4. Wings / Center player looking toward Green (West / North-West, yaw = 135)
+		TccLabyrinthTracker.ExitPoint lookingGreen = TccLabyrinthTracker.findClosestLookedAt(10934.0, 3479.0, 135f);
+		assertNotNull(lookingGreen);
+		assertEquals(TccLabyrinthTracker.ExitColor.GREEN, lookingGreen.color);
 	}
 
 	@Test
 	public void testExitPointsCountAndLookup() {
 		assertEquals(16, TccLabyrinthTracker.ExitPoint.values().length);
-		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("BLUE_TOP_RIGHT"));
-		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("yellow_far_right"));
-		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("red_bottom"));
-		assertNull(TccLabyrinthTracker.ExitPoint.fromName("NON_EXISTENT"));
 
-		// Match near Yellow Far Right (509, 260)
-		TccLabyrinthTracker.ExitPoint closest = TccLabyrinthTracker.ExitPoint.findClosest(510f, 262f);
-		assertEquals(TccLabyrinthTracker.ExitPoint.YELLOW_FAR_RIGHT, closest);
+		// New 16 exit names
+		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("RL"));
+		assertEquals(TccLabyrinthTracker.ExitColor.RED, TccLabyrinthTracker.ExitPoint.fromName("RL").color);
+		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("RR2"));
+		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("RR3"));
+		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("RR4"));
+		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("RR5"));
+		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("Blue left 1"));
+		assertEquals(TccLabyrinthTracker.ExitColor.BLUE, TccLabyrinthTracker.ExitPoint.fromName("Blue left 1").color);
+		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("Y straight"));
+		assertEquals(TccLabyrinthTracker.ExitColor.YELLOW, TccLabyrinthTracker.ExitPoint.fromName("Y straight").color);
+		assertNotNull(TccLabyrinthTracker.ExitPoint.fromName("G left"));
+		assertEquals(TccLabyrinthTracker.ExitColor.GREEN, TccLabyrinthTracker.ExitPoint.fromName("G left").color);
+
+		// Legacy alias backwards compatibility
+		assertEquals(TccLabyrinthTracker.ExitPoint.BLUE_RIGHT_2, TccLabyrinthTracker.ExitPoint.fromName("BLUE_TOP_RIGHT"));
+		assertEquals(TccLabyrinthTracker.ExitPoint.Y_RIGHT, TccLabyrinthTracker.ExitPoint.fromName("yellow_far_right"));
+		assertEquals(TccLabyrinthTracker.ExitPoint.RR2, TccLabyrinthTracker.ExitPoint.fromName("red_bottom"));
+		assertNull(TccLabyrinthTracker.ExitPoint.fromName("NON_EXISTENT"));
 	}
 
 	@Test
@@ -213,8 +218,8 @@ public class TccLabyrinthTrackerTest {
 		assertNull(TccLabyrinthTracker.getConfirmedExit());
 		assertFalse(TccLabyrinthTracker.isExitReached());
 
-		TccLabyrinthTracker.confirmExit(TccLabyrinthTracker.ExitPoint.YELLOW_FAR_RIGHT, null);
-		assertEquals(TccLabyrinthTracker.ExitPoint.YELLOW_FAR_RIGHT, TccLabyrinthTracker.getConfirmedExit());
+		TccLabyrinthTracker.confirmExit(TccLabyrinthTracker.ExitPoint.Y_RIGHT, null);
+		assertEquals(TccLabyrinthTracker.ExitPoint.Y_RIGHT, TccLabyrinthTracker.getConfirmedExit());
 		assertTrue(TccLabyrinthTracker.isExitReached());
 
 		TccLabyrinthTracker.reset();
@@ -225,13 +230,13 @@ public class TccLabyrinthTrackerTest {
 	@Test
 	public void testPeerExitReachedConfirmation() {
 		assertNull(TccLabyrinthTracker.getConfirmedExit());
-		TccLabyrinthTracker.onPeerExitReached("Peer1", "RED_BOTTOM", 10850.0, 3350.0);
-		assertEquals(TccLabyrinthTracker.ExitPoint.RED_BOTTOM, TccLabyrinthTracker.getConfirmedExit());
+		TccLabyrinthTracker.onPeerExitReached("Peer1", "RR2", 10804.0, 3449.0);
+		assertEquals(TccLabyrinthTracker.ExitPoint.RR2, TccLabyrinthTracker.getConfirmedExit());
 		assertTrue(TccLabyrinthTracker.isExitReached());
 
-		// Peer corrects exit to BLUE_TOP_LEFT
-		TccLabyrinthTracker.onPeerExitReached("Peer1", "BLUE_TOP_LEFT", 11100.0, 3450.0);
-		assertEquals(TccLabyrinthTracker.ExitPoint.BLUE_TOP_LEFT, TccLabyrinthTracker.getConfirmedExit());
+		// Peer corrects exit to BLUE_LEFT_2
+		TccLabyrinthTracker.onPeerExitReached("Peer1", "BLUE_LEFT_2", 11117.0, 3474.0);
+		assertEquals(TccLabyrinthTracker.ExitPoint.BLUE_LEFT_2, TccLabyrinthTracker.getConfirmedExit());
 	}
 
 	@Test
@@ -248,14 +253,14 @@ public class TccLabyrinthTrackerTest {
 	@Test
 	public void testResetClearsState() {
 		TccLabyrinthTracker.markGolemDefeated("B1", null);
-		TccLabyrinthTracker.confirmExit(TccLabyrinthTracker.ExitPoint.BLUE_TOP_RIGHT, null);
+		TccLabyrinthTracker.confirmExit(TccLabyrinthTracker.ExitPoint.BLUE_RIGHT_2, null);
 		TccLabyrinthTracker.setHasExitTitleForTest(true);
 		TccLabyrinthTracker.setLastReportKeyMsForTest(System.currentTimeMillis());
 		assertTrue(TccLabyrinthTracker.getDefeatedGolems().contains("B1"));
 		assertTrue(TccLabyrinthTracker.isExitReached());
 		assertTrue(TccLabyrinthTracker.hasExitTitle());
 		assertTrue(TccLabyrinthTracker.getLastReportKeyMs() > 0L);
-		assertEquals(TccLabyrinthTracker.ExitPoint.BLUE_TOP_RIGHT, TccLabyrinthTracker.getConfirmedExit());
+		assertEquals(TccLabyrinthTracker.ExitPoint.BLUE_RIGHT_2, TccLabyrinthTracker.getConfirmedExit());
 
 		TccLabyrinthTracker.reset();
 		assertFalse(TccLabyrinthTracker.getDefeatedGolems().contains("B1"));
