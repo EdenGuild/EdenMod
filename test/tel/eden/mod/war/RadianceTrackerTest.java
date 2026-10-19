@@ -248,7 +248,7 @@ class RadianceTrackerTest {
 		// Partner casts their Radiance (Tier 2 -> 9.65s)
 		RadianceTracker.onRemoteCast(config, "war1", 2, 9650L, t0, 0L);
 		assertTrue(RadianceTracker.isCastCountdownActive());
-		// 9.65s - 1.25s = 8.40s countdown
+		// 9.65s - 1.25s = 8.40s countdown displayed accounting for grace
 		assertEquals(8.40, RadianceTracker.getRemainingCountdownSeconds(t0), 0.01);
 		assertEquals(0L, RadianceTracker.getLocalRadianceActiveUntilMs());
 		// Partner cast does NOT affect local player's cooldown
@@ -262,21 +262,21 @@ class RadianceTrackerTest {
 		// Local cast executed:
 		// 1. Pending countdown is cleared
 		assertFalse(RadianceTracker.isCastCountdownActive());
-		// 2. Active radiance counter gets upped to local player's aspect tier duration (Tier 3 = 10.0s)
-		assertEquals(tInterrupt + 10_000L, RadianceTracker.getLocalRadianceActiveUntilMs());
+		// 2. Active radiance counter gets set to aspect tier duration minus grace (Tier 3 = 10.0s - 1.25s = 8.75s)
+		assertEquals(tInterrupt + 8750L, RadianceTracker.getLocalRadianceActiveUntilMs());
 		// 3. Local cooldown is set to 15s
 		assertEquals(15.0, RadianceTracker.getCachedCooldownSeconds());
 
 		// Single-tick footer flicker to null must not cause a false cast or reset timer
 		long tFlicker = tInterrupt + 500L;
 		RadianceTracker.processCooldownTick(config, null, tFlicker, null);
-		assertEquals(tInterrupt + 10_000L, RadianceTracker.getLocalRadianceActiveUntilMs());
+		assertEquals(tInterrupt + 8750L, RadianceTracker.getLocalRadianceActiveUntilMs());
 
 		// Footer reappears at 14s (continuing downwards) - must NOT trigger new cast
 		long tSpam = tInterrupt + 1000L;
 		RadianceTracker.processCooldownTick(config, 14.0, tSpam, null);
 		// Active radiance until timestamp MUST NOT reset
-		assertEquals(tInterrupt + 10_000L, RadianceTracker.getLocalRadianceActiveUntilMs());
+		assertEquals(tInterrupt + 8750L, RadianceTracker.getLocalRadianceActiveUntilMs());
 		assertEquals(14.0, RadianceTracker.getCachedCooldownSeconds());
 
 		// When partner casts next (interrupting back), local cooldown remains unchanged
@@ -284,10 +284,48 @@ class RadianceTrackerTest {
 		RadianceTracker.onRemoteCast(config, "war1", 1, 9000L, tPartnerCast, 0L);
 		// Local active radiance cleared
 		assertEquals(0L, RadianceTracker.getLocalRadianceActiveUntilMs());
-		// New countdown starts (9.0 - 1.25 = 7.75s)
+		// New countdown starts (9.0 - 1.25 = 7.75s displayed)
 		assertTrue(RadianceTracker.isCastCountdownActive());
 		assertEquals(7.75, RadianceTracker.getRemainingCountdownSeconds(tPartnerCast), 0.01);
 		// Local cooldown must NOT change based off partner casting
 		assertEquals(14.0, RadianceTracker.getCachedCooldownSeconds());
+	}
+
+	@Test
+	void testGracePeriodAlertTiming() {
+		BridgeConfig config = new BridgeConfig();
+		config.radianceTracker = true;
+		config.radianceGroupKey = "war1";
+		config.radianceRequireWar = false;
+		config.radianceAdvanceNoticeSeconds = 1.25;
+		RadianceTracker.setGroupMemberCount(2);
+
+		long t0 = System.currentTimeMillis();
+		// Remote cast with Tier 3 (10.0s) -> timer displayed is 10.0s - 1.25s = 8.75s
+		RadianceTracker.onRemoteCast(config, "war1", 3, 10_000L, t0, 0L);
+		assertTrue(RadianceTracker.isCastCountdownActive());
+		assertEquals(8.75, RadianceTracker.getRemainingCountdownSeconds(t0), 0.01);
+
+		// At t0 + 8000ms (0.75s remaining before alert), countdown has not expired -> no cast prompt
+		RadianceTracker.processCooldownTick(config, null, t0 + 8000L, null);
+		assertFalse(RadianceTracker.isCastPromptActive(t0 + 8000L));
+
+		// At t0 + 8750ms (timer reaches 0.0s, which is 1.25s before 10s radiance expires) -> cast prompt triggers
+		RadianceTracker.processCooldownTick(config, null, t0 + 8750L, null);
+		assertTrue(RadianceTracker.isCastPromptActive(t0 + 8750L));
+
+		// Test local cast accounting for grace post counting aspect+base
+		RadianceTracker.onJoin();
+		RadianceTracker.setGroupMemberCount(2);
+		config.radianceSelfTier = 3; // 10.0s
+		RadianceTracker.processCooldownTick(config, null, t0, null);
+		RadianceTracker.processCooldownTick(config, 15.0, t0, null);
+		// Local radiance timer is set to 10.0s - 1.25s = 8.75s
+		assertEquals(t0 + 8750L, RadianceTracker.getLocalRadianceActiveUntilMs());
+		assertFalse(RadianceTracker.isCastPromptActive(t0 + 8000L));
+		RadianceTracker.processCooldownTick(config, 14.0, t0 + 8750L, null);
+		// Local cast must NOT trigger cast prompt on caster (only on partner's turn)
+		assertFalse(RadianceTracker.isCastPromptActive(t0 + 8750L));
+		assertEquals(0L, RadianceTracker.getLocalRadianceActiveUntilMs());
 	}
 }
