@@ -22,7 +22,7 @@ public class ClientCommonPacketListenerMixin {
 				mod.onGuildLogContainerClosed(close.getContainerId());
 			}
 		} else if (packet instanceof ServerboundContainerClickPacket click) {
-			AttackMenuScraper.onContainerClick(click.slotNum());
+			AttackMenuScraper.onContainerClick(click.containerId(), click.slotNum());
 		}
 	}
 }

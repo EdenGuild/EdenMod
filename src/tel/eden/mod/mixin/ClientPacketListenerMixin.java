@@ -77,6 +77,7 @@ public class ClientPacketListenerMixin {
 		if (!minecraft.isSameThread()) {
 			return;
 		}
+		tel.eden.mod.war.AttackMenuScraper.onOpenScreen(packet.getContainerId(), packet.getTitle());
 		EdenModClient mod = EdenModClient.instance();
 		if (mod != null && mod.onGuildLogOpenScreen(packet)) {
 			ci.cancel();

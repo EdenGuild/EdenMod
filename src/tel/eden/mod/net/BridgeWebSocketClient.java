@@ -662,8 +662,10 @@ public final class BridgeWebSocketClient {
 	 * Toggle this player's "heading to {@code territory}" marker (right-click on a timer
 	 * row). One assignment per player: marking a new territory moves them, re-marking the
 	 * current one clears it. The backend broadcasts the updated board to everyone.
+	 * {@code remaining} is the timer's countdown in seconds, or null if unreadable; it
+	 * tells the backend when the war is due so it can ignore an early "timer ended".
 	 */
-	public void sendWarGoing(String territory) {
+	public void sendWarGoing(String territory, Integer remaining) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
@@ -671,6 +673,9 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "warGoing");
 		obj.addProperty("territory", territory);
+		if (remaining != null) {
+			obj.addProperty("remaining", remaining);
+		}
 		enqueueSend(current, obj.toString());
 	}
 
@@ -694,8 +699,9 @@ public final class BridgeWebSocketClient {
 
 	/**
 	 * Report that this player queued an attack on {@code territory} in the attack GUI.
+	 * {@code remaining} is the new timer's countdown in seconds, or null if unreadable.
 	 */
-	public void sendWarQueued(String territory, boolean inside) {
+	public void sendWarQueued(String territory, boolean inside, Integer remaining) {
 		WebSocket current = socket;
 		if (current == null || territory == null || territory.isBlank()) {
 			return;
@@ -704,6 +710,9 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "warQueued");
 		obj.addProperty("territory", territory.trim());
 		obj.addProperty("inside", inside);
+		if (remaining != null) {
+			obj.addProperty("remaining", remaining);
+		}
 		enqueueSend(current, obj.toString());
 	}
 
