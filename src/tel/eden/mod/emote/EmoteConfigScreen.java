@@ -185,9 +185,6 @@ public final class EmoteConfigScreen extends Screen {
 		}
 		pages.add(newPage);
 		loadPageFromMemory(pages.size() - 1);
-		if (this.minecraft != null && addPageBtn != null) {
-			addPageBtn.playDownSound(this.minecraft.getSoundManager());
-		}
 	}
 
 	private void deleteCurrentPage() {
@@ -204,17 +201,11 @@ public final class EmoteConfigScreen extends Screen {
 		}
 		int nextIndex = Math.min(currentPageIndex, pages.size() - 1);
 		loadPageFromMemory(nextIndex);
-		if (this.minecraft != null && deletePageBtn != null) {
-			deletePageBtn.playDownSound(this.minecraft.getSoundManager());
-		}
 	}
 
 	private void toggleActivePage() {
 		activePageIndex = currentPageIndex;
 		updateHeaderWidgets();
-		if (this.minecraft != null && activeToggleBtn != null) {
-			activeToggleBtn.playDownSound(this.minecraft.getSoundManager());
-		}
 	}
 
 	private void previousPage() {
@@ -292,9 +283,6 @@ public final class EmoteConfigScreen extends Screen {
 			if (i < slotButtons.size()) {
 				slotButtons.get(i).setValue(favorites[i]);
 			}
-		}
-		if (this.minecraft != null && randomizeBtn != null) {
-			randomizeBtn.playDownSound(this.minecraft.getSoundManager());
 		}
 	}
 

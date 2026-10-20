@@ -62,6 +62,28 @@ class RaidCompletionParserTest {
 	}
 
 	@Test
+	void keepsANicknameContainingAndAsOnePlayer() {
+		// sweetserenity's nickname "lightning and the" used to split into lightning + "the".
+		Component message = Component.empty().append(named("nukegrootplush", "Lumeniia")).append(", and ").append(named("lightning and the", "sweetserenity")).append(" finished Nest of the Grootslangs and claimed 2x Aspects, +3408m Guild Experience, and +220 Seasonal Rating");
+
+		RaidCompletion completion = RaidCompletionParser.parse(message).orElseThrow();
+
+		assertEquals(List.of("Lumeniia", "sweetserenity"), completion.party());
+		assertEquals("Nest of the Grootslangs", completion.raidName());
+	}
+
+	@Test
+	void foldsANicknameWrappedAcrossTwoLinesIntoOnePlayer() {
+		// Wynncraft wrapped the line inside the nickname: "lightning and" / glyph prefix / "the".
+		Component message = Component.empty().append("Magic_Pickle123, ").append(named("John Eden", "BearBackVoyager")).append(", ").append(named("enrikay555", "xEnrikayx")).append(", and ").append(named("lightning and", "sweetserenity")).append("\n ").append(named("the", "sweetserenity")).append(" finished The Nameless Anomaly and claimed 2x Aspects, 2048x Emeralds");
+
+		RaidCompletion completion = RaidCompletionParser.parse(message).orElseThrow();
+
+		assertEquals(List.of("Magic_Pickle123", "BearBackVoyager", "xEnrikayx", "sweetserenity"), completion.party());
+		assertEquals("The Nameless Anomaly", completion.raidName());
+	}
+
+	@Test
 	void defaultsAbsentLootFieldsToZeroWhenRenderedAsUnreadableGlyphs() {
 		// Loot is frequently rendered in a custom-font glyph run that our capture hook
 		// can't read as literal text — the parser must still succeed on party/raid name.
@@ -104,6 +126,15 @@ class RaidCompletionParserTest {
 
 		Component dmChat = Component.literal("Troll whispers: Player1 finished The Wartorn Palace and claimed 2048x Emeralds");
 		assertTrue(RaidCompletionParser.parse(dmChat).isEmpty());
+	}
+
+	@Test
+	void rejectsGuildChatWhoseSenderSpanCarriesTheColon() {
+		// Un-nicked guild chat renders the sender as one span "Ivodad3:" that can carry the
+		// name as its insertion; substituting that span must not erase the colon.
+		Component sender = Component.literal("Ivodad3:").withStyle(style -> style.withInsertion("Ivodad3"));
+		Component spoof = Component.empty().append(sender).append(" , Victim finished Nest of the Grootslangs and claimed 2x Aspects");
+		assertTrue(RaidCompletionParser.parse(spoof).isEmpty());
 	}
 
 	@Test

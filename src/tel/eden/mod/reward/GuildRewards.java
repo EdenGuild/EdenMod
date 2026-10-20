@@ -102,6 +102,10 @@ public final class GuildRewards {
 	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final long WEEK_MS = 604_800_000L;
 	private static final long REFRESH_INTERVAL_MS = 600_000L; // 10 min, like the script
+	// Minimum gap between refresh attempts, successful or not. A failed lookup (API error,
+	// or a guildless player) never stamps lastRefresh, and callers like the per-tick menu
+	// scrapers would otherwise fire one Wynncraft API request after another.
+	private static final long RETRY_BACKOFF_MS = 60_000L;
 	// Member-management menu layout (a 5-row, 45-slot custom menu, index = row*9 + col,
 	// both 0-indexed):
 	//   col 0 (slots 0,9,18,27,36): invite member / — / back button / guild reward
@@ -501,6 +505,7 @@ public final class GuildRewards {
 	private volatile String rank = "";
 	private volatile Map<String, MemberInfo> members = emptyMembers();
 	private volatile long lastRefresh = 0L;
+	private volatile long lastAttempt = 0L;
 	private volatile boolean refreshing;
 
 	/** Whether the linked player is a Chief or Owner (only they may gift). */
@@ -593,18 +598,22 @@ public final class GuildRewards {
 		return info == null ? null : info.joinedEpochMillis();
 	}
 
-	/** Refresh the rank + member list from the API if stale, off-thread (non-blocking). */
-	public void ensureFresh(String playerName) {
+	/**
+	 * Refresh the rank + member list from the API if stale, off-thread (non-blocking).
+	 * Synchronized because it is also reached from the websocket thread.
+	 */
+	public synchronized void ensureFresh(String playerName) {
 		if (playerName != null && !playerName.isBlank()) {
 			selfName = playerName;
 		}
 		long now = System.currentTimeMillis();
-		if (refreshing || (now - lastRefresh < REFRESH_INTERVAL_MS && !members.isEmpty())) {
+		if (refreshing || (now - lastRefresh < REFRESH_INTERVAL_MS && !members.isEmpty()) || now - lastAttempt < RETRY_BACKOFF_MS) {
 			return;
 		}
 		if (playerName == null || playerName.isBlank()) {
 			return;
 		}
+		lastAttempt = now;
 		refreshing = true;
 		worker.submit(() -> {
 			try {

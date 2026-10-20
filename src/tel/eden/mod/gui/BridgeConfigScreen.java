@@ -98,13 +98,15 @@ public final class BridgeConfigScreen extends Screen {
 		int cx = contentX();
 		int cw = contentWidth();
 
-		int btnW = Math.max(100, Math.min(130, cw / 3));
-		int dropW = cw - btnW - 8;
+		int linkW = Math.max(88, Math.min(105, cw * 28 / 100));
+		int hudW = Math.max(72, Math.min(85, cw * 22 / 100));
+		int dropW = cw - linkW - hudW - 12;
 
-		linkButton = this.addRenderableWidget(Button.builder(Component.literal("Link account"), button -> startLinkFlow()).bounds(cx, 92, btnW, 20).build());
+		linkButton = this.addRenderableWidget(Button.builder(Component.literal("Link account"), button -> startLinkFlow()).bounds(cx, 92, linkW, 20).build());
+		this.addRenderableWidget(Button.builder(Component.literal("Edit HUD"), button -> this.minecraft.setScreen(new HudLayoutScreen(this, config))).bounds(cx + linkW + 6, 92, hudW, 20).build());
 
 		EdenDropdown.PopupSettings popupSettings = new EdenDropdown.PopupSettings(HEADER_BOTTOM, this.height - FOOTER_HEIGHT, 20, Category.values().length);
-		categoryDropdown = this.addRenderableWidget(new EdenDropdown<>(cx + btnW + 8, 92, dropW, 20, this.font, List.of(Category.values()), selectedCategory, cat -> "Category: " + cat.label(), newCat -> {
+		categoryDropdown = this.addRenderableWidget(new EdenDropdown<>(cx + linkW + hudW + 12, 92, dropW, 20, this.font, List.of(Category.values()), selectedCategory, cat -> "Category: " + cat.label(), newCat -> {
 			selectedCategory = newCat;
 			updateVisibleRows();
 		}, openDrop -> {
@@ -148,7 +150,10 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow(Category.PARTY_RAIDS, "Raid gambit ready safety", () -> config.raidGambitSafety, v -> config.raidGambitSafety = v, "On", "Off", true);
 		IntConfigSlider gambitSlider = new IntConfigSlider(CONTROL_W, 20, 0, 3, 1, () -> config.raidGambitMinimum, v -> config.raidGambitMinimum = v, v -> Component.literal(v == 0 ? "Off (0)" : String.valueOf(v)));
 		addSliderRow(Category.PARTY_RAIDS, "Minimum raid gambits", gambitSlider, gambitSlider::syncFromConfig, () -> config.raidGambitMinimum = 1);
+		addToggleRow(Category.PARTY_RAIDS, "TCC Labyrinth minimap (Map credits: kimchaewon)", () -> config.tccLabyrinthMap, v -> config.tccLabyrinthMap = v, "On", "Off", true);
+		addToggleRow(Category.PARTY_RAIDS, "TCC exit discovery ping", () -> config.tccExitPing, v -> config.tccExitPing = v, "On", "Off", true);
 		addToggleRow(Category.PARTY_RAIDS, "Require guild raid to ready", () -> config.requireGuildRaid, v -> config.requireGuildRaid = v, "On", "Off", false);
+		addToggleRow(Category.PARTY_RAIDS, "Witness cooldown timer", () -> config.witnessCooldownTracker, v -> config.witnessCooldownTracker = v, "On", "Off", true);
 
 		// War & Territory
 		addToggleRow(Category.WAR, "Attack timers HUD", () -> config.warAttackTimers, v -> config.warAttackTimers = v, "On", "Off", true);
@@ -190,8 +195,6 @@ public final class BridgeConfigScreen extends Screen {
 		if (config.isSecretUnlocked(BridgeConfig.SECRET_BABY_PLAYERS)) {
 			addToggleRow(Category.VISUALS, "Baby players", EdenMenuScreen::isBabyModeEnabled, EdenMenuScreen::setBabyModeEnabled, "On", "Off", false);
 		}
-		addButtonRow(Category.VISUALS, "HUD layout", () -> Component.literal("Edit..."), () -> this.minecraft.setScreen(new HudLayoutScreen(this, config)), () -> {
-		});
 		addCycleRow(Category.VISUALS, "Chat emote tools", () -> config.chatEmoteToolsMode.label(), () -> config.chatEmoteToolsMode = nextChatEmoteToolsMode(config.chatEmoteToolsMode), () -> config.chatEmoteToolsMode = BridgeConfig.ChatEmoteToolsMode.UI_AND_AUTO);
 		addToggleRow(Category.VISUALS, "Allow emote picker outside chat", () -> config.emotePickerOpenFromGameplay, v -> config.emotePickerOpenFromGameplay = v, "Allowed", "Chat only", true);
 		addToggleRow(Category.VISUALS, "Emote wheel", () -> config.emoteWheelEnabled, v -> config.emoteWheelEnabled = v, "On", "Off", true);

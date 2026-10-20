@@ -161,6 +161,8 @@ public final class EdenModClient implements ClientModInitializer {
 	// Invalidates delayed party commands when the client changes server/world, so invites
 	// queued for one session can never be delivered to the next connection.
 	private final java.util.concurrent.atomic.AtomicInteger partyCommandGeneration = new java.util.concurrent.atomic.AtomicInteger();
+	private final java.util.concurrent.atomic.AtomicLong allyViewRequestId = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong allyViewPendingId = new java.util.concurrent.atomic.AtomicLong();
 	// Deterministic per-occurrence index so rapid identical bank events stay distinct.
 	// Short window: only the current burst counts, so stale earlier deposits can't
 	// make different clients assign divergent seqs (which duplicated Discord posts).
@@ -232,6 +234,10 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private boolean onWynncraft;
+
+	public boolean onWynncraft() {
+		return onWynncraft;
+	}
 	// Mutated on the inbound-message path and read from GUI screens on the render
 	// thread. Each change publishes one immutable snapshot through this volatile field,
 	// so readers cannot observe the remove/add or clear/addAll halves of an update.
@@ -519,6 +525,8 @@ public final class EdenModClient implements ClientModInitializer {
 		enteredWynnGameWorld = true;
 		guildLogSync.onWorldJoin();
 		tel.eden.mod.war.eco.TerritoryGuideController.reset();
+		tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
+		tel.eden.mod.raid.WitnessCooldownTracker.reset();
 	}
 
 	/** Packet hooks for the invisible guild-log query (mirrors Wynntils' query path). */
@@ -641,12 +649,15 @@ public final class EdenModClient implements ClientModInitializer {
 		TerritoryMenuKeybind.register(edenCategory);
 		TerritoryOutlineRenderer.register(edenCategory);
 		tel.eden.mod.emote.EmoteWheel.register(edenCategory);
+		tel.eden.mod.raid.tcc.TccLabyrinthTracker.registerKeybind(edenCategory);
 		WarTracker.setReporter(this::relayWarAttended);
 
 		// War-suite 2D HUD overlays, drawn only while on Wynncraft.
 		HudRenderCallback.EVENT.register((graphics, tickCounter) -> {
 			if (onWynncraft) {
 				WarHud.render(config, graphics);
+				tel.eden.mod.raid.tcc.TccLabyrinthMapHud.render(config, graphics);
+				tel.eden.mod.raid.WitnessCooldownTracker.render(config, graphics);
 			}
 		});
 		// War-suite territory outlines, added to the per-frame gizmo collector during
@@ -663,13 +674,16 @@ public final class EdenModClient implements ClientModInitializer {
 			guildLogSync.onWorldJoin();
 			partyCommandGeneration.incrementAndGet();
 			loginPending = true;
-			// Fresh connection: drop the packet-captured scoreboard and all war-board state
-			// so a previous world/session's timers, defence, and heads never linger.
+			// Fresh connection: drop the packet-captured scoreboard and this world's timer
+			// tracking. The war board itself survives a world swap (the bridge socket stays
+			// open and keeps it current); disconnect() clears it fully.
 			ScoreboardCapture.reset();
 			RaidPartyTracker.reset();
 			AllianceMenuScraper.reset();
 			GuildMenuScraper.reset();
-			AttackTimerMenu.reset();
+			AttackTimerMenu.onWorldJoin();
+			tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
+			tel.eden.mod.raid.WitnessCooldownTracker.reset();
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
 			tel.eden.mod.war.eco.TerritoryGuideController.reset();
 			guildAllyManager.requestCancel();
@@ -769,6 +783,7 @@ public final class EdenModClient implements ClientModInitializer {
 			tel.eden.mod.war.radiance.RadianceTracker.onClientTick(config, client);
 			RaidPartyTracker.onTick();
 			RaidReadyTracker.onClientTick();
+			tel.eden.mod.raid.tcc.TccLabyrinthTracker.tick(config, socket);
 			PartyHealthTracker.tick();
 			AttackMenuScraper.onTick(client);
 			AllianceMenuScraper.onTick(client);
@@ -1094,6 +1109,59 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
+				public void onTccMapPos(String sender, String senderUuid, double x, double y, double z, float yaw, boolean isWings) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						if (mc.player != null) {
+							String myUuid = mc.player.getUUID().toString().replace("-", "");
+							String cleanSenderUuid = senderUuid != null ? senderUuid.replace("-", "").trim() : "";
+							if (!cleanSenderUuid.isEmpty() && cleanSenderUuid.equalsIgnoreCase(myUuid)) {
+								return;
+							}
+						}
+						tel.eden.mod.raid.tcc.TccLabyrinthTracker.onPeerPosition(sender, senderUuid, x, y, z, yaw, isWings);
+					});
+				}
+
+				@Override
+				public void onTccGolemDefeated(String sender, String golemId) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> tel.eden.mod.raid.tcc.TccLabyrinthTracker.onPeerGolemDefeated(golemId));
+				}
+
+				@Override
+				public void onTccExitReached(String sender, String path, double x, double z) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						if (mc.player != null && sender != null && sender.equalsIgnoreCase(mc.player.getScoreboardName())) {
+							return;
+						}
+						tel.eden.mod.raid.tcc.TccLabyrinthTracker.onPeerExitReached(sender, path, x, z, config);
+					});
+				}
+
+				@Override
+				public void onWitnessKill(String sender, String senderUuid, long timestamp) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						if (mc.player == null) {
+							return;
+						}
+						String myUuid = mc.player.getUUID().toString().replace("-", "");
+						String cleanSenderUuid = senderUuid != null ? senderUuid.replace("-", "").trim() : "";
+						if (!cleanSenderUuid.isEmpty() && cleanSenderUuid.equalsIgnoreCase(myUuid)) {
+							return;
+						}
+						if (sender != null && !sender.isBlank()) {
+							if (sender.equalsIgnoreCase(mc.player.getGameProfile().name()) || sender.equalsIgnoreCase(mc.player.getName().getString())) {
+								return;
+							}
+						}
+						tel.eden.mod.raid.WitnessCooldownTracker.onRemoteWitnessKill(sender);
+					});
+				}
+
+				@Override
 				public void onConnectionRejected(String code) {
 					pendingConnectionCode = code;
 					Minecraft.getInstance().execute(() -> socket = null);
@@ -1132,6 +1200,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 				@Override
 				public void onAllyActivity(java.util.List<AllyActivityEntry> entries) {
+					allyViewPendingId.set(0);
 					boolean canManage = isChiefOwnerOrStrategist();
 					display(() -> DiscordChatFormatter.allyActivity(entries, canManage));
 				}
@@ -1371,10 +1440,17 @@ public final class EdenModClient implements ClientModInitializer {
 	private void requestAllyView(FabricClientCommandSource source) {
 		BridgeWebSocketClient current = socket;
 		if (current == null) {
-			source.sendFeedback(notConnected());
+			source.sendFeedback(DiscordChatFormatter.systemLine("Unable to fetch ally info, try again later.", ChatFormatting.RED));
 			return;
 		}
+		long id = allyViewRequestId.incrementAndGet();
+		allyViewPendingId.set(id);
 		current.sendAllyActivityRequest();
+		partyCommandExecutor.schedule(() -> {
+			if (allyViewPendingId.compareAndSet(id, 0)) {
+				display(() -> DiscordChatFormatter.systemLine("Unable to fetch ally info, try again later.", ChatFormatting.RED));
+			}
+		}, 5, TimeUnit.SECONDS);
 	}
 
 	private CompletableFuture<Suggestions> suggestMembers(CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
@@ -2379,6 +2455,9 @@ public final class EdenModClient implements ClientModInitializer {
 		RaidReadyTracker.reset();
 		PartyHealthTracker.reset();
 		ChatReplyManager.reset();
+		tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
+		tel.eden.mod.util.PlayerSkinResolver.reset();
+		tel.eden.mod.raid.WitnessCooldownTracker.reset();
 		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();
 		tel.eden.mod.war.eco.TerritoryGuideController.reset();
 		guildAllyManager.requestCancel();
@@ -2434,6 +2513,7 @@ public final class EdenModClient implements ClientModInitializer {
 		DiscordChatFormatter.onServerChatLine();
 		if (onWynncraft) {
 			RaidReadyTracker.onSystemChat(message);
+			tel.eden.mod.raid.WitnessCooldownTracker.onChatMessage(message);
 			// War chat cues (start countdown → attendance capture; end → HUD summary)
 			// work even while the bridge socket is down. Keep these deferred until after
 			// this packet handler returns, alongside the rest of the client-tick state.
@@ -2461,6 +2541,7 @@ public final class EdenModClient implements ClientModInitializer {
 			// needs a new bounded startup-recovery window for it.
 			guildLogSync.onWorldJoin();
 			territoryDefendedTracker.clear();
+			tel.eden.mod.raid.WitnessCooldownTracker.reset();
 			setInGameWorld(true);
 		}
 		BridgeWebSocketClient current = socket;

@@ -93,6 +93,37 @@ public final class PartyHealthTracker {
 		return HEALTH_BY_UUID.get(uuid);
 	}
 
+	/**
+	 * Real usernames of the tracked party members, for relays the backend matches by
+	 * username. The sidebar shows nicknames, so a member left unresolved is omitted
+	 * rather than sent as a nickname that could equal another player's username.
+	 */
+	public static List<String> getTrackedPartyNames() {
+		Minecraft mc = Minecraft.getInstance();
+		List<String> names = new ArrayList<>();
+		for (PlayerHealthData data : HEALTH_BY_UUID.values()) {
+			String username = usernameFor(mc, data);
+			if (username != null) {
+				names.add(username);
+			}
+		}
+		return names;
+	}
+
+	/** The member's account name: from their UUID's profile, else a known nickname alias. */
+	static String usernameFor(Minecraft mc, PlayerHealthData data) {
+		if (mc != null && mc.getConnection() != null && data.uuid() != null) {
+			PlayerInfo info = mc.getConnection().getPlayerInfo(data.uuid());
+			if (info != null && info.getProfile() != null && info.getProfile().name() != null) {
+				return info.getProfile().name();
+			}
+		}
+		if (data.name() == null || data.name().isBlank()) {
+			return null;
+		}
+		return PlayerNameResolver.resolveKnown(data.name()).orElse(null);
+	}
+
 	public static void tick() {
 		tickCounter++;
 		if (tickCounter % 5 != 0) {
