@@ -9,11 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Consumer;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
 import tel.eden.mod.EdenLogger;
 
 /**
@@ -27,10 +23,9 @@ import tel.eden.mod.EdenLogger;
 public final class WynntilsItemDecoder {
 	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final String WYNNTILS_BUFFER = "com.wynntils.utils.EncodedByteBuffer";
-	private static final String WYNNTILS_MODELS = "com.wynntils.core.components.Models";
+	private static final String WYNNTILS_ITEM_ENCODING_MODEL = "com.wynntils.core.components.Models";
 	private static final String WYNNTILS_ITEM_WEIGHT_SERVICES = "com.wynntils.core.components.Services";
 	private static final String WYNNTILS_WEIGHT_SOURCE = "com.wynntils.models.gear.type.ItemWeightSource";
-	private static final String WYNNTILS_STAT_ORDERING = "com.wynntils.models.stats.type.StatListOrdering";
 	private static final String WYNNTILS_STAT_CALCULATOR = "com.wynntils.models.stats.StatCalculator";
 
 	private WynntilsItemDecoder() {
@@ -53,8 +48,7 @@ public final class WynntilsItemDecoder {
 		try {
 			Class<?> bufferClass = Class.forName(WYNNTILS_BUFFER);
 			Object buffer = call(bufferClass, null, "fromUtf16String", new Class<?>[]{String.class}, itemString);
-			Object encodingModel = staticField(WYNNTILS_MODELS, "ItemEncoding");
-			ItemCardDebug.log("Wynntils encoding model", encodingModel == null ? "null" : ItemCardDebug.source(encodingModel.getClass()));
+			Object encodingModel = staticField(WYNNTILS_ITEM_ENCODING_MODEL, "ItemEncoding");
 			Object errorOr = invokeDecode(encodingModel, buffer, craftedName);
 			if (errorOr == null || (boolean) call(errorOr, "hasError")) {
 				LOGGER.warn("Wynntils could not decode shared item: {}", errorOr == null ? "no matching decode method" : call(errorOr, "getError"));
@@ -74,64 +68,46 @@ public final class WynntilsItemDecoder {
 		}
 
 		String name = normalizeRenderableText(String.valueOf(call(wynnItem, "getName")));
-		ItemCardDebug.log("decoded Wynntils item " + name, ItemCardDebug.source(wynnItem.getClass()));
 		Object tier = callOrNull(wynnItem, "getGearTier");
 		Object type = callOrNull(wynnItem, "getGearType");
 
 		String tierName = tier == null ? "" : prettyEnum(String.valueOf(call(tier, "getName")));
 		String typeName = type == null ? "" : prettyEnum(enumName(type));
 
-		DecodedItem card = new DecodedItem(name, tierName, resolveRarityColor(tierName, tierColor(tier)), typeName, resolveOverallPercent(wynnItem), buildIdentifications(wynnItem, WynntilsItemDecoder::warnStatOrdering), buildMajorIds(wynnItem), buildWeightings(wynnItem), buildShinyTracker(wynnItem), buildPowders(wynnItem), numberOr(callOrNull(wynnItem, "getPowderSlots"), 0), resolveRerollCount(wynnItem));
-		ItemCardDebug.log("card model " + name, ItemCardDebug.ids(card));
-		return Optional.of(card);
+		return Optional.of(new DecodedItem(name, tierName, resolveRarityColor(tierName, tierColor(tier)), typeName, resolveOverallPercent(wynnItem), buildIdentifications(wynnItem), buildMajorIds(wynnItem), buildWeightings(wynnItem), buildShinyTracker(wynnItem), buildPowders(wynnItem), numberOr(callOrNull(wynnItem, "getPowderSlots"), 0), resolveRerollCount(wynnItem)));
 	}
 
-	private static List<DecodedItem.Identification> buildIdentifications(Object wynnItem, Consumer<String> warning) throws ReflectiveOperationException {
+	private static List<DecodedItem.Identification> buildIdentifications(Object wynnItem) throws ReflectiveOperationException {
 		List<DecodedItem.Identification> identifications = new ArrayList<>();
 		Object actualValues = call(wynnItem, "getIdentifications");
 		Object possibleValues = callOrNull(wynnItem, "getPossibleValues");
 		Map<Object, Object> possibleByStat = indexByStatType(possibleValues);
 
 		if (!(actualValues instanceof List<?> actualList)) {
-			ItemCardDebug.log("raw identifications", "unexpected value: " + actualValues);
 			return identifications;
 		}
-		ItemCardDebug.log("raw identifications", actualList.stream().map(actual -> {
-			Object stat = callOrNull(actual, "statType");
-			return "key=" + callOrNull(stat, "getKey") + "; name=" + callOrNull(stat, "getDisplayName") + "; unit=" + statUnit(stat) + "; value=" + callOrNull(actual, "value") + "; inverted=" + callOrNull(stat, "calculateAsInverted") + "; type=" + (stat == null ? "null" : stat.getClass().getName());
-		}).toList());
 
-		record OrderedIdentification(DecodedItem.Identification id, int position) {
+		record OrderedIdentification(DecodedItem.Identification id, int ordinal) {
 		}
 
-		Map<Object, Integer> defaultOrder = defaultStatOrder(warning);
-		List<String> unknownStats = new ArrayList<>();
 		List<OrderedIdentification> ordered = new ArrayList<>();
 		for (Object actual : actualList) {
 			Object statType = call(actual, "statType");
 			int value = numberOr(call(actual, "value"), 0);
 			String statName = normalizeRenderableText(String.valueOf(call(statType, "getDisplayName")));
-			if (!defaultOrder.isEmpty() && !defaultOrder.containsKey(statType)) {
-				unknownStats.add(statName + statUnit(statType));
-			}
 			// Wynntils stores inverted stats in benefit order; flip the displayed sign,
 			// while retaining the stored value's sign for the renderer's color.
 			boolean calculateAsInverted = Boolean.TRUE.equals(call(statType, "calculateAsInverted"));
 			long displayed = calculateAsInverted ? -(long) value : value;
 			String valueText = formatStatValue(displayed, statUnit(statType));
 			float roll = rollPercent(actual, possibleByStat.get(statType));
-			ordered.add(new OrderedIdentification(new DecodedItem.Identification(statName, valueText, roll, value >= 0), defaultOrder.getOrDefault(statType, Integer.MAX_VALUE)));
+			ordered.add(new OrderedIdentification(new DecodedItem.Identification(statName, valueText, roll, value >= 0), statOrdinal(statType)));
 		}
 
-		if (!unknownStats.isEmpty()) {
-			warning.accept("Wynntils default ID ordering did not recognise: " + String.join(", ", unknownStats) + ". These IDs appear last in payload order.");
-		}
-		ItemCardDebug.log("before sort", ordered.stream().map(id -> id.id().name() + " " + id.id().valueText() + " (DEFAULT rank " + id.position() + ")").toList());
-		ordered.sort(Comparator.comparingInt(OrderedIdentification::position));
+		ordered.sort(Comparator.comparingInt(OrderedIdentification::ordinal));
 		for (OrderedIdentification orderedIdentification : ordered) {
 			identifications.add(orderedIdentification.id());
 		}
-		ItemCardDebug.log("after sort", ordered.stream().map(id -> id.id().name() + " " + id.id().valueText() + " (DEFAULT rank " + id.position() + ")").toList());
 		return identifications;
 	}
 
@@ -350,47 +326,16 @@ public final class WynntilsItemDecoder {
 		return prettyEnum(element);
 	}
 
-	private static Map<Object, Integer> defaultStatOrder(Consumer<String> warning) {
-		try {
-			// Use the same list as Wynntils' tooltip, explicitly selecting DEFAULT rather
-			// than the player's configured ordering. Delimiters only occupy unused ranks.
-			Object model = staticField(WYNNTILS_MODELS, "Stat");
-			if (model == null) {
-				throw new IllegalStateException("Wynntils Models.Stat is null");
-			}
-			Class<?> orderingClass = Class.forName(WYNNTILS_STAT_ORDERING);
-			Object ordering = orderingClass.getField("DEFAULT").get(null);
-			ItemCardDebug.log("ordering model", ItemCardDebug.source(model.getClass()) + "; requested=" + ordering);
-			Object result = model.getClass().getMethod("getOrderingList", orderingClass).invoke(model, ordering);
-			if (result instanceof List<?> stats && !stats.isEmpty()) {
-				ItemCardDebug.log("DEFAULT ordering list", java.util.stream.IntStream.range(0, stats.size()).mapToObj(index -> {
-					Object stat = stats.get(index);
-					return index + ":" + callOrNull(stat, "getKey") + " " + callOrNull(stat, "getDisplayName") + statUnit(stat);
-				}).toList());
-				Map<Object, Integer> positions = new HashMap<>();
-				for (int index = 0; index < stats.size(); index++) {
-					positions.putIfAbsent(stats.get(index), index);
-				}
-				return positions;
-			}
-			throw new IllegalStateException("Wynntils getOrderingList(DEFAULT) returned " + (result == null ? "null" : result instanceof List<?> ? "an empty list" : result.getClass().getName()));
-		} catch (ReflectiveOperationException | RuntimeException e) {
-			Throwable cause = e.getCause() == null ? e : e.getCause();
-			warning.accept("Could not apply Wynntils default ID ordering. Using payload order. Reason: " + cause);
+	private static int statOrdinal(Object statType) {
+		if (statType instanceof Enum<?> e) {
+			return e.ordinal();
 		}
-		// Preserve payload order if the optional API is unavailable. Unrecognised
-		// stats likewise remain in payload order after the known stats.
-		return Map.of();
-	}
-
-	private static void warnStatOrdering(String message) {
-		LOGGER.warn("{}", message);
-		Minecraft client = Minecraft.getInstance();
-		client.execute(() -> {
-			if (client.player != null) {
-				client.player.displayClientMessage(Component.literal("[EdenMod] " + message).withStyle(ChatFormatting.YELLOW), false);
-			}
-		});
+		try {
+			Object ordinal = call(statType, "ordinal");
+			return ordinal instanceof Number n ? n.intValue() : Integer.MAX_VALUE;
+		} catch (ReflectiveOperationException | RuntimeException ignored) {
+			return Integer.MAX_VALUE;
+		}
 	}
 
 	private static String statUnit(Object statType) {
