@@ -10,6 +10,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.PlayerSkin;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.config.BridgeConfig;
+import tel.eden.mod.hud.HudLayout;
 import tel.eden.mod.hud.HudPanel;
 import tel.eden.mod.hud.HudRender;
 import tel.eden.mod.net.BridgeWebSocketClient;
@@ -23,10 +24,21 @@ import tel.eden.mod.util.PlayerSkinResolver;
  */
 public final class TccLabyrinthMapHud {
 	public static final String PANEL = "tccLabyrinthMap";
-	public static final float DEFAULT_X = 0.02f;
-	public static final float DEFAULT_Y = 0.05f;
+	public static final float DEFAULT_X = 0.0f;
+	public static final float DEFAULT_Y = 0.0f;
 	public static final int PANEL_W = 130;
 	public static final int PANEL_H = 180;
+
+	public static final String ALERT_PANEL = "tccReportTitle";
+	public static final float ALERT_DEFAULT_X = 0.30f;
+	public static final float ALERT_DEFAULT_Y = 0.18f;
+	public static final int ALERT_PANEL_W = 220;
+	public static final int ALERT_PANEL_H = 20;
+
+	private static volatile String alertText = null;
+	private static volatile int alertColor = 0xFFFFFFFF;
+	private static volatile long alertStartMs = 0L;
+	private static volatile long alertExpiresAtMs = 0L;
 
 	private static final int INSET_X = 5;
 	private static final int INSET_Y = 6;
@@ -55,14 +67,91 @@ public final class TccLabyrinthMapHud {
 			return;
 		}
 
-		if (!TccLabyrinthTracker.isInRoom2()) {
+		if (TccLabyrinthTracker.isInRoom2()) {
+			HudPanel panel = new HudPanel();
+			panel.add(TccLabyrinthMapHud::drawMinimap);
+			HudRender.draw(config, PANEL, DEFAULT_X, DEFAULT_Y, PANEL_W, PANEL_H, panel, graphics);
+		}
+
+		renderReportAlert(config, graphics);
+	}
+
+	public static void triggerAlert(String text, int colorRgb) {
+		alertText = text;
+		alertColor = colorRgb;
+		long now = System.currentTimeMillis();
+		alertStartMs = now;
+		alertExpiresAtMs = now + 5000L;
+	}
+
+	public static void resetAlert() {
+		alertText = null;
+		alertExpiresAtMs = 0L;
+	}
+
+	public static String getAlertText() {
+		return alertText;
+	}
+
+	private static void renderReportAlert(BridgeConfig config, GuiGraphics graphics) {
+		if (alertText == null) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		if (now >= alertExpiresAtMs) {
+			alertText = null;
 			return;
 		}
 
-		HudPanel panel = new HudPanel();
-		panel.add(TccLabyrinthMapHud::drawMinimap);
+		Minecraft mc = Minecraft.getInstance();
+		if (mc == null || mc.player == null) {
+			return;
+		}
 
-		HudRender.draw(config, PANEL, DEFAULT_X, DEFAULT_Y, PANEL_W, PANEL_H, panel, graphics);
+		long remaining = alertExpiresAtMs - now;
+		float alphaFactor = 1.0f;
+		if (remaining < 1000L) {
+			alphaFactor = remaining / 1000.0f;
+		} else if (now - alertStartMs < 300L) {
+			alphaFactor = (now - alertStartMs) / 300.0f;
+		}
+		int alpha = Math.max(10, Math.min(255, (int) (alphaFactor * 255)));
+
+		int baseTextW = mc.font.width(alertText);
+		int screenW = mc.getWindow().getGuiScaledWidth();
+		float hudScale = HudLayout.scale(config, ALERT_PANEL);
+
+		// Default title font scale: 1.25f, clamped so it never goes off screen
+		float fontScale = 1.25f;
+		float maxPanelW = (screenW - 12) / Math.max(0.1f, hudScale);
+		if ((baseTextW * fontScale + 16) > maxPanelW) {
+			fontScale = Math.max(0.6f, (maxPanelW - 16) / Math.max(1, baseTextW));
+		}
+
+		int textW = Math.round(baseTextW * fontScale);
+		int textH = Math.round(mc.font.lineHeight * fontScale);
+		int panelW = textW + 16;
+		int panelH = textH + 8;
+
+		int bgAlpha = (int) (alpha * 0.75f);
+		int bgColor = (bgAlpha << 24) | 0x0C1017;
+		int borderColor = ((alpha * 2 / 3) << 24) | (alertColor & 0x00FFFFFF);
+		int textColor = (alpha << 24) | (alertColor & 0x00FFFFFF);
+
+		HudPanel panel = new HudPanel();
+		final float finalFontScale = fontScale;
+		final String textToDraw = alertText;
+		panel.add(g -> {
+			g.fill(0, 0, panelW, panelH, bgColor);
+			g.renderOutline(0, 0, panelW, panelH, borderColor);
+			g.pose().pushMatrix();
+			g.pose().translate(8.0f, (panelH - textH) / 2.0f);
+			g.pose().scale(finalFontScale, finalFontScale);
+			g.drawString(mc.font, textToDraw, 0, 0, textColor, true);
+			g.pose().popMatrix();
+		});
+
+		HudRender.draw(config, ALERT_PANEL, ALERT_DEFAULT_X, ALERT_DEFAULT_Y, panelW, panelH, panel, graphics);
 	}
 
 	private static void drawMinimap(GuiGraphics graphics) {
@@ -86,14 +175,7 @@ public final class TccLabyrinthMapHud {
 			}
 		}
 
-		// 4. Confirmed Exit Marker (white circle drawn inside of purple circle)
-		TccLabyrinthTracker.ExitPoint confirmed = TccLabyrinthTracker.getConfirmedExit();
-		if (confirmed != null) {
-			float[] screen = projectMapPixel(confirmed.mapPixelX, confirmed.mapPixelY);
-			drawConfirmedExitCircle(graphics, Math.round(screen[0]), Math.round(screen[1]));
-		}
-
-		// 5. Exit Reached Banner
+		// 4. Exit Reached Banner
 		if (TccLabyrinthTracker.isExitReached()) {
 			int bannerY = INSET_Y + VIEWPORT_H - 12;
 			graphics.fill(INSET_X, bannerY, INSET_X + VIEWPORT_W, INSET_Y + VIEWPORT_H, 0xDD006622);
@@ -134,7 +216,14 @@ public final class TccLabyrinthMapHud {
 			drawPlayer(graphics, mc, p, sx, sy, !connected && p.isLocal());
 		}
 
-		// 6. Minimap Ornate Frame overlay (144 x 143 visible frame cropped from 164 x 155 source at u=13, v=6)
+		// 6. Confirmed Exit Marker (white pulsating circle rendered above player skins and hp bars)
+		TccLabyrinthTracker.ExitPoint confirmed = TccLabyrinthTracker.getConfirmedExit();
+		if (confirmed != null) {
+			float[] screen = projectMapPixel(confirmed.mapPixelX, confirmed.mapPixelY);
+			drawConfirmedExitCircle(graphics, Math.round(screen[0]), Math.round(screen[1]));
+		}
+
+		// 7. Minimap Ornate Frame overlay (144 x 143 visible frame cropped from 164 x 155 source at u=13, v=6)
 		graphics.blit(RenderPipelines.GUI_TEXTURED, FRAME_TEXTURE, 0, 0, 13.0f, 6.0f, PANEL_W, PANEL_H, 144, 143, 164, 155);
 	}
 
@@ -152,19 +241,29 @@ public final class TccLabyrinthMapHud {
 	private static void drawConfirmedExitCircle(GuiGraphics graphics, int cx, int cy) {
 		long time = System.currentTimeMillis();
 		double pulse = (Math.sin(time / 200.0) + 1.0) * 0.5;
-		float radius = 5.0f + (float) (pulse * 2.5);
+		float radius = 9.0f + (float) (pulse * 4.0);
 		int alpha = (int) (180 + pulse * 75);
 		int color = (alpha << 24) | 0x00FFFFFF;
+		int shadowColor = ((alpha / 3) << 24) | 0x000000;
 
-		int rCeil = (int) Math.ceil(radius + 1.0f);
-		double rMinSq = (radius - 1.0) * (radius - 1.0);
-		double rMaxSq = (radius + 1.0) * (radius + 1.0);
+		int rCeil = (int) Math.ceil(radius + 2.5f);
+		double rInnerSq = (radius - 1.3) * (radius - 1.3);
+		double rOuterSq = (radius + 1.3) * (radius + 1.3);
+		double rShadowInnerSq = (radius - 2.2) * (radius - 2.2);
+		double rShadowOuterSq = (radius + 2.2) * (radius + 2.2);
+
 		for (int dx = -rCeil; dx <= rCeil; dx++) {
 			int dxSq = dx * dx;
 			for (int dy = -rCeil; dy <= rCeil; dy++) {
 				int distSq = dxSq + dy * dy;
-				if (distSq >= rMinSq && distSq <= rMaxSq) {
-					graphics.fill(cx + dx, cy + dy, cx + dx + 1, cy + dy + 1, color);
+				int px = cx + dx;
+				int py = cy + dy;
+				if (px >= INSET_X && px < INSET_X + VIEWPORT_W && py >= INSET_Y && py < INSET_Y + VIEWPORT_H) {
+					if (distSq >= rInnerSq && distSq <= rOuterSq) {
+						graphics.fill(px, py, px + 1, py + 1, color);
+					} else if ((distSq >= rShadowInnerSq && distSq < rInnerSq) || (distSq > rOuterSq && distSq <= rShadowOuterSq)) {
+						graphics.fill(px, py, px + 1, py + 1, shadowColor);
+					}
 				}
 			}
 		}

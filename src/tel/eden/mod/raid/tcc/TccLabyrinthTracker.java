@@ -401,6 +401,7 @@ public final class TccLabyrinthTracker {
 		} else {
 			mc.player.displayClientMessage(Component.literal("Reported TCC Exit: " + ep.displayName).withStyle(ep.color.chatFormatting), true);
 		}
+		TccLabyrinthMapHud.triggerAlert(myName + " has reported an exit at " + ep.displayName, ep.color.argb);
 		if (prev == ep && config != null && config.tccExitPing) {
 			playDiscoveryPing();
 		}
@@ -557,13 +558,7 @@ public final class TccLabyrinthTracker {
 				if (mc.player != null) {
 					mc.player.displayClientMessage(msg, false);
 				}
-				mc.execute(() -> {
-					if (mc.gui != null) {
-						mc.gui.setTimes(10, 70, 20);
-						mc.gui.setSubtitle(Component.empty());
-						mc.gui.setTitle(msg);
-					}
-				});
+				TccLabyrinthMapHud.triggerAlert(reporter + " has reported an exit at " + ep.displayName, ep.color.argb);
 			}
 		}
 	}
@@ -616,6 +611,7 @@ public final class TccLabyrinthTracker {
 		lastSentX = 0.0;
 		lastSentZ = 0.0;
 		lastSentYaw = 0.0f;
+		TccLabyrinthMapHud.resetAlert();
 	}
 
 	public static boolean hasExitTitle() {

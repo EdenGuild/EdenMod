@@ -270,4 +270,14 @@ public class TccLabyrinthTrackerTest {
 		assertNull(TccLabyrinthTracker.getConfirmedExit());
 		assertNull(TccLabyrinthTracker.getWingsPlayerUUID());
 	}
+
+	@Test
+	public void testReportAlertTriggerAndReset() {
+		assertNull(TccLabyrinthMapHud.getAlertText());
+		TccLabyrinthMapHud.triggerAlert("Player1 has reported an exit at Blue right 1", 0xFF55FFFF);
+		assertEquals("Player1 has reported an exit at Blue right 1", TccLabyrinthMapHud.getAlertText());
+
+		TccLabyrinthTracker.reset();
+		assertNull(TccLabyrinthMapHud.getAlertText());
+	}
 }
