@@ -13,12 +13,21 @@ public record TerritoryPreset(String name, String notes, Set<String> excludedTer
 	public TerritoryPreset {
 		name = (name == null || name.isBlank()) ? "Unnamed Preset" : name.trim();
 		notes = (notes == null) ? "" : notes.trim();
-		excludedTerritories = (excludedTerritories == null) ? Set.of() : Set.copyOf(excludedTerritories);
+		// Imported JSON can carry nulls anywhere; drop them here so nothing downstream sees one.
+		Set<String> cleanExcluded = new HashSet<>();
+		if (excludedTerritories != null) {
+			for (String territory : excludedTerritories) {
+				if (territory != null) {
+					cleanExcluded.add(territory);
+				}
+			}
+		}
+		excludedTerritories = Set.copyOf(cleanExcluded);
 		Map<String, TerritoryLoadout> cleanTerrs = new java.util.LinkedHashMap<>();
 		if (territories != null) {
 			Map<String, TerritoryLoadout> caseInsensitive = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
 			for (Map.Entry<String, TerritoryLoadout> entry : territories.entrySet()) {
-				if (entry.getKey() == null)
+				if (entry.getKey() == null || entry.getValue() == null)
 					continue;
 				String clean = entry.getKey().trim();
 				if (clean.endsWith("(HQ)")) {
@@ -83,7 +92,17 @@ public record TerritoryPreset(String name, String notes, Set<String> excludedTer
 		public static final TerritoryLoadout ZERO = new TerritoryLoadout(0, 0, 0, 0, Map.of());
 
 		public TerritoryLoadout {
-			bonuses = (bonuses == null) ? Map.of() : Collections.unmodifiableMap(new HashMap<>(bonuses));
+			// A null bonus name or level (possible in imported JSON) is dropped: bonus() would
+			// otherwise unbox it and throw while the guide renders.
+			Map<String, Integer> cleanBonuses = new HashMap<>();
+			if (bonuses != null) {
+				for (Map.Entry<String, Integer> entry : bonuses.entrySet()) {
+					if (entry.getKey() != null && entry.getValue() != null) {
+						cleanBonuses.put(entry.getKey(), entry.getValue());
+					}
+				}
+			}
+			bonuses = Collections.unmodifiableMap(cleanBonuses);
 		}
 
 		public int bonus(String name) {

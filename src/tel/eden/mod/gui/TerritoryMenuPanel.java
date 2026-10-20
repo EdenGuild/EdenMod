@@ -27,6 +27,7 @@ import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import tel.eden.mod.EdenLogger;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.war.eco.TerritoryContainerScanner;
@@ -38,10 +39,13 @@ import tel.eden.mod.war.eco.TerritoryPresetCodec;
  * Top Preset HUD bar, Preset Storage Dropdown, and in-menu guide highlights on Wynntils' TerritoryManagementScreen.
  */
 public final class TerritoryMenuPanel {
+	private static final EdenLogger LOGGER = EdenLogger.get();
+
 	private TerritoryMenuPanel() {
 	}
 
 	private static boolean dropdownOpen = false;
+	private static boolean overlayFailureLogged = false;
 
 	public static boolean isDropdownOpen() {
 		return dropdownOpen;
@@ -595,6 +599,19 @@ public final class TerritoryMenuPanel {
 	}
 
 	private static void renderWynntilsOverlay(Screen screen, GuiGraphics graphics, int mouseX, int mouseY) {
+		// Drawn from inside Wynntils' screen render, where an exception crashes the game every
+		// time the menu opens. Skip the overlay instead, and log the first failure.
+		try {
+			drawWynntilsOverlay(screen, graphics, mouseX, mouseY);
+		} catch (RuntimeException e) {
+			if (!overlayFailureLogged) {
+				overlayFailureLogged = true;
+				LOGGER.warn("Territory preset overlay failed, skipping it: {}", e.toString());
+			}
+		}
+	}
+
+	private static void drawWynntilsOverlay(Screen screen, GuiGraphics graphics, int mouseX, int mouseY) {
 		BridgeConfig config = EdenModClient.instance().config();
 		if (config == null || !config.territoryMenuSuite) {
 			return;
