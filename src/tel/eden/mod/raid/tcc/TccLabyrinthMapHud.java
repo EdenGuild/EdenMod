@@ -30,8 +30,8 @@ public final class TccLabyrinthMapHud {
 	public static final int PANEL_H = 180;
 
 	public static final String ALERT_PANEL = "tccReportTitle";
-	public static final float ALERT_DEFAULT_X = 0.30f;
-	public static final float ALERT_DEFAULT_Y = 0.18f;
+	public static final float ALERT_DEFAULT_X = 0.35f;
+	public static final float ALERT_DEFAULT_Y = 0.44f;
 	public static final int ALERT_PANEL_W = 220;
 	public static final int ALERT_PANEL_H = 20;
 
@@ -151,7 +151,9 @@ public final class TccLabyrinthMapHud {
 			g.pose().popMatrix();
 		});
 
-		HudRender.draw(config, ALERT_PANEL, ALERT_DEFAULT_X, ALERT_DEFAULT_Y, panelW, panelH, panel, graphics);
+		float defX = (screenW - panelW) / (2.0f * screenW);
+		float defY = ALERT_DEFAULT_Y;
+		HudRender.draw(config, ALERT_PANEL, defX, defY, panelW, panelH, panel, graphics);
 	}
 
 	private static void drawMinimap(GuiGraphics graphics) {
