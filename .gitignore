@@ -21,3 +21,7 @@ Thumbs.db
 *.bak
 resources/assets/edenmod/font/emotes.json
 resources/assets/edenmod/emotes_manifest.json
+
+# Agents
+.agents/
+AGENTS.md

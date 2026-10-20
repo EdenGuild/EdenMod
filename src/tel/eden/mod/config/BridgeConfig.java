@@ -183,6 +183,16 @@ public final class BridgeConfig {
 	/** Territories excluded from playing the territory loss sound when captured. */
 	public List<String> territoryLossBlacklist = new ArrayList<>(DEFAULT_TERRITORY_LOSS_BLACKLIST);
 
+	// ---- Territory Preset Helper (Wynntils Add-on) ----
+	/** Master toggle for the Territory Preset Helper Wynntils add-on. On by default. */
+	public boolean territoryMenuSuite = true;
+
+	/** Active territory preset encoded Base64 or JSON string, or empty. */
+	public String territoryActivePreset = "";
+
+	/** Storage of saved territory presets: name -> encoded string or JSON. */
+	public Map<String, String> territorySavedPresets = new java.util.LinkedHashMap<>();
+
 	/**
 	 * Run {@code /stream} automatically on entering a Wynncraft world. Off by default:
 	 * it changes what the server shows you, so it should be an opt-in.
@@ -500,6 +510,9 @@ public final class BridgeConfig {
 						config.radianceAdvanceNoticeSeconds = 1.25;
 					} else {
 						config.radianceAdvanceNoticeSeconds = Math.max(0.0, Math.min(3.0, Math.round(config.radianceAdvanceNoticeSeconds * 4.0) / 4.0));
+					}
+					if (config.territorySavedPresets == null) {
+						config.territorySavedPresets = new java.util.LinkedHashMap<>();
 					}
 					return config;
 				}

@@ -524,6 +524,7 @@ public final class EdenModClient implements ClientModInitializer {
 	public void onWorldRespawn() {
 		enteredWynnGameWorld = true;
 		guildLogSync.onWorldJoin();
+		tel.eden.mod.war.eco.TerritoryGuideController.reset();
 		tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 		tel.eden.mod.raid.WitnessCooldownTracker.reset();
 	}
@@ -554,6 +555,13 @@ public final class EdenModClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		instance = this;
 		config = BridgeConfig.load();
+		if (config.territoryActivePreset != null && !config.territoryActivePreset.isBlank()) {
+			try {
+				tel.eden.mod.war.eco.TerritoryGuideController.setActivePreset(tel.eden.mod.war.eco.TerritoryPresetCodec.parse(config.territoryActivePreset));
+			} catch (Exception ignored) {
+			}
+		}
+		tel.eden.mod.gui.TerritoryMenuPanel.init();
 		refreshCommandKeybinds();
 
 		// Relay the guild's live reward storage to the backend counter: the exact value
@@ -677,6 +685,7 @@ public final class EdenModClient implements ClientModInitializer {
 			tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 			tel.eden.mod.raid.WitnessCooldownTracker.reset();
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
+			tel.eden.mod.war.eco.TerritoryGuideController.reset();
 			guildAllyManager.requestCancel();
 			// Connect if applicable; the backend reports link/membership standing via
 			// authOk (handleAuthStatus), which drives any "please link" prompt.
@@ -2450,6 +2459,7 @@ public final class EdenModClient implements ClientModInitializer {
 		tel.eden.mod.util.PlayerSkinResolver.reset();
 		tel.eden.mod.raid.WitnessCooldownTracker.reset();
 		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();
+		tel.eden.mod.war.eco.TerritoryGuideController.reset();
 		guildAllyManager.requestCancel();
 		territoryDefendedTracker.clear();
 		// Before the socket goes: an outstanding deduct must not outlive the session that
