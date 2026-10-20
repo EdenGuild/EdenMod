@@ -267,16 +267,6 @@ public final class BridgeWebSocketClient {
 		return socket != null && authenticated;
 	}
 
-	/** Whether raw WebSocket connection is open (even if still authenticating). */
-	public boolean isSocketOpen() {
-		return socket != null;
-	}
-
-	/** Whether the Mojang session verification has completed. */
-	public boolean isAuthenticated() {
-		return socket != null && authenticated;
-	}
-
 	/**
 	 * Queue {@code text} to send on {@code ws}, serialized against every other send.
 	 * {@code WebSocket.sendText} allows only one outstanding send at a time, but sends
@@ -591,15 +581,19 @@ public final class BridgeWebSocketClient {
 		sendType("diceroll");
 	}
 
-	/** Broadcast player position for TCC Room 2 Labyrinth. */
-	public void sendTccMapPos(double x, double y, double z, float yaw, boolean isWings) {
-		sendTccMapPos(x, y, z, yaw, isWings, null);
+	// TCC Room 2 relays are scoped to the raid party each message carries. Every builder
+	// returns null without a party and nothing is sent: a party-less message would give the
+	// backend nobody to scope it to, and other raid groups must never see it.
+
+	/** Broadcast this player's TCC Room 2 Labyrinth position to their raid party. */
+	public void sendTccMapPos(double x, double y, double z, float yaw, boolean isWings, java.util.List<String> partyMembers) {
+		sendTcc(tccMapPosPayload(x, y, z, yaw, isWings, partyMembers));
 	}
 
-	public void sendTccMapPos(double x, double y, double z, float yaw, boolean isWings, java.util.List<String> partyMembers) {
-		WebSocket current = socket;
-		if (current == null) {
-			return;
+	static JsonObject tccMapPosPayload(double x, double y, double z, float yaw, boolean isWings, java.util.List<String> partyMembers) {
+		JsonArray party = partyArray(partyMembers);
+		if (party == null) {
+			return null;
 		}
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "tccMapPos");
@@ -608,39 +602,58 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("z", z);
 		obj.addProperty("yaw", yaw);
 		obj.addProperty("isWings", isWings);
-		addParty(obj, partyMembers);
-		enqueueSend(current, obj.toString());
-	}
-
-	/** Broadcast defeated golem notice for TCC Room 2 Labyrinth. */
-	public void sendTccGolemDefeated(String golemId) {
-		sendTccGolemDefeated(golemId, null);
-	}
-
-	/**
-	 * Broadcast a defeated golem to this raid party. Without a party list the backend relays
-	 * it to every Eden member active in Room 2, marking it on other groups' maps too.
-	 */
-	public void sendTccGolemDefeated(String golemId, java.util.List<String> partyMembers) {
-		WebSocket current = socket;
-		if (current == null) {
-			return;
-		}
-		enqueueSend(current, tccGolemDefeatedPayload(golemId, partyMembers).toString());
-	}
-
-	static JsonObject tccGolemDefeatedPayload(String golemId, java.util.List<String> partyMembers) {
-		JsonObject obj = new JsonObject();
-		obj.addProperty("type", "tccGolemDefeated");
-		obj.addProperty("golemId", golemId);
-		addParty(obj, partyMembers);
+		obj.add("party", party);
 		return obj;
 	}
 
-	/** Attach the raid party (blank names dropped) that the backend scopes TCC relays to. */
-	private static void addParty(JsonObject obj, java.util.List<String> partyMembers) {
-		if (partyMembers == null || partyMembers.isEmpty()) {
+	/** Broadcast a defeated TCC Room 2 golem to this raid party. */
+	public void sendTccGolemDefeated(String golemId, java.util.List<String> partyMembers) {
+		sendTcc(tccGolemDefeatedPayload(golemId, partyMembers));
+	}
+
+	static JsonObject tccGolemDefeatedPayload(String golemId, java.util.List<String> partyMembers) {
+		JsonArray party = partyArray(partyMembers);
+		if (party == null) {
+			return null;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "tccGolemDefeated");
+		obj.addProperty("golemId", golemId);
+		obj.add("party", party);
+		return obj;
+	}
+
+	/** Broadcast a reported TCC Room 2 exit to this raid party. */
+	public void sendTccExitReached(String path, double x, double z, java.util.List<String> partyMembers) {
+		sendTcc(tccExitReachedPayload(path, x, z, partyMembers));
+	}
+
+	static JsonObject tccExitReachedPayload(String path, double x, double z, java.util.List<String> partyMembers) {
+		JsonArray party = partyArray(partyMembers);
+		if (party == null) {
+			return null;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "tccExitReached");
+		obj.addProperty("path", path);
+		obj.addProperty("x", x);
+		obj.addProperty("z", z);
+		obj.add("party", party);
+		return obj;
+	}
+
+	private void sendTcc(JsonObject payload) {
+		WebSocket current = socket;
+		if (current == null || payload == null) {
 			return;
+		}
+		enqueueSend(current, payload.toString());
+	}
+
+	/** The raid party as a JSON array with blank names dropped, or null when no name is left. */
+	private static JsonArray partyArray(java.util.List<String> partyMembers) {
+		if (partyMembers == null) {
+			return null;
 		}
 		JsonArray arr = new JsonArray();
 		for (String member : partyMembers) {
@@ -648,26 +661,7 @@ public final class BridgeWebSocketClient {
 				arr.add(member);
 			}
 		}
-		obj.add("party", arr);
-	}
-
-	/** Broadcast exit reached notice for TCC Room 2 Labyrinth. */
-	public void sendTccExitReached(String path, double x, double z) {
-		sendTccExitReached(path, x, z, null);
-	}
-
-	public void sendTccExitReached(String path, double x, double z, java.util.List<String> partyMembers) {
-		WebSocket current = socket;
-		if (current == null) {
-			return;
-		}
-		JsonObject obj = new JsonObject();
-		obj.addProperty("type", "tccExitReached");
-		obj.addProperty("path", path);
-		obj.addProperty("x", x);
-		obj.addProperty("z", z);
-		addParty(obj, partyMembers);
-		enqueueSend(current, obj.toString());
+		return arr.size() > 0 ? arr : null;
 	}
 
 	/**

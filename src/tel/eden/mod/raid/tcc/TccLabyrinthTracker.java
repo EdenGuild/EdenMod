@@ -235,12 +235,9 @@ public final class TccLabyrinthTracker {
 	private static double lastSentX = 0.0;
 	private static double lastSentZ = 0.0;
 	private static float lastSentYaw = 0.0f;
-	private static boolean debugForceShow = false;
+	private static boolean forceInRoom2ForTesting = false;
 	private static boolean wasInRoom2 = false;
-	private static boolean hasExitTitle = false;
-	private static long lastExitTitleMs = 0L;
 	private static long lastReportKeyMs = 0L;
-	private static final long REPORT_COOLDOWN_MS = 5000L;
 	private static KeyMapping reportExitKey;
 
 	private TccLabyrinthTracker() {
@@ -254,16 +251,13 @@ public final class TccLabyrinthTracker {
 		reportExitKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.tcc_report_exit", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
 	}
 
-	public static boolean isDebugForceShow() {
-		return debugForceShow;
-	}
-
-	public static void setDebugForceShow(boolean value) {
-		debugForceShow = value;
+	/** Treat the player as inside Room 2 regardless of position (tests have no player). */
+	public static void setForceInRoom2ForTesting(boolean value) {
+		forceInRoom2ForTesting = value;
 	}
 
 	public static boolean isInRoom2() {
-		if (debugForceShow) {
+		if (forceInRoom2ForTesting) {
 			return true;
 		}
 		Minecraft mc = Minecraft.getInstance();
@@ -334,10 +328,14 @@ public final class TccLabyrinthTracker {
 			boolean keepalive = (now - lastBroadcastMs >= 2500L);
 			if ((moved || keepalive) && socket != null && socket.isConnected()) {
 				java.util.List<String> party = getRaidPartyMembers();
-				socket.sendTccMapPos(px, py, pz, yaw, isWings, party);
-				lastSentX = px;
-				lastSentZ = pz;
-				lastSentYaw = yaw;
+				// No party resolved yet: send nothing rather than an unscoped position, and
+				// retry on the next interval.
+				if (!party.isEmpty()) {
+					socket.sendTccMapPos(px, py, pz, yaw, isWings, party);
+					lastSentX = px;
+					lastSentZ = pz;
+					lastSentYaw = yaw;
+				}
 				lastBroadcastMs = now;
 			}
 		}
@@ -378,7 +376,7 @@ public final class TccLabyrinthTracker {
 		}
 
 		java.util.List<String> party = getRaidPartyMembers();
-		if (party.isEmpty() && !debugForceShow) {
+		if (party.isEmpty()) {
 			mc.player.displayClientMessage(Component.literal("Unable to report exit, could not resolve party").withStyle(ChatFormatting.RED), false);
 			return;
 		}
@@ -434,25 +432,6 @@ public final class TccLabyrinthTracker {
 			if (g.isPastBarrier(px, pz)) {
 				markGolemDefeated(g.id, socket);
 			}
-		}
-	}
-
-	public static void onTitle(Component component) {
-		onTitle(component, null, null);
-	}
-
-	public static void onTitle(Component component, BridgeWebSocketClient socket) {
-		onTitle(component, null, socket);
-	}
-
-	public static void onTitle(Component component, BridgeConfig config, BridgeWebSocketClient socket) {
-		if (component == null || !isInRoom2()) {
-			return;
-		}
-		String text = component.getString().toLowerCase();
-		if (text.contains("waiting for players")) {
-			hasExitTitle = true;
-			lastExitTitleMs = System.currentTimeMillis();
 		}
 	}
 
@@ -604,22 +583,12 @@ public final class TccLabyrinthTracker {
 		wingsPlayerUUID = null;
 		exitReached = false;
 		confirmedExit = null;
-		hasExitTitle = false;
-		lastExitTitleMs = 0L;
 		lastReportKeyMs = 0L;
 		lastBroadcastMs = 0L;
 		lastSentX = 0.0;
 		lastSentZ = 0.0;
 		lastSentYaw = 0.0f;
 		TccLabyrinthMapHud.resetAlert();
-	}
-
-	public static boolean hasExitTitle() {
-		return hasExitTitle;
-	}
-
-	public static void setHasExitTitleForTest(boolean value) {
-		hasExitTitle = value;
 	}
 
 	public static long getLastReportKeyMs() {
@@ -633,7 +602,10 @@ public final class TccLabyrinthTracker {
 	/**
 	 * The raid party the backend scopes TCC relays to. Wynntils is the primary source; without
 	 * it (or before it knows the party) fall back to the party RaidPartyTracker read from the
-	 * hidden {@code /party list} reply, otherwise this player's map events would reach nobody.
+	 * hidden {@code /party list} reply. Peers seen on the map are deliberately not counted:
+	 * they arrive through the relay, so treating them as party would let one misrouted
+	 * message link two raid groups for the rest of the run. Empty when no teammate is known,
+	 * and then nothing is sent.
 	 */
 	public static java.util.List<String> getRaidPartyMembers() {
 		java.util.Set<String> members = new java.util.LinkedHashSet<>();
@@ -648,12 +620,6 @@ public final class TccLabyrinthTracker {
 		}
 		for (String m : tel.eden.mod.chat.RaidPartyTracker.partyMembers()) {
 			String canon = tel.eden.mod.chat.PlayerNameResolver.canonicalize(m);
-			if (canon != null && !canon.isBlank()) {
-				members.add(canon);
-			}
-		}
-		for (PlayerEntry peer : PEERS.values()) {
-			String canon = tel.eden.mod.chat.PlayerNameResolver.canonicalize(peer.name());
 			if (canon != null && !canon.isBlank()) {
 				members.add(canon);
 			}

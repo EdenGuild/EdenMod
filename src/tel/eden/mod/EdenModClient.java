@@ -714,12 +714,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}))).then(ClientCommandManager.literal("congratulate").then(ClientCommandManager.argument("name", StringArgumentType.word()).executes(ctx -> {
 				congratulate(ctx.getSource(), StringArgumentType.getString(ctx, "name"));
 				return 1;
-			}))).then(ClientCommandManager.literal("tcctest").executes(ctx -> {
-				boolean next = !tel.eden.mod.raid.tcc.TccLabyrinthTracker.isDebugForceShow();
-				tel.eden.mod.raid.tcc.TccLabyrinthTracker.setDebugForceShow(next);
-				ctx.getSource().sendFeedback(Component.literal("TCC Labyrinth minimap test force-show: " + (next ? "ON" : "OFF")).withStyle(ChatFormatting.AQUA));
-				return 1;
-			})).then(ClientCommandManager.literal("debug").executes(ctx -> {
+			}))).then(ClientCommandManager.literal("debug").executes(ctx -> {
 				for (String line : AttackTimerMenu.debugSidebarLines()) {
 					ctx.getSource().sendFeedback(Component.literal("[debug] " + line).withStyle(ChatFormatting.AQUA));
 				}
@@ -2410,6 +2405,7 @@ public final class EdenModClient implements ClientModInitializer {
 		RaidPartyTracker.reset();
 		RaidReadyTracker.reset();
 		PartyHealthTracker.reset();
+		ChatReplyManager.reset();
 		tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 		tel.eden.mod.util.PlayerSkinResolver.reset();
 		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();

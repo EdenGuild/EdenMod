@@ -14,8 +14,6 @@ import net.minecraft.network.protocol.game.ClientboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
-import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
-import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -32,24 +30,6 @@ public class ClientPacketListenerMixin {
 			if (mod != null) {
 				mod.handleWynncraftActionBar(packet.text());
 			}
-		}
-	}
-
-	@Inject(method = "setTitleText", at = @At("HEAD"))
-	private void edenBridge$observeTitleText(ClientboundSetTitleTextPacket packet, CallbackInfo ci) {
-		Minecraft minecraft = Minecraft.getInstance();
-		if (minecraft.isSameThread()) {
-			EdenModClient mod = EdenModClient.instance();
-			tel.eden.mod.raid.tcc.TccLabyrinthTracker.onTitle(packet.text(), mod != null ? mod.config() : null, mod != null ? mod.socket() : null);
-		}
-	}
-
-	@Inject(method = "setSubtitleText", at = @At("HEAD"))
-	private void edenBridge$observeSubtitleText(ClientboundSetSubtitleTextPacket packet, CallbackInfo ci) {
-		Minecraft minecraft = Minecraft.getInstance();
-		if (minecraft.isSameThread()) {
-			EdenModClient mod = EdenModClient.instance();
-			tel.eden.mod.raid.tcc.TccLabyrinthTracker.onTitle(packet.text(), mod != null ? mod.config() : null, mod != null ? mod.socket() : null);
 		}
 	}
 

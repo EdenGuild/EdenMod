@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.UUID;
-import net.minecraft.network.chat.Component;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +16,13 @@ public class TccLabyrinthTrackerTest {
 	@BeforeEach
 	public void setup() {
 		TccLabyrinthTracker.reset();
-		TccLabyrinthTracker.setDebugForceShow(true);
+		TccLabyrinthTracker.setForceInRoom2ForTesting(true);
+	}
+
+	@AfterEach
+	public void tearDown() {
+		TccLabyrinthTracker.setForceInRoom2ForTesting(false);
+		TccLabyrinthTracker.reset();
 	}
 
 	@Test
@@ -121,6 +127,16 @@ public class TccLabyrinthTrackerTest {
 	}
 
 	@Test
+	public void testPeersOnTheMapAreNotCountedAsParty() {
+		// A peer reaches this map through the relay, so counting it as party would turn one
+		// misrouted position into a lasting link between two raid groups.
+		tel.eden.mod.chat.RaidPartyTracker.reset();
+		TccLabyrinthTracker.onPeerPosition("Stranger", UUID.randomUUID().toString(), 10934, 45.0, 3479, 0f, false);
+		assertEquals(1, TccLabyrinthTracker.getPeers().size());
+		assertTrue(TccLabyrinthTracker.getRaidPartyMembers().isEmpty());
+	}
+
+	@Test
 	public void testFightingAgainstTheBarrierDoesNotTrigger() {
 		UUID fighter = UUID.randomUUID();
 
@@ -138,25 +154,8 @@ public class TccLabyrinthTrackerTest {
 	}
 
 	@Test
-	public void testExitTitleDetectionWithoutAutoReporting() {
-		assertFalse(TccLabyrinthTracker.hasExitTitle());
-		assertFalse(TccLabyrinthTracker.isExitReached());
-		assertNull(TccLabyrinthTracker.getConfirmedExit());
-
-		TccLabyrinthTracker.onTitle(Component.literal("Waiting for players..."), null);
-
-		assertTrue(TccLabyrinthTracker.hasExitTitle());
-		// Auto-detection is removed: title alone does NOT confirm exit!
-		assertFalse(TccLabyrinthTracker.isExitReached());
-		assertNull(TccLabyrinthTracker.getConfirmedExit());
-	}
-
-	@Test
 	public void testReportExitDoesNotRequireTitle() {
-		TccLabyrinthTracker.setDebugForceShow(true);
-		TccLabyrinthTracker.setHasExitTitleForTest(false);
-
-		// Without title, reportExit succeeds directly based on look direction
+		// No "Waiting for players..." title needed: reportExit picks the exit from look direction
 		TccLabyrinthTracker.ExitPoint reported = TccLabyrinthTracker.reportExit(10827.0, 3396.0, 0f, null, null);
 		assertNotNull(reported);
 		assertEquals(TccLabyrinthTracker.ExitPoint.RR3, reported);
@@ -166,8 +165,6 @@ public class TccLabyrinthTrackerTest {
 
 	@Test
 	public void testLookBasedExitSelection() {
-		TccLabyrinthTracker.setDebugForceShow(true);
-
 		// 1. Player standing right at RR3 (10827, 3396)
 		TccLabyrinthTracker.ExitPoint atExit = TccLabyrinthTracker.findClosestLookedAt(10827.0, 3396.0, 180f);
 		assertEquals(TccLabyrinthTracker.ExitPoint.RR3, atExit);
@@ -254,18 +251,15 @@ public class TccLabyrinthTrackerTest {
 	public void testResetClearsState() {
 		TccLabyrinthTracker.markGolemDefeated("B1", null);
 		TccLabyrinthTracker.confirmExit(TccLabyrinthTracker.ExitPoint.BLUE_RIGHT_2, null);
-		TccLabyrinthTracker.setHasExitTitleForTest(true);
 		TccLabyrinthTracker.setLastReportKeyMsForTest(System.currentTimeMillis());
 		assertTrue(TccLabyrinthTracker.getDefeatedGolems().contains("B1"));
 		assertTrue(TccLabyrinthTracker.isExitReached());
-		assertTrue(TccLabyrinthTracker.hasExitTitle());
 		assertTrue(TccLabyrinthTracker.getLastReportKeyMs() > 0L);
 		assertEquals(TccLabyrinthTracker.ExitPoint.BLUE_RIGHT_2, TccLabyrinthTracker.getConfirmedExit());
 
 		TccLabyrinthTracker.reset();
 		assertFalse(TccLabyrinthTracker.getDefeatedGolems().contains("B1"));
 		assertFalse(TccLabyrinthTracker.isExitReached());
-		assertFalse(TccLabyrinthTracker.hasExitTitle());
 		assertEquals(0L, TccLabyrinthTracker.getLastReportKeyMs());
 		assertNull(TccLabyrinthTracker.getConfirmedExit());
 		assertNull(TccLabyrinthTracker.getWingsPlayerUUID());
