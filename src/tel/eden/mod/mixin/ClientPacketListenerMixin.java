@@ -29,6 +29,9 @@ public class ClientPacketListenerMixin {
 			EdenModClient mod = EdenModClient.instance();
 			if (mod != null) {
 				mod.handleWynncraftActionBar(packet.text());
+				if (mod.onWynncraft()) {
+					tel.eden.mod.raid.WitnessCooldownTracker.onMessage(packet.text());
+				}
 			}
 		}
 	}
@@ -77,6 +80,7 @@ public class ClientPacketListenerMixin {
 		if (!minecraft.isSameThread()) {
 			return;
 		}
+		tel.eden.mod.war.AttackMenuScraper.onOpenScreen(packet.getContainerId(), packet.getTitle());
 		EdenModClient mod = EdenModClient.instance();
 		if (mod != null && mod.onGuildLogOpenScreen(packet)) {
 			ci.cancel();
@@ -122,8 +126,9 @@ public class ClientPacketListenerMixin {
 		if (packet.overlay()) {
 			// Reward feedback may be rendered as Wynncraft's ticker/action bar rather than a
 			// chat line. It is bookkeeping input, but must not enter the general chat relay.
-			if (mod != null) {
+			if (mod != null && mod.onWynncraft()) {
 				mod.handleRewardFeedback(packet.content());
+				tel.eden.mod.raid.WitnessCooldownTracker.onMessage(packet.content());
 			}
 			return;
 		}

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,6 +63,52 @@ class AttackTimerMenuTest {
 		AttackTimerMenu.dropStaleLocalQueuersForTesting(Set.of("Detlas"), 20_000L);
 		AttackTimerMenu.dropStaleLocalQueuersForTesting(Set.of(), 40_000L);
 		assertNotNull(AttackTimerMenu.queuerForTesting("Detlas"));
+	}
+
+	@Test
+	void timerThatRunsOutEndsOnceItLeavesTheSidebar() {
+		assertEquals(List.of("Detlas"), AttackTimerMenu.advanceTimers(Map.of("Detlas", 10), 0L).appeared());
+		assertEquals(List.of(), AttackTimerMenu.advanceTimers(Map.of(), 1_000L).ended()); // a re-render blip
+		assertEquals(List.of("Detlas"), AttackTimerMenu.advanceTimers(Map.of(), 4_000L).ended());
+	}
+
+	@Test
+	void timerHiddenWithTimeLeftIsHeldUntilItsWarIsDue() {
+		// Five minutes left when the sidebar stops showing it (another sidebar took over).
+		AttackTimerMenu.advanceTimers(Map.of("Detlas", 300), 0L);
+		AttackTimerMenu.advanceTimers(Map.of(), 1_000L);
+		assertEquals(List.of(), AttackTimerMenu.advanceTimers(Map.of(), 60_000L).ended());
+		assertEquals(List.of(), AttackTimerMenu.advanceTimers(Map.of(), 309_999L).ended());
+		// Due at 300s, ended once the grace after that has passed.
+		assertEquals(List.of("Detlas"), AttackTimerMenu.advanceTimers(Map.of(), 310_000L).ended());
+	}
+
+	@Test
+	void hiddenTimerComingBackIsNotANewTimer() {
+		AttackTimerMenu.advanceTimers(Map.of("Detlas", 300), 0L);
+		AttackTimerMenu.advanceTimers(Map.of(), 1_000L);
+		AttackTimerMenu.advanceTimers(Map.of(), 30_000L);
+		AttackTimerMenu.TimerChanges back = AttackTimerMenu.advanceTimers(Map.of("Detlas", 270), 31_000L);
+		assertEquals(List.of(), back.appeared());
+		assertEquals(List.of(), back.ended());
+	}
+
+	@Test
+	void newTimerIsThisClientsQueueOnlyIfItsAttackSlotWasJustClickedHere() {
+		long now = System.currentTimeMillis();
+		assertEquals(List.of(), AttackTimerMenu.matchQueues(List.of("Detlas"), now)); // never clicked
+
+		AttackTimerMenu.noteAttackClick("Detlas");
+		assertEquals(List.of(), AttackTimerMenu.matchQueues(List.of("Ragni"), now)); // a different territory
+		assertEquals(List.of("Detlas"), AttackTimerMenu.matchQueues(List.of("Detlas"), now));
+		assertEquals(List.of(), AttackTimerMenu.matchQueues(List.of("Detlas"), now + 6_000L)); // too long ago
+	}
+
+	@Test
+	void newTimerSomeoneElseQueuedIsNotClaimed() {
+		AttackTimerMenu.putLocalQueuerForTesting("Detlas", BOB);
+		AttackTimerMenu.noteAttackClick("Detlas");
+		assertEquals(List.of(), AttackTimerMenu.matchQueues(List.of("Detlas"), System.currentTimeMillis()));
 	}
 
 	@Test

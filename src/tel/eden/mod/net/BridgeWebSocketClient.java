@@ -158,6 +158,10 @@ public final class BridgeWebSocketClient {
 		default void onRadianceGroupCount(String groupKey, int count) {
 		}
 
+		/** A raid party member or group peer reported an Athanatic Witness kill. */
+		default void onWitnessKill(String sender, String senderUuid, long timestamp) {
+		}
+
 		/** TCC Room 2 Labyrinth position from party member. */
 		default void onTccMapPos(String sender, String senderUuid, double x, double y, double z, float yaw, boolean isWings) {
 		}
@@ -169,6 +173,7 @@ public final class BridgeWebSocketClient {
 		/** TCC Room 2 Exit reached notice. */
 		default void onTccExitReached(String sender, String path, double x, double z) {
 		}
+
 		/**
 		 * The Mojang session was verified ({@code authOk}); {@code linked} and
 		 * {@code member} report this player's backend standing. Both true means full
@@ -760,11 +765,42 @@ public final class BridgeWebSocketClient {
 	}
 
 	/**
+	 * Broadcast an Athanatic Witness kill to the raid party.
+	 *
+	 * @return whether the message was queued on a connected socket
+	 */
+	public boolean sendWitnessKill(java.util.List<String> partyMembers) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		enqueueSend(current, witnessKillPayload(partyMembers).toString());
+		return true;
+	}
+
+	static JsonObject witnessKillPayload(java.util.List<String> partyMembers) {
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "witnessKill");
+		if (partyMembers != null && !partyMembers.isEmpty()) {
+			com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+			for (String member : partyMembers) {
+				if (member != null && !member.isBlank()) {
+					arr.add(member.trim());
+				}
+			}
+			obj.add("party", arr);
+		}
+		return obj;
+	}
+
+	/**
 	 * Toggle this player's "heading to {@code territory}" marker (right-click on a timer
 	 * row). One assignment per player: marking a new territory moves them, re-marking the
 	 * current one clears it. The backend broadcasts the updated board to everyone.
+	 * {@code remaining} is the timer's countdown in seconds, or null if unreadable; it
+	 * tells the backend when the war is due so it can ignore an early "timer ended".
 	 */
-	public void sendWarGoing(String territory) {
+	public void sendWarGoing(String territory, Integer remaining) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
@@ -772,6 +808,9 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "warGoing");
 		obj.addProperty("territory", territory);
+		if (remaining != null) {
+			obj.addProperty("remaining", remaining);
+		}
 		enqueueSend(current, obj.toString());
 	}
 
@@ -795,8 +834,9 @@ public final class BridgeWebSocketClient {
 
 	/**
 	 * Report that this player queued an attack on {@code territory} in the attack GUI.
+	 * {@code remaining} is the new timer's countdown in seconds, or null if unreadable.
 	 */
-	public void sendWarQueued(String territory, boolean inside) {
+	public void sendWarQueued(String territory, boolean inside, Integer remaining) {
 		WebSocket current = socket;
 		if (current == null || territory == null || territory.isBlank()) {
 			return;
@@ -805,6 +845,9 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "warQueued");
 		obj.addProperty("territory", territory.trim());
 		obj.addProperty("inside", inside);
+		if (remaining != null) {
+			obj.addProperty("remaining", remaining);
+		}
 		enqueueSend(current, obj.toString());
 	}
 
@@ -1240,6 +1283,7 @@ public final class BridgeWebSocketClient {
 				case "warBoard" -> sink.onWarBoard(parseWarBoard(obj));
 				case "radianceGroupCount" -> sink.onRadianceGroupCount(get(obj, "groupKey"), getInt(obj, "count", 0));
 				case "radianceCast" -> sink.onRadianceCast(get(obj, "sender"), get(obj, "senderUuid"), get(obj, "groupKey"), getInt(obj, "tier", 0), getLong(obj, "remainingMs", 0L), getLong(obj, "timestamp", System.currentTimeMillis()));
+				case "witnessKill" -> sink.onWitnessKill(get(obj, "sender"), get(obj, "senderUuid"), getLong(obj, "timestamp", System.currentTimeMillis()));
 				case "tccMapPos" -> sink.onTccMapPos(get(obj, "sender"), get(obj, "senderUuid"), getDouble(obj, "x", 0.0), getDouble(obj, "y", 0.0), getDouble(obj, "z", 0.0), getFloat(obj, "yaw", 0.0f), getBool(obj, "isWings"));
 				case "tccGolemDefeated" -> sink.onTccGolemDefeated(get(obj, "sender"), get(obj, "golemId"));
 				case "tccExitReached" -> sink.onTccExitReached(get(obj, "sender"), get(obj, "path"), getDouble(obj, "x", 0.0), getDouble(obj, "z", 0.0));

@@ -86,4 +86,12 @@ class DiscordChatFormatterTest {
 
 		org.junit.jupiter.api.Assertions.assertTrue(text.contains("Unknown Guild — 10m ago"));
 	}
+
+	@Test
+	void allyActivityReturnsErrorWhenEmpty() {
+		Component component = DiscordChatFormatter.allyActivity(List.of(), false);
+		String text = component.getString();
+
+		org.junit.jupiter.api.Assertions.assertTrue(text.contains("Unable to fetch ally info, try again later."));
+	}
 }

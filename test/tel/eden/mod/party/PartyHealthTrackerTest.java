@@ -393,4 +393,16 @@ class PartyHealthTrackerTest {
 		int slotShared = PartyHealthTracker.resolvePartySlot("RealName", "20", java.util.Collections.emptyList(), 3, true);
 		assertEquals(3, slotShared);
 	}
+
+	@Test
+	void trackedPartyNamesAreUsernamesNotSidebarNicknames() {
+		// The backend matches relays by username, so a sidebar nickname must resolve first.
+		tel.eden.mod.chat.PlayerNameResolver.recordAlias("Sparkles", "RealSteve");
+		PartyHealthTracker.PlayerHealthData known = new PartyHealthTracker.PlayerHealthData(UUID.randomUUID(), "Sparkles", 100, 100, 1.0f, false, 0.0f, 1);
+		assertEquals("RealSteve", PartyHealthTracker.usernameFor(null, known));
+
+		// Unresolved: left out, since the nickname could be another player's username.
+		PartyHealthTracker.PlayerHealthData unknown = new PartyHealthTracker.PlayerHealthData(UUID.randomUUID(), "Moonbeam", 100, 100, 1.0f, false, 0.0f, 2);
+		assertNull(PartyHealthTracker.usernameFor(null, unknown));
+	}
 }

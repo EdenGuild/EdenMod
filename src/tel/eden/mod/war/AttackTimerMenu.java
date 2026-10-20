@@ -108,6 +108,25 @@ public final class AttackTimerMenu {
 	// How long a territory must stay off the sidebar to be believed gone. A re-render blip
 	// is sub-second; a timer that really ended never comes back.
 	private static final long TIMER_GONE_MS = 3_000L;
+	// The countdown last read for each live timer, and when it was read.
+	private static final Map<String, Integer> lastSeenSeconds = new HashMap<>();
+	private static final Map<String, Long> lastSeenAt = new HashMap<>();
+	// A timer that leaves the sidebar with this little time left went because its war
+	// started. One that leaves with more left is only hidden here (the sidebar is showing
+	// something else, such as a war or a raid) and must not end the war for everyone.
+	private static final long ENDING_SOON_MS = 15_000L;
+	// A hidden timer is held this long past the moment its war was due, then ended.
+	private static final long HIDDEN_GRACE_MS = 10_000L;
+	// When this client last clicked the attack slot of each territory's "Attacking:" menu.
+	// A timer that appears for that territory soon after is this client's queue, even when
+	// the attack sound never arrives. Requiring the click (not just an open menu) keeps a
+	// scout who is only reading the defence from claiming someone else's queue.
+	private static final Map<String, Long> attackClickAt = new HashMap<>();
+	private static final long QUEUE_MATCH_MS = 5_000L;
+	// Queues waiting to be reported, so the report can carry the new timer's countdown.
+	// One whose timer never shows is sent without it after QUEUE_SEND_WAIT_MS.
+	private static final Map<String, Long> pendingQueueSend = new HashMap<>();
+	private static final long QUEUE_SEND_WAIT_MS = 3_000L;
 	// Last inside-status this client reported per territory, and settle debounce state.
 	private static final Map<String, Boolean> lastReportedInsideByTerritory = new HashMap<>();
 	private static final Map<String, Boolean> pendingInsideByTerritory = new HashMap<>();
@@ -174,6 +193,26 @@ public final class AttackTimerMenu {
 		}
 		queuers.put(territory, new WarQueuer(name, uuid, inside));
 		localQueuers.add(territory);
+	}
+
+	/** Note that this client clicked the attack slot for {@code territory} (client thread). */
+	public static void noteAttackClick(String territory) {
+		attackClickAt.put(territory, System.currentTimeMillis());
+	}
+
+	/**
+	 * This client queued an attack on {@code territory} (client thread). Shown at once;
+	 * reported to the backend once the new timer is on the sidebar, so the report carries
+	 * its countdown, or after {@link #QUEUE_SEND_WAIT_MS} without it.
+	 */
+	public static void confirmQueued(String territory) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null) {
+			return;
+		}
+		reportQueued(territory, mc.player.getGameProfile().name(), mc.player.getUUID().toString());
+		pendingQueueSend.putIfAbsent(territory, System.currentTimeMillis());
+		attackClickAt.remove(territory);
 	}
 
 	/**
@@ -277,29 +316,17 @@ public final class AttackTimerMenu {
 		if (scoreboard == null || scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR) == null) {
 			previousActive.clear();
 			missingSince.clear();
+			lastSeenSeconds.clear();
+			lastSeenAt.clear();
 			return;
 		}
-		java.util.Set<String> current = new java.util.HashSet<>();
+		Map<String, Integer> current = new HashMap<>();
 		for (Upcoming attack : currentAttacks()) {
-			current.add(attack.territory());
+			current.put(attack.territory(), seconds(attack.time()));
 		}
 		long now = System.currentTimeMillis();
-		// Anything back on the board plainly did not end.
-		missingSince.keySet().removeAll(current);
-		// Territories still considered live: those on the board, plus any whose absence is
-		// too brief to trust. Ending one clears everybody's head for it on every client, so
-		// it is worth a few seconds' patience to be sure.
-		java.util.Set<String> active = new java.util.HashSet<>(current);
-		for (String territory : previousActive) {
-			if (current.contains(territory)) {
-				continue;
-			}
-			Long since = missingSince.putIfAbsent(territory, now);
-			if (since == null || now - since < TIMER_GONE_MS) {
-				active.add(territory);
-				continue;
-			}
-			missingSince.remove(territory);
+		TimerChanges changes = advanceTimers(current, now);
+		for (String territory : changes.ended()) {
 			chatDefenses.remove(territory);
 			queuers.remove(territory);
 			localQueuers.remove(territory);
@@ -307,19 +334,110 @@ public final class AttackTimerMenu {
 			lastReportedInsideByTerritory.remove(territory);
 			pendingInsideByTerritory.remove(territory);
 			pendingSinceByTerritory.remove(territory);
+			pendingQueueSend.remove(territory);
 			if (socket != null) {
 				socket.sendWarTimerEnded(territory);
 			}
 		}
-		previousActive = active;
-		dropStaleLocalQueuers(current, now);
+		for (String territory : matchQueues(changes.appeared(), now)) {
+			confirmQueued(territory);
+		}
+		flushQueueSends(current, now, socket);
+		dropStaleLocalQueuers(previousActive, now);
 		reportInside(socket);
 	}
 
+	/** What one sidebar reading changed: timers that have ended, and ones that just appeared. */
+	record TimerChanges(List<String> ended, List<String> appeared) {
+	}
+
 	/**
-	 * Drop a local-only queuer once its territory has shown no attack timer for
+	 * Fold one sidebar reading ({@code territory -> seconds left}) into the live-timer
+	 * state. Ending one clears everybody's heads for it on every client, so a timer only
+	 * ends once it has stayed off the sidebar for {@link #TIMER_GONE_MS} and either it was
+	 * about to run out when it went or its war is well past due.
+	 */
+	static TimerChanges advanceTimers(Map<String, Integer> current, long now) {
+		// Anything back on the board plainly did not end.
+		missingSince.keySet().removeAll(current.keySet());
+		List<String> appeared = new ArrayList<>();
+		for (Map.Entry<String, Integer> timer : current.entrySet()) {
+			if (!previousActive.contains(timer.getKey())) {
+				appeared.add(timer.getKey());
+			}
+			if (timer.getValue() != Integer.MAX_VALUE) {
+				lastSeenSeconds.put(timer.getKey(), timer.getValue());
+				lastSeenAt.put(timer.getKey(), now);
+			}
+		}
+		java.util.Set<String> active = new java.util.HashSet<>(current.keySet());
+		List<String> ended = new ArrayList<>();
+		for (String territory : previousActive) {
+			if (current.containsKey(territory)) {
+				continue;
+			}
+			long since = missingSince.computeIfAbsent(territory, t -> now);
+			if (now - since < TIMER_GONE_MS || !timerOver(territory, since, now)) {
+				active.add(territory);
+				continue;
+			}
+			missingSince.remove(territory);
+			lastSeenSeconds.remove(territory);
+			lastSeenAt.remove(territory);
+			ended.add(territory);
+		}
+		previousActive = active;
+		return new TimerChanges(ended, appeared);
+	}
+
+	/** Whether a timer missing from the sidebar since {@code since} has really ended. */
+	private static boolean timerOver(String territory, long since, long now) {
+		Integer seconds = lastSeenSeconds.get(territory);
+		Long readAt = lastSeenAt.get(territory);
+		if (seconds == null || readAt == null) {
+			return true;
+		}
+		long dueAt = readAt + seconds * 1000L;
+		return dueAt - since <= ENDING_SOON_MS || now >= dueAt + HIDDEN_GRACE_MS;
+	}
+
+	/**
+	 * Newly appeared timers that are this client's own queue: its attack slot was clicked
+	 * here within {@link #QUEUE_MATCH_MS}, and nobody is known to have queued it.
+	 */
+	static List<String> matchQueues(List<String> appeared, long now) {
+		attackClickAt.values().removeIf(at -> now - at > QUEUE_MATCH_MS);
+		List<String> mine = new ArrayList<>();
+		for (String territory : appeared) {
+			if (attackClickAt.containsKey(territory) && !queuers.containsKey(territory)) {
+				mine.add(territory);
+			}
+		}
+		return mine;
+	}
+
+	/** Report each pending queue once its timer is readable, or after the wait without it. */
+	private static void flushQueueSends(Map<String, Integer> current, long now, BridgeWebSocketClient socket) {
+		for (java.util.Iterator<Map.Entry<String, Long>> it = pendingQueueSend.entrySet().iterator(); it.hasNext();) {
+			Map.Entry<String, Long> pending = it.next();
+			Integer seconds = current.get(pending.getKey());
+			boolean timed = seconds != null && seconds != Integer.MAX_VALUE;
+			if (!timed && now - pending.getValue() < QUEUE_SEND_WAIT_MS) {
+				continue;
+			}
+			it.remove();
+			if (socket != null) {
+				String territory = pending.getKey();
+				socket.sendWarQueued(territory, territory.equals(currentTerritory()), timed ? seconds : null);
+			}
+		}
+	}
+
+	/**
+	 * Drop a local-only queuer once its territory has had no live timer for
 	 * {@link #LOCAL_QUEUER_NO_TIMER_MS}: a chat report for a territory nobody queued, or a
 	 * war that ended while this client was on another world, would otherwise never clear.
+	 * {@code current} is the live set, which keeps a timer the sidebar is only hiding.
 	 */
 	private static void dropStaleLocalQueuers(java.util.Set<String> current, long now) {
 		for (java.util.Iterator<String> it = localQueuers.iterator(); it.hasNext();) {
@@ -433,6 +551,8 @@ public final class AttackTimerMenu {
 		chatDefenses.clear();
 		previousActive.clear();
 		missingSince.clear();
+		lastSeenSeconds.clear();
+		lastSeenAt.clear();
 		localQueuerNoTimerSince.clear();
 		clickBoxes.clear();
 		headBoxes.clear();
@@ -454,6 +574,10 @@ public final class AttackTimerMenu {
 		localQueuerNoTimerSince.clear();
 		previousActive.clear();
 		missingSince.clear();
+		lastSeenSeconds.clear();
+		lastSeenAt.clear();
+		attackClickAt.clear();
+		pendingQueueSend.clear();
 		clickBoxes.clear();
 		headBoxes.clear();
 		soonestTerritory = null;
@@ -510,8 +634,8 @@ public final class AttackTimerMenu {
 		int width = maxWidth + 6;
 		int height = rows * ROW_HEIGHT + 4;
 		float scale = HudLayout.scale(config, PANEL);
-		int x = clamp(HudLayout.x(config, PANEL, DEFAULT_X, DEFAULT_Y), Math.round(width * scale), mc.getWindow().getGuiScaledWidth());
-		int y = clamp(HudLayout.y(config, PANEL, DEFAULT_X, DEFAULT_Y), Math.round(height * scale), mc.getWindow().getGuiScaledHeight());
+		int x = HudLayout.x(config, PANEL, DEFAULT_X, DEFAULT_Y);
+		int y = HudLayout.y(config, PANEL, DEFAULT_X, DEFAULT_Y);
 
 		// Panel is built at the origin and placed/scaled by the pose transform, so the
 		// click boxes must be recorded in final screen coords (origin + relative*scale).
@@ -740,7 +864,7 @@ public final class AttackTimerMenu {
 				if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
 					BridgeWebSocketClient socket = EdenModClient.instance().socket();
 					if (socket != null) {
-						socket.sendWarGoing(entry.getKey());
+						socket.sendWarGoing(entry.getKey(), secondsLeft(entry.getKey()));
 						lastReportedInsideByTerritory.remove(entry.getKey());
 						pendingInsideByTerritory.remove(entry.getKey());
 						pendingSinceByTerritory.remove(entry.getKey());
@@ -755,6 +879,17 @@ public final class AttackTimerMenu {
 			}
 		}
 		return false;
+	}
+
+	/** Seconds left on {@code territory}'s timer as the sidebar shows it, or null if unreadable. */
+	private static Integer secondsLeft(String territory) {
+		for (Upcoming attack : currentAttacks()) {
+			if (attack.territory().equals(territory)) {
+				int seconds = seconds(attack.time());
+				return seconds == Integer.MAX_VALUE ? null : seconds;
+			}
+		}
+		return null;
 	}
 
 	private static String rowText(Upcoming attack, String currentTerritory) {
@@ -896,10 +1031,6 @@ public final class AttackTimerMenu {
 		}
 		BlockPos pos = mc.player.blockPosition();
 		return TerritoryData.territoryAt(pos.getX(), pos.getZ());
-	}
-
-	private static int clamp(int value, int size, int screen) {
-		return Math.max(0, Math.min(value, screen - size));
 	}
 
 	private static String stripCodes(String text) {

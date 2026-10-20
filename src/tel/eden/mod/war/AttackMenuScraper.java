@@ -39,24 +39,36 @@ public final class AttackMenuScraper {
 	private static String lastSentDefense = "";
 	private static volatile String pendingAttackTerritory;
 	private static volatile long pendingAttackTime;
+	// The last "Attacking: <territory>" container the server opened, by id, so a click in
+	// it is recognised even when no screen for it is showing (the click can be sent before
+	// the screen opens, or without one).
+	private static int attackContainerId = -1;
+	private static String attackContainerTerritory;
 
 	/**
-	 * Called when a container slot is clicked. If in "Attacking: <territory>" and slot is
-	 * the attack slot, record a pending attack attempt for confirmation.
+	 * Called when a container slot click is sent. A click on the attack slot of an
+	 * "Attacking: &lt;territory&gt;" menu is recorded as a pending attack, confirmed by the
+	 * attack sound or by the new timer appearing on the sidebar.
 	 */
-	public static void onContainerClick(int slot) {
+	public static void onContainerClick(int containerId, int slot) {
 		Minecraft mc = Minecraft.getInstance();
-		if (!(mc.screen instanceof AbstractContainerScreen<?> screen)) {
+		if (!mc.isSameThread()) {
+			mc.execute(() -> onContainerClick(containerId, slot));
 			return;
 		}
-		String territory = attackTargetTitle(screen);
+		if (slot != DEFENSE_SLOT) {
+			return;
+		}
+		String territory = mc.screen instanceof AbstractContainerScreen<?> screen ? attackTargetTitle(screen) : null;
+		if (territory == null && containerId == attackContainerId) {
+			territory = attackContainerTerritory;
+		}
 		if (territory == null) {
 			return;
 		}
-		if (slot == DEFENSE_SLOT) {
-			pendingAttackTerritory = territory;
-			pendingAttackTime = System.currentTimeMillis();
-		}
+		pendingAttackTerritory = territory;
+		pendingAttackTime = System.currentTimeMillis();
+		AttackTimerMenu.noteAttackClick(territory);
 	}
 
 	/**
@@ -67,21 +79,15 @@ public final class AttackMenuScraper {
 		String territory = pendingAttackTerritory;
 		if (territory != null && System.currentTimeMillis() - pendingAttackTime < 3000L) {
 			pendingAttackTerritory = null;
-			confirmAttack(territory);
+			AttackTimerMenu.confirmQueued(territory);
 		}
 	}
 
-	private static void confirmAttack(String territory) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.player != null) {
-			net.minecraft.core.BlockPos pos = mc.player.blockPosition();
-			boolean inside = territory.equals(TerritoryData.territoryAt(pos.getX(), pos.getZ()));
-			AttackTimerMenu.reportQueued(territory, mc.player.getGameProfile().name(), mc.player.getUUID().toString());
-			BridgeWebSocketClient socket = EdenModClient.instance().socket();
-			if (socket != null) {
-				socket.sendWarQueued(territory, inside);
-			}
-		}
+	/** Called for every server-opened container (client thread): remembers the attack menu's id. */
+	public static void onOpenScreen(int containerId, Component title) {
+		String territory = attackTerritory(title);
+		attackContainerId = territory != null ? containerId : -1;
+		attackContainerTerritory = territory;
 	}
 
 	/** Client-thread tick: if the attack menu is open, scrape + relay slot 13's defence. */
@@ -124,7 +130,15 @@ public final class AttackMenuScraper {
 
 	/** The territory named in an open "Attacking: &lt;territory&gt;" menu, or null. */
 	private static String attackTargetTitle(AbstractContainerScreen<?> screen) {
-		String title = strip(screen.getTitle().getString());
+		return attackTerritory(screen.getTitle());
+	}
+
+	/** The territory named by an "Attacking: &lt;territory&gt;" title, or null. */
+	static String attackTerritory(Component titleComponent) {
+		if (titleComponent == null) {
+			return null;
+		}
+		String title = strip(titleComponent.getString());
 		if (!title.startsWith(TITLE_PREFIX)) {
 			return null;
 		}

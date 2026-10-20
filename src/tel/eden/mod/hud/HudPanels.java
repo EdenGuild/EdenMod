@@ -10,5 +10,5 @@ import java.util.List;
  */
 public record HudPanels(String name, String label, float defaultX, float defaultY, int previewWidth, int previewHeight) {
 
-	public static final List<HudPanels> ALL = List.of(new HudPanels("attackTimers", "Attack timers", 0.40f, 0.14f, 130, 44), new HudPanels("warInfo", "War info overlay", 0.015f, 0.30f, 150, 74), new HudPanels("weeklyWars", "Weekly war count", 0.83f, 0.04f, 60, 12), new HudPanels("radianceTracker", "Radiance tracker", 0.50f, 0.35f, 110, 24), new HudPanels("tccLabyrinthMap", "TCC Labyrinth minimap", 0.0f, 0.0f, 130, 180), new HudPanels("tccReportTitle", "TCC report title", 0.35f, 0.44f, 220, 20));
+	public static final List<HudPanels> ALL = List.of(new HudPanels("attackTimers", "Attack timers", 0.40f, 0.14f, 130, 44), new HudPanels("warInfo", "War info overlay", 0.015f, 0.30f, 150, 74), new HudPanels("weeklyWars", "Weekly war count", 0.83f, 0.04f, 60, 12), new HudPanels("radianceTracker", "Radiance tracker", 0.50f, 0.35f, 110, 24), new HudPanels("witnessCooldown", "Witness cooldown", 0.45f, 0.40f, 90, 16), new HudPanels("tccLabyrinthMap", "TCC Labyrinth minimap", 0.0f, 0.0f, 130, 180), new HudPanels("tccReportTitle", "TCC report title", 0.35f, 0.44f, 220, 20));
 }

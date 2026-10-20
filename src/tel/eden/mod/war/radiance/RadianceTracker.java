@@ -200,7 +200,8 @@ public final class RadianceTracker {
 			// Local cast executed: clear pending countdown & prompt, mark local effect active
 			clearCountdown();
 			clearCastPrompt();
-			localRadianceActiveUntilMs = now + toMillis(selfDuration);
+			double countdownSeconds = getCastCountdownDurationSeconds(config, selfDuration);
+			localRadianceActiveUntilMs = now + toMillis(countdownSeconds);
 			lastCooldownExpiresAtMs = now + toMillis(cooldownSecondsBoxed);
 		} else if (onCooldown) {
 			// Update ongoing cooldown expiration estimate while on cooldown
@@ -347,7 +348,7 @@ public final class RadianceTracker {
 		castPromptUntilMs = now + Math.max(0L, durationMs);
 	}
 
-	private static boolean isCastPromptActive(long now) {
+	public static boolean isCastPromptActive(long now) {
 		return now < castPromptUntilMs;
 	}
 
