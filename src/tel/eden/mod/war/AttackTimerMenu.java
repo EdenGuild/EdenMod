@@ -634,8 +634,8 @@ public final class AttackTimerMenu {
 		int width = maxWidth + 6;
 		int height = rows * ROW_HEIGHT + 4;
 		float scale = HudLayout.scale(config, PANEL);
-		int x = clamp(HudLayout.x(config, PANEL, DEFAULT_X, DEFAULT_Y), Math.round(width * scale), mc.getWindow().getGuiScaledWidth());
-		int y = clamp(HudLayout.y(config, PANEL, DEFAULT_X, DEFAULT_Y), Math.round(height * scale), mc.getWindow().getGuiScaledHeight());
+		int x = HudLayout.x(config, PANEL, DEFAULT_X, DEFAULT_Y);
+		int y = HudLayout.y(config, PANEL, DEFAULT_X, DEFAULT_Y);
 
 		// Panel is built at the origin and placed/scaled by the pose transform, so the
 		// click boxes must be recorded in final screen coords (origin + relative*scale).
@@ -1031,10 +1031,6 @@ public final class AttackTimerMenu {
 		}
 		BlockPos pos = mc.player.blockPosition();
 		return TerritoryData.territoryAt(pos.getX(), pos.getZ());
-	}
-
-	private static int clamp(int value, int size, int screen) {
-		return Math.max(0, Math.min(value, screen - size));
 	}
 
 	private static String stripCodes(String text) {
