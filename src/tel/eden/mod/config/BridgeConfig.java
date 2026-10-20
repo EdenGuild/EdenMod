@@ -277,6 +277,12 @@ public final class BridgeConfig {
 	/** Minimum number of gambits required to ready up normally (range 0-3, default 1). */
 	public int raidGambitMinimum = 1;
 
+	/** Live minimap HUD for The Canyon Colossus Room 2 Labyrinth. */
+	public boolean tccLabyrinthMap = true;
+
+	/** Audio ping when an exit in TCC Room 2 Labyrinth is discovered/confirmed. */
+	public boolean tccExitPing = true;
+
 	/** Disallow readying up in the raid menu if the raid is not a guild raid. */
 	public boolean requireGuildRaid = false;
 
