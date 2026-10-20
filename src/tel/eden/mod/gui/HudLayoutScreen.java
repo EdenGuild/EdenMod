@@ -19,6 +19,7 @@ public final class HudLayoutScreen extends Screen {
 	private static final int BOX_BG = 0x804060A0;
 	private static final int BOX_BG_HOVER = 0xA05080C0;
 	private static final int BORDER = 0xFFFFFFFF;
+	private static final int MIN_VISIBLE = 16;
 
 	private final Screen parent;
 	private final BridgeConfig config;
@@ -46,7 +47,7 @@ public final class HudLayoutScreen extends Screen {
 	@Override
 	public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
 		super.render(graphics, mouseX, mouseY, delta);
-		graphics.drawCenteredString(this.font, Component.literal("Drag to move · scroll over a panel to resize"), this.width / 2, 12, 0xFFFFFFFF);
+		graphics.drawCenteredString(this.font, Component.literal("Drag to move · scroll to resize · right-click to reset"), this.width / 2, 12, 0xFFFFFFFF);
 		for (HudPanels panel : HudPanels.ALL) {
 			int[] rect = rectOf(panel);
 			boolean hovered = panel.name().equals(dragging) || (mouseX >= rect[0] && mouseX <= rect[2] && mouseY >= rect[1] && mouseY <= rect[3]);
@@ -63,6 +64,12 @@ public final class HudLayoutScreen extends Screen {
 		for (HudPanels panel : HudPanels.ALL) {
 			int[] rect = rectOf(panel);
 			if (event.x() >= rect[0] && event.x() <= rect[2] && event.y() >= rect[1] && event.y() <= rect[3]) {
+				if (event.button() == 1) {
+					config.hudPositions.remove(panel.name());
+					HudLayout.setScale(config, panel.name(), 1.0f);
+					config.save();
+					return true;
+				}
 				dragging = panel.name();
 				dragOffsetX = (int) event.x() - rect[0];
 				dragOffsetY = (int) event.y() - rect[1];
@@ -80,8 +87,8 @@ public final class HudLayoutScreen extends Screen {
 				float scale = HudLayout.scale(config, dragging);
 				int w = Math.round(panel.previewWidth() * scale);
 				int h = Math.round(panel.previewHeight() * scale);
-				int newX = clamp((int) event.x() - dragOffsetX, this.width - w);
-				int newY = clamp((int) event.y() - dragOffsetY, this.height - h);
+				int newX = clamp((int) event.x() - dragOffsetX, -w + MIN_VISIBLE, this.width - MIN_VISIBLE);
+				int newY = clamp((int) event.y() - dragOffsetY, -h + MIN_VISIBLE, this.height - MIN_VISIBLE);
 				HudLayout.save(config, dragging, newX, newY);
 			}
 			return true;
@@ -118,13 +125,15 @@ public final class HudLayoutScreen extends Screen {
 		float scale = HudLayout.scale(config, panel.name());
 		int w = Math.round(panel.previewWidth() * scale);
 		int h = Math.round(panel.previewHeight() * scale);
-		int x = clamp(HudLayout.x(config, panel.name(), panel.defaultX(), panel.defaultY()), this.width - w);
-		int y = clamp(HudLayout.y(config, panel.name(), panel.defaultX(), panel.defaultY()), this.height - h);
+		int rawX = HudLayout.x(config, panel.name(), panel.defaultX(), panel.defaultY());
+		int rawY = HudLayout.y(config, panel.name(), panel.defaultX(), panel.defaultY());
+		int x = clamp(rawX, -w + MIN_VISIBLE, this.width - MIN_VISIBLE);
+		int y = clamp(rawY, -h + MIN_VISIBLE, this.height - MIN_VISIBLE);
 		return new int[]{x, y, x + w, y + h};
 	}
 
-	private static int clamp(int value, int max) {
-		return Math.max(0, Math.min(value, Math.max(0, max)));
+	private static int clamp(int value, int min, int max) {
+		return Math.max(min, Math.min(value, max));
 	}
 
 	private static HudPanels panelByName(String name) {
