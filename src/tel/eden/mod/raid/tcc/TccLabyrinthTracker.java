@@ -364,7 +364,7 @@ public final class TccLabyrinthTracker {
 			return;
 		}
 		if (!isInRoom2()) {
-			mc.player.displayClientMessage(Component.literal("Unable to report exit").withStyle(ChatFormatting.RED), true);
+			mc.player.displayClientMessage(Component.literal("Unable to report exit").withStyle(ChatFormatting.RED), false);
 			return;
 		}
 
@@ -373,13 +373,13 @@ public final class TccLabyrinthTracker {
 		if (now - lastReportKeyMs < cooldownMs) {
 			double remainingSec = (cooldownMs - (now - lastReportKeyMs)) / 1000.0;
 			String timeStr = String.format(java.util.Locale.ROOT, "%.1fs", remainingSec);
-			mc.player.displayClientMessage(Component.literal("Reporting exits on cooldown, try again in " + timeStr).withStyle(ChatFormatting.RED), true);
+			mc.player.displayClientMessage(Component.literal("Reporting exits on cooldown, try again in " + timeStr).withStyle(ChatFormatting.RED), false);
 			return;
 		}
 
 		java.util.List<String> party = getRaidPartyMembers();
 		if (party.isEmpty() && !debugForceShow) {
-			mc.player.displayClientMessage(Component.literal("Unable to report exit, could not resolve party").withStyle(ChatFormatting.RED), true);
+			mc.player.displayClientMessage(Component.literal("Unable to report exit, could not resolve party").withStyle(ChatFormatting.RED), false);
 			return;
 		}
 
@@ -389,7 +389,7 @@ public final class TccLabyrinthTracker {
 		float yaw = mc.player.getYRot();
 		ExitPoint ep = reportExit(px, pz, yaw, config, socket);
 		if (ep == null) {
-			mc.player.displayClientMessage(Component.literal("Unable to report exit").withStyle(ChatFormatting.RED), true);
+			mc.player.displayClientMessage(Component.literal("Unable to report exit").withStyle(ChatFormatting.RED), false);
 			return;
 		}
 
