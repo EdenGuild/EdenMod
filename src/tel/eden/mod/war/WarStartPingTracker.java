@@ -11,13 +11,15 @@ import tel.eden.mod.config.BridgeConfig;
 
 /**
  * Sounds a loud bell ping before a guild war battle starts, based on Wynncraft's
- * countdown announcement (e.g. "The war battle will start in 25 seconds.").
+ * countdown announcement ("The war battle will start in 25 seconds.") or the
+ * "5 seconds..." fallback when entering a war late.
  */
 public final class WarStartPingTracker {
 	private WarStartPingTracker() {
 	}
 
-	private static final Pattern COUNTDOWN_PATTERN = Pattern.compile("The war (?:battle|for .+?)\\s+will start in\\s+(\\d+)\\s+seconds?[\\.!]*", Pattern.CASE_INSENSITIVE);
+	private static final Pattern COUNTDOWN_25S_PATTERN = Pattern.compile("The war battle will start in 25 seconds?[\\.!]*", Pattern.CASE_INSENSITIVE);
+	private static final Pattern COUNTDOWN_5S_FALLBACK = Pattern.compile("\\b5 seconds\\.{2,}", Pattern.CASE_INSENSITIVE);
 	private static final Pattern WAR_BEGUN_PATTERN = Pattern.compile("The battle has begun!", Pattern.CASE_INSENSITIVE);
 
 	private static volatile long battleStartTimeMs = 0L;
@@ -42,12 +44,25 @@ public final class WarStartPingTracker {
 			return 0;
 		}
 
-		Matcher m = COUNTDOWN_PATTERN.matcher(clean);
-		if (m.find()) {
-			int seconds = Integer.parseInt(m.group(1));
-			battleStartTimeMs = nowMs + (seconds * 1000L);
-			startTimer(seconds, config);
-			return seconds;
+		Matcher m25 = COUNTDOWN_25S_PATTERN.matcher(clean);
+		if (m25.find()) {
+			battleStartTimeMs = nowMs + 25_000L;
+			int delaySeconds = calculateDelay(25, config);
+			startTimer(delaySeconds, config);
+			return 25;
+		}
+
+		Matcher m5 = COUNTDOWN_5S_FALLBACK.matcher(clean);
+		if (m5.find() && !pendingAlert && !alertPlayed) {
+			if (config != null && config.warStartPing) {
+				int alertSeconds = Math.max(1, Math.min(25, config.warStartPingSeconds));
+				if (alertSeconds < 5) {
+					battleStartTimeMs = nowMs + 5_000L;
+					int delaySeconds = 5 - alertSeconds;
+					startTimer(delaySeconds, config);
+					return 5;
+				}
+			}
 		}
 
 		if (WAR_BEGUN_PATTERN.matcher(clean).find() || clean.contains("canceled and refunded")) {
@@ -58,10 +73,9 @@ public final class WarStartPingTracker {
 		return 0;
 	}
 
-	public static void startTimer(int seconds, BridgeConfig config) {
+	public static void startTimer(int delaySeconds, BridgeConfig config) {
 		long seq = ++timerSeq;
-		int delaySeconds = calculateDelay(seconds, config);
-		if (delaySeconds < 0) {
+		if (delaySeconds < 0 || config == null || !config.warStartPing) {
 			pendingAlert = false;
 			alertPlayed = false;
 			return;
