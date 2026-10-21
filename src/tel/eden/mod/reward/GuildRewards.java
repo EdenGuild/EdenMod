@@ -726,7 +726,8 @@ public final class GuildRewards {
 					// gets whatever it already handed out reconciled, instead of silently
 					// falling back to the slower, consensus-gated passive path.
 					progress("Confirming with the Guild Log...", 0, 0);
-					int confirmed = reportConfirmedDeduction(name, type, result.given(), collectPostGiftEvidence());
+					// A dump hands out surplus, never a tracked pending balance, so it deducts nothing.
+					int confirmed = reportConfirmedDeduction(name, type, result.given(), collectPostGiftEvidence(), !dump);
 					// Only report a shortfall now, after ticker AND Guild Log reconciliation —
 					// checking right after runSingle (ticker alone) is a frequent false alarm,
 					// since the Guild Log usually catches exactly the gap the ticker missed.
@@ -1452,15 +1453,18 @@ public final class GuildRewards {
 	/**
 	 * Confirm one member's real landed amount for a single (non-batch) gift against
 	 * its own Guild Log evidence — whichever is higher, the ticker-confirmed click
-	 * count or what the log shows for this receiver — and request its deduction
-	 * directly. Replaces uploading raw evidence for the server to reconcile: the
-	 * mod already holds the ticker, the baseline, and the log rows synchronously
-	 * in one place, so there's no server-side state needed to keep in sync with it.
+	 * count or what the log shows for this receiver — and, when {@code settlesPending},
+	 * request its deduction directly. Replaces uploading raw evidence for the server to
+	 * reconcile: the mod already holds the ticker, the baseline, and the log rows
+	 * synchronously in one place, so there's no server-side state needed to keep in
+	 * sync with it. Package-private so the dump case is unit-testable.
 	 */
-	private int reportConfirmedDeduction(String name, RewardType type, int tickerClicks, List<GuildLogEvent> evidence) {
+	int reportConfirmedDeduction(String name, RewardType type, int tickerClicks, List<GuildLogEvent> evidence, boolean settlesPending) {
 		int logClicks = evidence == null ? 0 : guildLogCounts(Map.of(name, tickerClicks), type, evidence).getOrDefault(name, 0);
 		int confirmed = Math.max(tickerClicks, logClicks);
-		sendConfirmedDeduction(name, type, confirmed);
+		if (settlesPending) {
+			sendConfirmedDeduction(name, type, confirmed);
+		}
 		return confirmed;
 	}
 

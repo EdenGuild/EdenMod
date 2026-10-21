@@ -111,4 +111,18 @@ class SendConfirmedDeductionTest {
 		// max(ticker=3, log=4) = 4, capped at attempted=5 -> 4.
 		assertEquals(List.of(new Request("aspects", "Eve", 4)), captured);
 	}
+
+	@Test
+	void dumpConfirmsButNeverDeducts() {
+		// /eden dump hands out surplus emeralds, never a tracked pending balance, so asking
+		// the backend to deduct them only failed with "does not have N pending emeralds".
+		List<Request> captured = new ArrayList<>();
+		GuildRewards rewards = rewardsWithSender(captured);
+		assertEquals(18, rewards.reportConfirmedDeduction("Asthae", RewardType.EMERALD, 18, null, false));
+		assertTrue(captured.isEmpty());
+
+		// A regular single gift still settles the pending balance it paid out.
+		assertEquals(2, rewards.reportConfirmedDeduction("Asthae", RewardType.EMERALD, 2, null, true));
+		assertEquals(List.of(new Request("emeralds", "Asthae", 2 * 1024)), captured);
+	}
 }
