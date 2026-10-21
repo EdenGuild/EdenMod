@@ -142,6 +142,12 @@ public final class BridgeConfig {
 	/** HUD chip showing your rolling 7-day war count (from the backend). */
 	public boolean warWeeklyCountHud = false;
 
+	/** War countdown loud ping when a war is about to start. Off by default. */
+	public boolean warStartPing = false;
+
+	/** Seconds before war start to sound the loud ping (range 1-25s, default 5s). */
+	public int warStartPingSeconds = 5;
+
 	/** Client-to-client Radiance Tracker for Paladins/Knights in guild wars. Off by default. */
 	public boolean radianceTracker = false;
 
@@ -484,6 +490,7 @@ public final class BridgeConfig {
 					config.emotePickerColumns = Math.max(1, Math.min(10, config.emotePickerColumns));
 					config.emotePickerRows = Math.max(1, Math.min(10, config.emotePickerRows));
 					config.warAttackTimerMaxRows = Math.max(1, Math.min(50, config.warAttackTimerMaxRows));
+					config.warStartPingSeconds = Math.max(1, Math.min(25, config.warStartPingSeconds));
 					config.imagePreviewSize = Math.max(1, Math.min(100, config.imagePreviewSize));
 					// The label scale divides the draw position, so a hand-edited 0 would put
 					// the text at an infinite coordinate; the offsets are bounded to keep a

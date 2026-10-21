@@ -527,6 +527,7 @@ public final class EdenModClient implements ClientModInitializer {
 		tel.eden.mod.war.eco.TerritoryGuideController.reset();
 		tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 		tel.eden.mod.raid.WitnessCooldownTracker.reset();
+		tel.eden.mod.war.WarStartPingTracker.reset();
 	}
 
 	/** Packet hooks for the invisible guild-log query (mirrors Wynntils' query path). */
@@ -684,6 +685,7 @@ public final class EdenModClient implements ClientModInitializer {
 			AttackTimerMenu.onWorldJoin();
 			tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 			tel.eden.mod.raid.WitnessCooldownTracker.reset();
+			tel.eden.mod.war.WarStartPingTracker.reset();
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
 			tel.eden.mod.war.eco.TerritoryGuideController.reset();
 			guildAllyManager.requestCancel();
@@ -2458,6 +2460,7 @@ public final class EdenModClient implements ClientModInitializer {
 		tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 		tel.eden.mod.util.PlayerSkinResolver.reset();
 		tel.eden.mod.raid.WitnessCooldownTracker.reset();
+		tel.eden.mod.war.WarStartPingTracker.reset();
 		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();
 		tel.eden.mod.war.eco.TerritoryGuideController.reset();
 		guildAllyManager.requestCancel();
@@ -2523,6 +2526,7 @@ public final class EdenModClient implements ClientModInitializer {
 				WarDPS.onChat(warLine);
 				tel.eden.mod.war.radiance.RadianceTracker.onChat(warLine);
 				tel.eden.mod.war.TerritoryLossTracker.onChat(warLine);
+				tel.eden.mod.war.WarStartPingTracker.onChat(warLine, config);
 			});
 			// Auto /stream sits above the socket guard on purpose: it is a local
 			// convenience and has nothing to do with the bridge, so it keeps working
@@ -2542,6 +2546,7 @@ public final class EdenModClient implements ClientModInitializer {
 			guildLogSync.onWorldJoin();
 			territoryDefendedTracker.clear();
 			tel.eden.mod.raid.WitnessCooldownTracker.reset();
+			tel.eden.mod.war.WarStartPingTracker.reset();
 			setInGameWorld(true);
 		}
 		BridgeWebSocketClient current = socket;

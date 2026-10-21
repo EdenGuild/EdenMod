@@ -162,6 +162,9 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow(Category.WAR, "Green beacon at soonest war", () -> config.warGreenBeacon, v -> config.warGreenBeacon = v, "On", "Off", true);
 		addToggleRow(Category.WAR, "War info overlay (DPS/EHP)", () -> config.warDpsHud, v -> config.warDpsHud = v, "On", "Off", true);
 		addToggleRow(Category.WAR, "Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
+		addToggleRow(Category.WAR, "War start countdown ping", () -> config.warStartPing, v -> config.warStartPing = v, "On", "Off", false);
+		IntConfigSlider warStartPingSlider = new IntConfigSlider(CONTROL_W, 20, 1, 25, 1, () -> config.warStartPingSeconds, v -> config.warStartPingSeconds = v, v -> Component.literal(v + "s"));
+		addSliderRow(Category.WAR, "War start ping timing", warStartPingSlider, warStartPingSlider::syncFromConfig, () -> config.warStartPingSeconds = 5);
 		addToggleRow(Category.WAR, "Hide economy messages", () -> config.hideEconomyMessages, v -> config.hideEconomyMessages = v, "On", "Off", false);
 		addToggleRow(Category.WAR, "Territory loss sound", () -> config.territoryLossSound, v -> config.territoryLossSound = v, "On", "Off", false);
 		addToggleRow(Category.WAR, "Territory loss blacklist", () -> config.territoryLossBlacklistEnabled, v -> config.territoryLossBlacklistEnabled = v, "On", "Off", true);
