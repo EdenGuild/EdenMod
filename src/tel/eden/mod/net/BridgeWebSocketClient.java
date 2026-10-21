@@ -82,6 +82,14 @@ public final class BridgeWebSocketClient {
 		 */
 		void onAspectGiveaway(java.util.List<GiveawayCandidate> candidates, int storageAspects, String error, String color);
 
+		/** Response to an in-game reward status query. */
+		default void onRewardStatus(boolean aspectsBlocked, boolean emeraldsBlocked, int pendingAspects, long pendingEmeralds, String error, String color) {
+		}
+
+		/** Response to an in-game reward opt-out/in request. */
+		default void onRewardOptOutReply(String rewardKind, boolean blocked, String error, String color) {
+		}
+
 		/**
 		 * Response to a {@code rewardDeductRequest}: on success {@code error} is empty
 		 * and target/kind/amount/remaining carry the display-unit values the backend
@@ -449,6 +457,31 @@ public final class BridgeWebSocketClient {
 	/** Ask the backend for each member's pending emeralds (Chiefs only). */
 	public void sendEmeraldsPendingRequest() {
 		sendType("emeraldsPendingRequest");
+	}
+
+	/** Ask the backend for caller's own pending rewards and opt-out status. */
+	public void sendRewardStatusRequest() {
+		sendType("rewardStatusRequest");
+	}
+
+	/** Ask the backend to toggle caller's opt-out status for aspects or emeralds. */
+	public static JsonObject rewardOptOutPayload(String rewardKind, boolean blocked) {
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "rewardOptOutRequest");
+		obj.addProperty("rewardKind", rewardKind);
+		obj.addProperty("blocked", blocked);
+		return obj;
+	}
+
+	/** Ask the backend to toggle caller's opt-out status for aspects or emeralds. */
+	public boolean sendRewardOptOutRequest(String rewardKind, boolean blocked) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = rewardOptOutPayload(rewardKind, blocked);
+		enqueueSend(current, obj.toString());
+		return true;
 	}
 
 	/** Ask the backend for the member list + aspect stock for the giveaway screen (Chiefs only). */
@@ -1316,6 +1349,8 @@ public final class BridgeWebSocketClient {
 				case "emeraldsPendingReply" -> sink.onEmeraldsPending(parsePendingEntries(obj, "emeralds"), get(obj, "error"), get(obj, "color"));
 				case "aspectGiveawayReply" -> sink.onAspectGiveaway(parseGiveawayCandidates(obj), getInt(obj, "storageAspects", 0), get(obj, "error"), get(obj, "color"));
 				case "rewardDeductReply" -> sink.onRewardDeductReply(get(obj, "target"), get(obj, "rewardKind"), getInt(obj, "amount", 0), getInt(obj, "remaining", 0), get(obj, "error"), get(obj, "color"));
+				case "rewardStatusReply" -> sink.onRewardStatus(getBool(obj, "aspectsBlocked"), getBool(obj, "emeraldsBlocked"), getInt(obj, "pendingAspects", 0), getLong(obj, "pendingEmeralds", 0L), get(obj, "error"), get(obj, "color"));
+				case "rewardOptOutReply" -> sink.onRewardOptOutReply(get(obj, "rewardKind"), getBool(obj, "blocked"), get(obj, "error"), get(obj, "color"));
 				case "giftLockReply" -> sink.onGiftLockReply(getBool(obj, "granted"), get(obj, "error"), get(obj, "holder"), getInt(obj, "retryAfterSeconds", 0));
 				case "partyUpdate" -> sink.onPartyUpdate(get(obj, "event"), get(obj, "actor"), parseParty(obj), get(obj, "color"));
 				case "partyListReply" -> sink.onPartyList(parsePartyList(obj), get(obj, "color"));
