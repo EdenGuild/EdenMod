@@ -39,6 +39,7 @@ import tel.eden.mod.guild.GuildLogSync;
 import tel.eden.mod.guild.GuildMenuScraper;
 import tel.eden.mod.guild.GuildRewardStorageSnapshot;
 import tel.eden.mod.guild.BackgroundContainerSession;
+import tel.eden.mod.gui.AspectGiveawayScreen;
 import tel.eden.mod.gui.BridgeConfigScreen;
 import tel.eden.mod.gui.CommandAliasScreen;
 import tel.eden.mod.gui.CommandKeybindScreen;
@@ -52,6 +53,7 @@ import tel.eden.mod.net.AllyActivityEntry;
 import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.net.PartyInfo;
 import tel.eden.mod.net.GiveawayCandidate;
+import tel.eden.mod.net.MailEntry;
 import tel.eden.mod.net.PendingEntry;
 import tel.eden.mod.net.WarBoardEntry;
 import tel.eden.mod.net.WarCountEntry;
@@ -106,6 +108,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.User;
+import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.ClickEvent;
@@ -185,6 +188,8 @@ public final class EdenModClient implements ClientModInitializer {
 	private KeyMapping createPartyKey;
 	private KeyMapping openEmotePickerKey;
 	private BridgeWebSocketClient socket;
+	// Mail ids already shown this session; the bot can re-send before our ack lands.
+	private final Set<Long> shownMailIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	// The in-flight giftLockAcquire's result slot: onGiftLockReply completes it (from
 	// the bridge's read thread), GuildRewards.GiftLockGateway.acquire() blocks on it
 	// (from the reward worker thread). At most one acquire is ever outstanding —
@@ -705,7 +710,7 @@ public final class EdenModClient implements ClientModInitializer {
 			})).then(ClientCommandManager.literal("online").executes(ctx -> {
 				requestOnline(ctx.getSource());
 				return 1;
-			})).then(ClientCommandManager.literal("aspects").then(ClientCommandManager.literal("pending").executes(ctx -> {
+			})).then(ClientCommandManager.literal("mail").then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).then(ClientCommandManager.argument("message", StringArgumentType.greedyString()).executes(ctx -> sendMail(ctx.getSource(), StringArgumentType.getString(ctx, "player"), StringArgumentType.getString(ctx, "message")))))).then(ClientCommandManager.literal("aspects").then(ClientCommandManager.literal("pending").executes(ctx -> {
 				requestAspectsPending(ctx.getSource());
 				return 1;
 			}))).then(ClientCommandManager.literal("cf").executes(ctx -> {
@@ -1194,6 +1199,33 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
+				public void onMailDelivery(java.util.List<MailEntry> mails) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						// No player (mid world swap): leave it unacked so the bot re-sends on the next world entry.
+						if (mc.player == null) {
+							return;
+						}
+						List<MailEntry> fresh = mails.stream().filter(m -> shownMailIds.add(m.id())).toList();
+						for (MailEntry mail : fresh) {
+							Component line = DiscordChatFormatter.pill("mail", mail.from() + " (" + AspectGiveawayScreen.formatAge(mail.sentAt()) + "): " + mail.content());
+							if (!WynntilsChatBridge.sendToTab(line)) {
+								mc.player.displayClientMessage(line, false);
+							}
+						}
+						if (!fresh.isEmpty()) {
+							Component title = Component.literal(fresh.size() == 1 ? "New Eden mail" : fresh.size() + " new Eden mails");
+							Component body = Component.literal("From " + String.join(", ", fresh.stream().map(MailEntry::from).distinct().toList()) + " — see chat");
+							SystemToast.addOrUpdate(mc.getToastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION, title, body);
+						}
+						BridgeWebSocketClient current = socket;
+						if (current != null) {
+							current.sendMailAck(mails.stream().map(MailEntry::id).toList());
+						}
+					});
+				}
+
+				@Override
 				public void onGameFeedback(String message, String color) {
 					displayColored(color, () -> DiscordChatFormatter.systemLine(message, net.minecraft.ChatFormatting.GOLD));
 				}
@@ -1315,6 +1347,14 @@ public final class EdenModClient implements ClientModInitializer {
 		}, "edenmod-update-download");
 		thread.setDaemon(true);
 		thread.start();
+	}
+
+	private int sendMail(FabricClientCommandSource source, String player, String message) {
+		BridgeWebSocketClient current = socket;
+		if (current == null || !current.sendMail(player, message)) {
+			source.sendFeedback(notConnected());
+		}
+		return 1;
 	}
 
 	private void requestOnline(FabricClientCommandSource source) {
@@ -2270,7 +2310,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;

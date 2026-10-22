@@ -39,7 +39,7 @@ public final class BridgeWebSocketClient {
 	 * it (the last one, "guildLogSync", was retired once the server-side code
 	 * that checked for it was removed).
 	 */
-	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of();
+	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of("mail");
 
 	/** Callbacks for inbound bridge events (delivered off the game thread). */
 	public interface MessageSink {
@@ -127,6 +127,14 @@ public final class BridgeWebSocketClient {
 		 * than color alone (e.g. the storage-nearly-full warning).
 		 */
 		void onPillMessage(String label, String content, String colorHex, boolean bold);
+
+		/**
+		 * Offline mail the bot held for this player ({@code mailDelivery}), sent when the
+		 * player enters a world or when mail arrives while they're in one. Ids already
+		 * shown this session can repeat; ack every id with {@link #sendMailAck} so the
+		 * bot marks them delivered.
+		 */
+		void onMailDelivery(java.util.List<MailEntry> mails);
 
 		/**
 		 * Response to a {@code warCountsRequest}: per-member war counts over the last
@@ -778,6 +786,42 @@ public final class BridgeWebSocketClient {
 		return true;
 	}
 
+	/**
+	 * Leave {@code to} an offline mail; the bot answers with a {@code mail} pill line.
+	 *
+	 * @return whether the message was queued on a connected socket
+	 */
+	public boolean sendMail(String to, String content) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "mailSend");
+		obj.addProperty("to", to);
+		obj.addProperty("content", content);
+		enqueueSend(current, obj.toString());
+		return true;
+	}
+
+	/** Tell the bot these mails were shown, so it stops re-sending them. */
+	public void sendMailAck(java.util.List<Long> ids) {
+		WebSocket current = socket;
+		if (current == null || ids.isEmpty()) {
+			return;
+		}
+		enqueueSend(current, mailAckPayload(ids).toString());
+	}
+
+	static JsonObject mailAckPayload(java.util.List<Long> ids) {
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "mailAck");
+		com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+		ids.forEach(arr::add);
+		obj.add("ids", arr);
+		return obj;
+	}
+
 	static JsonObject witnessKillPayload(java.util.List<String> partyMembers) {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "witnessKill");
@@ -1278,6 +1322,7 @@ public final class BridgeWebSocketClient {
 				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"), get(obj, "color"));
 				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
 				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"));
+				case "mailDelivery" -> sink.onMailDelivery(parseMail(obj));
 				case "warCountsReply" -> sink.onWarCounts(getInt(obj, "days", 7), parseWarCounts(obj), get(obj, "requester"), get(obj, "color"));
 				case "allyActivityReply" -> sink.onAllyActivity(parseAllyActivity(obj));
 				case "warBoard" -> sink.onWarBoard(parseWarBoard(obj));
@@ -1514,6 +1559,22 @@ public final class BridgeWebSocketClient {
 				if (element.isJsonObject()) {
 					JsonObject member = element.getAsJsonObject();
 					out.add(new PendingEntry(get(member, "name"), getInt(member, amountKey, 0)));
+				}
+			}
+		}
+		return out;
+	}
+
+	static java.util.List<MailEntry> parseMail(JsonObject obj) {
+		java.util.List<MailEntry> out = new java.util.ArrayList<>();
+		if (obj.has("mails") && obj.get("mails").isJsonArray()) {
+			for (var element : obj.get("mails").getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject mail = element.getAsJsonObject();
+					long id = getLong(mail, "id", 0L);
+					if (id > 0) {
+						out.add(new MailEntry(id, get(mail, "from"), get(mail, "content"), getLong(mail, "sentAt", 0L)));
+					}
 				}
 			}
 		}
