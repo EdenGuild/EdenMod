@@ -215,6 +215,34 @@ public final class AttackTimerMenu {
 		attackClickAt.remove(territory);
 	}
 
+	/** Whether this client queued the attack on {@code territory}. */
+	public static boolean isQueuedByPlayer(String territory) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc == null || mc.player == null) {
+			return false;
+		}
+		return isQueuedBy(territory, mc.player.getUUID().toString(), mc.player.getGameProfile().name());
+	}
+
+	static boolean isQueuedBy(String territory, String uuid, String name) {
+		if (territory == null) {
+			return false;
+		}
+		WarQueuer q = queuers.get(territory);
+		if (q == null) {
+			for (Map.Entry<String, WarQueuer> entry : queuers.entrySet()) {
+				if (entry.getKey().equalsIgnoreCase(territory)) {
+					q = entry.getValue();
+					break;
+				}
+			}
+		}
+		if (q == null) {
+			return false;
+		}
+		return (uuid != null && uuid.equals(q.uuid())) || (name != null && name.equalsIgnoreCase(q.name()));
+	}
+
 	/**
 	 * Parse a guild-chat line for a "&lt;territory&gt; defense is &lt;rating&gt;" report
 	 * (as Wynntils announces) and fold it into the HUD's fresher-intel overlay.
