@@ -20,6 +20,7 @@ import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
+import tel.eden.mod.EdenLogger;
 import tel.eden.mod.party.WynntilsPartyBridge;
 import tel.eden.mod.war.ScoreboardCapture;
 
@@ -56,6 +57,8 @@ import tel.eden.mod.war.ScoreboardCapture;
  * Wynncraft account, so the ally lookup finds nothing and drops it.
  */
 public final class RaidPartyTracker {
+	private static final EdenLogger LOGGER = EdenLogger.get();
+
 	private RaidPartyTracker() {
 	}
 
@@ -101,8 +104,10 @@ public final class RaidPartyTracker {
 	// raids can be re-queued quickly: a threshold longer than the time it takes to start the
 	// next one would carry an abandoned raid's players into it.
 	private static final long NEW_RAID_GAP_MS = 10_000L;
-	// Hold the tally this long after the raid ends: the completion message lands just after.
-	private static final long RETENTION_MS = 60_000L;
+	// No expiry timer on the tally once the raid sidebar goes: the sidebar vanishes in the
+	// reward room, a minute or more before the completion line (60-101s in logs), and a player
+	// who skips the loot swaps server even earlier. Only this player's own completion reads
+	// the tally, and the next raid's start clears it, so it cannot reach the wrong raid.
 
 	// Sampling runs on the client thread; a raid completion arrives on the netty thread
 	// (the chat mixin injects ahead of vanilla's ensureRunningOnSameThread), and that is
@@ -119,6 +124,9 @@ public final class RaidPartyTracker {
 	private static boolean raiding;
 	private static long raidEndedAt;
 	private static int tickCounter;
+	// Wynntils' current party, copied once a second on the client thread so a completion on
+	// the netty thread never reads Wynntils' own list while it is being updated.
+	private static List<String> liveParty = List.of();
 
 	/**
 	 * Drive the tracker. Called every client tick, but both the things it does are throttled:
@@ -137,12 +145,14 @@ public final class RaidPartyTracker {
 		// other holder is a raid completion that should never wait on that.
 		if (tick % SIDEBAR_CHECK_INTERVAL_TICKS == 0) {
 			boolean inRaid = sidebarShowsRaid();
+			List<String> live = wynntilsParty();
 			synchronized (LOCK) {
 				updateRaidState(inRaid);
+				liveParty = live;
 				sampling = raiding;
 			}
 			if (inRaid) {
-				checkOrRequestParty();
+				checkOrRequestParty(live);
 			}
 		}
 		if (!sampling) {
@@ -170,18 +180,28 @@ public final class RaidPartyTracker {
 		} else if (!inRaid && raiding) {
 			raiding = false;
 			raidEndedAt = System.currentTimeMillis();
+			LOGGER.info("[RaidParty] raid sidebar vanished; holding tally until the completion, next raid or disconnect: {}", tallySummary());
 		}
 	}
 
-	private static void checkOrRequestParty() {
+	/** Wynntils' current party with names resolved to accounts, or empty without Wynntils. */
+	private static List<String> wynntilsParty() {
+		if (!WynntilsPartyBridge.isAvailable()) {
+			return List.of();
+		}
+		List<String> names = new ArrayList<>();
+		for (String m : WynntilsPartyBridge.getPartyMembers()) {
+			String resolved = PlayerNameResolver.resolve(null, m);
+			names.add(resolved != null && !resolved.isBlank() ? resolved : m);
+		}
+		return List.copyOf(names);
+	}
+
+	private static void checkOrRequestParty(List<String> wynntilsParty) {
 		if (WynntilsPartyBridge.isAvailable()) {
-			List<String> wynnMembers = WynntilsPartyBridge.getPartyMembers();
-			if (!wynnMembers.isEmpty()) {
+			if (!wynntilsParty.isEmpty()) {
 				synchronized (LOCK) {
-					for (String m : wynnMembers) {
-						String resolved = PlayerNameResolver.resolve(null, m);
-						partyMembers.add(resolved != null && !resolved.isBlank() ? resolved : m);
-					}
+					partyMembers.addAll(wynntilsParty);
 				}
 			}
 		} else {
@@ -263,10 +283,12 @@ public final class RaidPartyTracker {
 	 * them are really allies and caps the party at {@link #RAID_PARTY_SIZE}, because that
 	 * needs the guild member list and the player API, neither of which the client has.
 	 *
-	 * <p>Empty when the completion already names a full party, when nothing was sampled
-	 * (this client was not in the raid), or when the tally has gone stale. Comparison with
-	 * the announced party is case-insensitive so a casing difference cannot duplicate a
-	 * player.
+	 * <p>When the tally has nothing (this client relogged mid-raid, or never saw the raid
+	 * sidebar), falls back to the current Wynntils party: the party cannot change until the
+	 * raid is completed and the completion line follows within a couple of seconds, so it is
+	 * still the raid's party. Empty when the completion already names a full party or neither
+	 * source has anyone else. Comparison with the announced party is case-insensitive so a
+	 * casing difference cannot duplicate a player.
 	 */
 	public static List<String> extraPlayers(List<String> announcedParty) {
 		if (announcedParty.size() >= RAID_PARTY_SIZE) {
@@ -275,9 +297,6 @@ public final class RaidPartyTracker {
 		Set<String> seen = announcedParty.stream().map(name -> name.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
 		List<String> result = new ArrayList<>();
 		synchronized (LOCK) {
-			if (isStale()) {
-				return List.of();
-			}
 			for (String member : partyMembers) {
 				if (seen.add(member.toLowerCase(Locale.ROOT))) {
 					result.add(member);
@@ -290,11 +309,19 @@ public final class RaidPartyTracker {
 					result.add(entry.getKey());
 				});
 			}
+			if (result.isEmpty()) {
+				for (String member : liveParty) {
+					if (seen.add(member.toLowerCase(Locale.ROOT))) {
+						result.add(member);
+					}
+				}
+				LOGGER.info("[RaidParty] tally had no extras for {} {}; live Wynntils party {} gives {}", announcedParty, tallySummary(), liveParty, result);
+			}
 		}
 		return Collections.unmodifiableList(result);
 	}
 
-	/** Drop the tally once a completion has consumed it, or on world change. */
+	/** Drop the tally once a completion has consumed it, or on disconnect. */
 	public static void reset() {
 		synchronized (LOCK) {
 			raiding = false;
@@ -305,18 +332,14 @@ public final class RaidPartyTracker {
 			expectingPartyList = false;
 			partyListRequestedAt = 0L;
 			partyListAttempts = 0;
+			liveParty = List.of();
 		}
 	}
 
-	/**
-	 * Whether the tally can still be trusted: a raid is running, or one ended recently enough
-	 * that this completion is plausibly its own. Holds LOCK.
-	 */
-	private static boolean isStale() {
-		if (raiding) {
-			return false;
-		}
-		return raidEndedAt == 0 || System.currentTimeMillis() - raidEndedAt > RETENTION_MS;
+	/** Roster and the most-seen players, for the diagnostic log lines. Holds LOCK. */
+	private static String tallySummary() {
+		String seen = sightings.entrySet().stream().sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).limit(MAX_CANDIDATES).map(entry -> entry.getKey() + " x" + entry.getValue()).collect(Collectors.joining(", "));
+		return "roster=" + partyMembers + " sightings=[" + seen + "] (need x" + MIN_SIGHTINGS + ")";
 	}
 
 	/** Whether the sidebar is showing a raid's objective block. */
@@ -437,6 +460,18 @@ public final class RaidPartyTracker {
 		synchronized (LOCK) {
 			raiding = isRaiding;
 			raidEndedAt = 0;
+		}
+	}
+
+	public static void endRaidForTesting() {
+		synchronized (LOCK) {
+			updateRaidState(false);
+		}
+	}
+
+	public static void setLivePartyForTesting(List<String> party) {
+		synchronized (LOCK) {
+			liveParty = List.copyOf(party);
 		}
 	}
 

@@ -146,11 +146,31 @@ class RaidPartyTrackerTest {
 		RaidPartyTracker.setExpectingPartyListForTesting(true);
 		RaidPartyTracker.addPartyMemberForTesting("Alice");
 		RaidPartyTracker.recordSightingForTesting("Bob", 20);
+		RaidPartyTracker.setLivePartyForTesting(List.of("Alice", "Carol"));
 
 		RaidPartyTracker.reset();
 
 		assertFalse(RaidPartyTracker.isExpectingPartyList());
 		assertTrue(RaidPartyTracker.partyMembersForTesting().isEmpty());
 		assertTrue(RaidPartyTracker.extraPlayers(List.of("Alice")).isEmpty());
+	}
+
+	@Test
+	void tallyOutlivesTheRaidSidebarUntilTheCompletion() {
+		// The sidebar vanishes in the reward room, a minute or more before the completion line.
+		RaidPartyTracker.setRaidingForTesting(true);
+		RaidPartyTracker.addPartyMemberForTesting("Alice");
+		RaidPartyTracker.addPartyMemberForTesting("Ally");
+		RaidPartyTracker.endRaidForTesting();
+
+		assertEquals(List.of("Ally"), RaidPartyTracker.extraPlayers(List.of("Alice", "Bob", "Carol")));
+	}
+
+	@Test
+	void fallsBackToLiveWynntilsPartyWhenTallyIsEmpty() {
+		// No raid seen (e.g. relogged mid-raid), but Wynntils still knows the party.
+		RaidPartyTracker.setLivePartyForTesting(List.of("Alice", "Bob", "Carol", "Ally"));
+
+		assertEquals(List.of("Ally"), RaidPartyTracker.extraPlayers(List.of("alice", "Bob", "Carol")));
 	}
 }

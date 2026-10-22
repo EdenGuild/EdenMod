@@ -683,7 +683,9 @@ public final class EdenModClient implements ClientModInitializer {
 			// tracking. The war board itself survives a world swap (the bridge socket stays
 			// open and keeps it current); disconnect() clears it fully.
 			ScoreboardCapture.reset();
-			RaidPartyTracker.reset();
+			// Not RaidPartyTracker: leaving a raid instance is a server swap that lands up to
+			// ~70s before the guild completion line, and wiping the tally here sent that
+			// completion with no allies. It is consumed on completion and cleared on disconnect.
 			AllianceMenuScraper.reset();
 			GuildMenuScraper.reset();
 			AttackTimerMenu.onWorldJoin();
