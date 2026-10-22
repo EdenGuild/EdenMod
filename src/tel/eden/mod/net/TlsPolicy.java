@@ -5,13 +5,22 @@ import java.net.Socket;
 import java.net.URL;
 import java.net.URLConnection;
 import java.net.http.HttpClient;
+import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertPathBuilder;
 import java.security.cert.CertificateException;
+import java.security.cert.PKIXBuilderParameters;
+import java.security.cert.PKIXRevocationChecker;
+import java.security.cert.TrustAnchor;
+import java.security.cert.X509CertSelector;
 import java.security.cert.X509Certificate;
+import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Set;
+import javax.net.ssl.CertPathTrustManagerParameters;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
@@ -38,6 +47,11 @@ import javax.net.ssl.X509ExtendedTrustManager;
  * <p>Source: eMudhra incident data (impacted-intermediates.json,
  * https://emudhra.we-have-a-problem.com/), all 16 certificates re-hashed locally and verified.
  * Only covers connections that use this class; Minecraft's own and other mods' are unaffected.
+ *
+ * <p>If the JVM runs with {@code -Dcom.sun.net.ssl.checkRevocation=true}, revocation is checked
+ * here via OCSP and CRLs in soft-fail mode, instead of the JDK's CRL-only hard-fail behaviour that
+ * breaks connections to OCSP-only certificates such as GitHub's (see
+ * {@link #revocationAwareTrustManager}).
  */
 public final class TlsPolicy {
 	/** SHA-256 (upper-case hex) of the SubjectPublicKeyInfo of each compromised intermediate CA. */
@@ -51,7 +65,7 @@ public final class TlsPolicy {
 				"92C063D67E8F14DB71D288E11266FFDAF69CBF115F7BAB14F3BC2F68D25E0E30" // EM OV CS CA - G3C (code signing)
 	);
 
-	private static final SSLContext CONTEXT = buildContext();
+	private static final SSLContext CONTEXT = buildContext(revocationCheckingRequested());
 
 	private TlsPolicy() {
 	}
@@ -105,29 +119,69 @@ public final class TlsPolicy {
 		return new DenyListTrustManager(delegate);
 	}
 
+	/** Whether the JVM was started with {@code -Dcom.sun.net.ssl.checkRevocation=true}. */
+	private static boolean revocationCheckingRequested() {
+		return Boolean.getBoolean("com.sun.net.ssl.checkRevocation");
+	}
+
 	/**
 	 * Fails closed: if the default trust manager cannot be built there is no safe fallback, and
 	 * silently using an unfiltered context would defeat the point of this class.
+	 *
+	 * @param revocationChecking whether to check certificate revocation (see
+	 *        {@link #revocationAwareTrustManager})
 	 */
-	private static SSLContext buildContext() {
+	static SSLContext buildContext(boolean revocationChecking) {
 		try {
-			TrustManagerFactory factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-			factory.init((KeyStore) null);
-			X509ExtendedTrustManager base = null;
-			for (TrustManager tm : factory.getTrustManagers()) {
-				if (tm instanceof X509ExtendedTrustManager extended) {
-					base = extended;
-					break;
-				}
-			}
-			if (base == null)
-				throw new IllegalStateException("No X509ExtendedTrustManager in the default trust store");
+			X509ExtendedTrustManager base = defaultTrustManager();
+			if (revocationChecking)
+				base = revocationAwareTrustManager(base);
 			SSLContext context = SSLContext.getInstance("TLS");
 			context.init(null, new TrustManager[]{wrap(base)}, null);
 			return context;
 		} catch (Exception e) {
 			throw new IllegalStateException("Cannot build the TLS trust policy", e);
 		}
+	}
+
+	private static X509ExtendedTrustManager defaultTrustManager() throws GeneralSecurityException {
+		TrustManagerFactory factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+		factory.init((KeyStore) null);
+		for (TrustManager tm : factory.getTrustManagers()) {
+			if (tm instanceof X509ExtendedTrustManager extended)
+				return extended;
+		}
+		throw new IllegalStateException("No X509ExtendedTrustManager in the default trust store");
+	}
+
+	/**
+	 * The same trust anchors as the JVM default, but with revocation checking that works for today's
+	 * certificates.
+	 *
+	 * <p>With {@code -Dcom.sun.net.ssl.checkRevocation=true} the JDK's own trust manager hard-fails
+	 * whenever it cannot determine a certificate's status, and by default it can only use CRLs. Many
+	 * CAs now issue certificates with an OCSP responder and no CRL distribution point (GitHub's
+	 * Sectigo certificate is one), so every such connection dies with "Could not determine revocation
+	 * status", including the updater and attestation checks. Here an explicit
+	 * {@link PKIXRevocationChecker} uses OCSP with a CRL fallback and treats a status that genuinely
+	 * cannot be obtained (responder down, no endpoint published) as unknown rather than fatal
+	 * ({@code SOFT_FAIL}). A certificate that is actually revoked is still rejected.
+	 */
+	private static X509ExtendedTrustManager revocationAwareTrustManager(X509ExtendedTrustManager defaults) throws GeneralSecurityException {
+		Set<TrustAnchor> anchors = new HashSet<>();
+		for (X509Certificate issuer : defaults.getAcceptedIssuers())
+			anchors.add(new TrustAnchor(issuer, null));
+		PKIXBuilderParameters params = new PKIXBuilderParameters(anchors, new X509CertSelector());
+		PKIXRevocationChecker checker = (PKIXRevocationChecker) CertPathBuilder.getInstance("PKIX").getRevocationChecker();
+		checker.setOptions(EnumSet.of(PKIXRevocationChecker.Option.SOFT_FAIL));
+		params.addCertPathChecker(checker);
+		TrustManagerFactory factory = TrustManagerFactory.getInstance("PKIX");
+		factory.init(new CertPathTrustManagerParameters(params));
+		for (TrustManager tm : factory.getTrustManagers()) {
+			if (tm instanceof X509ExtendedTrustManager extended)
+				return extended;
+		}
+		throw new IllegalStateException("No X509ExtendedTrustManager from the PKIX trust manager factory");
 	}
 
 	private static final class DenyListTrustManager extends X509ExtendedTrustManager {

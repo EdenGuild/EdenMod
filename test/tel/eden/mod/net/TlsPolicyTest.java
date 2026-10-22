@@ -158,4 +158,49 @@ class TlsPolicyTest {
 	void liveStillReachesLegitimateHosts() throws Exception {
 		assertEquals("200", fetch("https://github.com/"));
 	}
+
+	@Test
+	void buildsContextsWithAndWithoutRevocationChecking() {
+		assertNotNull(TlsPolicy.buildContext(false).getSocketFactory());
+		assertNotNull(TlsPolicy.buildContext(true).getSocketFactory());
+	}
+
+	private static HttpClient revocationCheckingClient() {
+		return HttpClient.newBuilder().sslContext(TlsPolicy.buildContext(true)).connectTimeout(Duration.ofSeconds(30)).build();
+	}
+
+	private static String send(HttpClient client, String url) throws Exception {
+		return Integer.toString(client.send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(30)).GET().build(), HttpResponse.BodyHandlers.discarding()).statusCode());
+	}
+
+	/**
+	 * Regression: with {@code -Dcom.sun.net.ssl.checkRevocation=true} the JDK hard-failed every
+	 * OCSP-only certificate ("Could not determine revocation status"), which broke the updater and
+	 * attestation checks against GitHub. The context used for that mode must still connect.
+	 */
+	@Test
+	@EnabledIfEnvironmentVariable(named = "EDENMOD_NETWORK_TESTS", matches = "1")
+	void liveRevocationCheckingStillReachesOcspOnlyHosts() throws Exception {
+		HttpClient client = revocationCheckingClient();
+		assertEquals("200", send(client, "https://api.github.com/"));
+		assertEquals("200", send(client, "https://github.com/"));
+	}
+
+	@Test
+	@EnabledIfEnvironmentVariable(named = "EDENMOD_NETWORK_TESTS", matches = "1")
+	void liveRevocationCheckingStillRejectsARevokedCertificate() {
+		try {
+			String status = send(revocationCheckingClient(), "https://revoked.badssl.com/");
+			org.junit.jupiter.api.Assertions.fail("a revoked certificate was accepted (HTTP " + status + ")");
+		} catch (Exception e) {
+			Throwable t = e;
+			boolean revoked = false;
+			while (t != null) {
+				revoked |= String.valueOf(t.getMessage()).toLowerCase().contains("revoked");
+				t = t.getCause();
+			}
+			// If the third-party test site is unreachable we learn nothing; only a clean "revoked" counts as a pass.
+			org.junit.jupiter.api.Assumptions.assumeTrue(revoked, "revoked.badssl.com unreachable or failed for another reason: " + e);
+		}
+	}
 }
