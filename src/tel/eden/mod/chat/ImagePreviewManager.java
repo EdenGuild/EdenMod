@@ -14,6 +14,7 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.Identifier;
 import tel.eden.mod.EdenLogger;
+import tel.eden.mod.net.TlsPolicy;
 
 public class ImagePreviewManager {
 	private static final EdenLogger LOGGER = EdenLogger.get();
@@ -272,7 +273,7 @@ public class ImagePreviewManager {
 					fetchUrl = resolved;
 				}
 				URL url = URI.create(fetchUrl).toURL();
-				java.net.URLConnection conn = url.openConnection();
+				java.net.URLConnection conn = TlsPolicy.open(url);
 				conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
 				conn.setReadTimeout(READ_TIMEOUT_MS);
 				conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
@@ -302,7 +303,7 @@ public class ImagePreviewManager {
 	private static String resolveShareImageUrl(String pageUrl) {
 		try {
 			URL url = URI.create(pageUrl).toURL();
-			java.net.URLConnection conn = url.openConnection();
+			java.net.URLConnection conn = TlsPolicy.open(url);
 			conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
 			conn.setReadTimeout(READ_TIMEOUT_MS);
 			conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");

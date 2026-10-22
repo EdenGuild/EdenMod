@@ -18,6 +18,7 @@ import net.minecraft.advancements.DisplayInfo;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import tel.eden.mod.EdenLogger;
+import tel.eden.mod.net.TlsPolicy;
 
 /**
  * Live territory reference data for the war suite.
@@ -42,7 +43,7 @@ public final class TerritoryData {
 
 	private static final Pattern DEFENSE = Pattern.compile("Territory Defences:\\s*(.+?)\\s*Trading");
 
-	private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
+	private static final HttpClient HTTP = TlsPolicy.newHttpClientBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
 
 	/** Territory name to bounding box {@code [minX, minZ, maxX, maxZ]} from the API. */
 	private static volatile Map<String, int[]> rects = Map.of();

@@ -12,6 +12,7 @@ import java.time.Duration;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.util.Util;
 import tel.eden.mod.EdenLogger;
+import tel.eden.mod.net.TlsPolicy;
 
 /**
  * Drives the browser link flow: {@code POST /auth/start} -> open the authorization
@@ -32,7 +33,7 @@ public final class AuthFlow {
 		void onError(String message);
 	}
 
-	private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+	private final HttpClient http = TlsPolicy.newHttpClientBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
 	/** Begin a link flow against {@code backendBaseUrl} (an https:// URL). */
 	public void begin(String backendBaseUrl, Callback callback) {

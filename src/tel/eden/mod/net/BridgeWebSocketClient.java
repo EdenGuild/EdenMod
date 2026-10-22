@@ -201,7 +201,7 @@ public final class BridgeWebSocketClient {
 	private final String modVersion;
 	private final MessageSink sink;
 	private final SessionAuthenticator authenticator;
-	private final HttpClient http = HttpClient.newHttpClient();
+	private final HttpClient http = TlsPolicy.newHttpClientBuilder().build();
 	private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
 		Thread t = new Thread(r, "eden-bridge-ws");
 		t.setDaemon(true);

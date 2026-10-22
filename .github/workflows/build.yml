@@ -25,19 +25,66 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      # Everything the Gradle build fetches from the network: the Gradle distribution (services.gradle.org),
+      # plugins and libraries (Fabric, Maven Central, Modrinth and Terraformers mavens) and the Minecraft
+      # jars, libraries and mappings that Loom pulls from Mojang. Verified: with these restored (plus the
+      # Spotless cache below), the full build - format check, compile, tests, remap - succeeds with no
+      # network at all. The key includes gradle.properties, which holds the Minecraft/Fabric/Loom versions
+      # (and mod_version, so a release bump costs one fresh upload); restore-keys falls back to the newest
+      # older entry so a version bump still starts from a warm cache. Saved only after a green run.
+      - name: Cache Gradle downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/wrapper/dists
+            ~/.gradle/caches/modules-2
+            ~/.gradle/caches/fabric-loom
+            ~/.gradle/caches/jars-9
+          key: gradle-${{ hashFiles('gradle.properties', 'build.gradle', 'settings.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-
+
+      # Spotless' Eclipse formatter fetches p2 metadata from download.eclipse.org on every clean runner,
+      # and spotlessApply also runs before compileJava, so when that server is down (it was, Oct 2026)
+      # every step below fails. The metadata is ~0.5 MB; the JDT jars themselves come from Maven Central.
+      # The key tracks the Spotless/Eclipse config; restore-keys falls back to any older entry, so a
+      # config change never leaves the job without a cache. Saved only after a green run.
+      - name: Cache Spotless Eclipse p2 metadata
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/dev/equo
+          key: spotless-p2-${{ hashFiles('build.gradle', 'eclipse-formatter.xml') }}
+          restore-keys: |
+            spotless-p2-
+
+      # If, and only if, the formatter cannot be *downloaded* (Eclipse outage and no cached copy), skip
+      # Spotless for the rest of this run instead of blocking the build. A genuine formatting violation
+      # fails differently and still fails the job. Formatting is also enforced locally (pre-commit hook and
+      # spotlessApply on every compile), so a skipped CI check is a warning, not a hole. Self-healing:
+      # once Eclipse is reachable again the check simply runs as normal.
       - name: Check formatting
-        run: ./gradlew spotlessCheck --no-daemon
+        shell: bash
+        run: |
+          set +e
+          ./gradlew spotlessCheck --no-daemon 2>&1 | tee "$RUNNER_TEMP/spotless.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ] && grep -q "Failed to load eclipse jdt formatter" "$RUNNER_TEMP/spotless.log"; then
+            echo "::warning title=Spotless skipped::The Eclipse formatter could not be downloaded (download.eclipse.org unavailable, no cached copy). Formatting was NOT checked in CI this run."
+            echo "SKIP_SPOTLESS=-x spotlessApply -x spotlessCheck" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          exit "$status"
 
       - name: Run tests
-        run: ./gradlew test --no-daemon --stacktrace
+        run: ./gradlew test $SKIP_SPOTLESS --no-daemon --stacktrace
 
       - name: Check Fulcio cert freshness
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./gradlew checkFulcioCert --no-daemon
+        run: ./gradlew checkFulcioCert $SKIP_SPOTLESS --no-daemon
 
       - name: Build
-        run: ./gradlew build --no-daemon --stacktrace
+        run: ./gradlew build $SKIP_SPOTLESS --no-daemon --stacktrace
 
       # The remapped mod jar, excluding the -sources jar.
       - name: Stage release jar

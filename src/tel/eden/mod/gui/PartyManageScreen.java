@@ -17,6 +17,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.net.PartyInfo;
+import tel.eden.mod.net.TlsPolicy;
 
 public final class PartyManageScreen extends EdenReferenceScreen {
 	private static final int BASE_PANEL_WIDTH = 360;
@@ -305,7 +306,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		if (!member.matches("[A-Za-z0-9_]{1,16}"))
 			return;
 		try {
-			java.net.URLConnection conn = new java.net.URL("https://minotar.net/helm/" + member + "/12.png").openConnection();
+			java.net.URLConnection conn = TlsPolicy.open(new java.net.URL("https://minotar.net/helm/" + member + "/12.png"));
 			conn.setConnectTimeout(5_000);
 			conn.setReadTimeout(5_000);
 			try (java.io.InputStream stream = conn.getInputStream()) {

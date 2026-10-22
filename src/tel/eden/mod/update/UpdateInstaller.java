@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Locale;
 import net.fabricmc.loader.api.FabricLoader;
 import tel.eden.mod.EdenLogger;
+import tel.eden.mod.net.TlsPolicy;
 
 /**
  * Downloads a newer EdenMod jar and swaps it in when the game closes.
@@ -61,7 +62,7 @@ public final class UpdateInstaller {
 	/** GitHub's Fulcio instance — provides the intermediate cert chain in PEM format. */
 	private static final String FULCIO_TRUST_BUNDLE_URL = "https://fulcio.githubapp.com/api/v2/trustBundle";
 
-	private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
+	private final HttpClient http = TlsPolicy.newHttpClientBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
 
 	/**
 	 * The SHA-256 hex of the running jar when boot attestation failed, or {@code null} if

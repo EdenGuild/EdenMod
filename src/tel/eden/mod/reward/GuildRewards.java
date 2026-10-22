@@ -49,6 +49,7 @@ import tel.eden.mod.chat.GuildReward;
 import tel.eden.mod.chat.PlayerNameResolver;
 import tel.eden.mod.guild.BackgroundContainerSession;
 import tel.eden.mod.guild.GuildLogEvent;
+import tel.eden.mod.net.TlsPolicy;
 
 /**
  * Gifts guild reward items (aspects/tomes/emeralds) to members by driving the
@@ -495,7 +496,7 @@ public final class GuildRewards {
 		LOGGER.info("Gift: rewards-slot diagnostic ({}) — item='{}' empty={} lore={}", reason, stack.getHoverName().getString(), stack.isEmpty(), lines);
 	}
 
-	private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+	private final HttpClient http = TlsPolicy.newHttpClientBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 	private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
 		Thread t = new Thread(r, "eden-guild-rewards");
 		t.setDaemon(true);

@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.util.Optional;
 import net.fabricmc.loader.api.FabricLoader;
 import tel.eden.mod.EdenLogger;
+import tel.eden.mod.net.TlsPolicy;
 
 /**
  * Checks the EdenMod GitHub repo for a release newer than the installed version.
@@ -26,7 +27,7 @@ public final class UpdateChecker {
 	private static final String LATEST_RELEASE_API = "https://api.github.com/repos/EdenGuild/EdenMod/releases/latest";
 	private static final int HTTP_OK = 200;
 
-	private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
+	private final HttpClient http = TlsPolicy.newHttpClientBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
 
 	/**
 	 * Days until the embedded Fulcio root cert expires. Negative when already expired.
