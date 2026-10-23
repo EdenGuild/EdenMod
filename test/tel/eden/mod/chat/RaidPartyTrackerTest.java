@@ -173,4 +173,14 @@ class RaidPartyTrackerTest {
 
 		assertEquals(List.of("Ally"), RaidPartyTracker.extraPlayers(List.of("alice", "Bob", "Carol")));
 	}
+
+	@Test
+	void livePartyFillsAPartialTallyAheadOfSightings() {
+		// The tally only caught one of the two allies; Wynntils knows the whole party.
+		RaidPartyTracker.recordSightingForTesting("HerrPopcorn", 30);
+		RaidPartyTracker.recordSightingForTesting("StandingNpc", 40);
+		RaidPartyTracker.setLivePartyForTesting(List.of("night03", "Fisik", "HerrPopcorn", "OtherAlly"));
+
+		assertEquals(List.of("HerrPopcorn", "OtherAlly"), RaidPartyTracker.extraPlayers(List.of("night03", "Fisik")));
+	}
 }

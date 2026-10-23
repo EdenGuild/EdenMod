@@ -33,16 +33,14 @@ import tel.eden.mod.war.ScoreboardCapture;
  * allies, and {@code 4 - named} is exactly how many are missing. Their names appear nowhere
  * in chat.
  *
- * <p>They are recovered by proximity rather than by reading the sidebar, the same way war
- * attendance is collected: while a raid is running, the players loaded around the client are
- * sampled periodically and their appearances counted. On completion the announced party is
- * subtracted from that tally and the most-seen remainder fills the gap.
- *
- * <p>Proximity is used because it is the only source that yields <em>account</em> names. The
- * sidebar shows nicknames, and nothing on those rows maps a nickname back to the account
- * behind it. A player entity carries a game profile, and that profile is the real account —
- * a nickname is a display layer painted over it. Reading names off entities means there is
- * no nickname to undo.
+ * <p>They are recovered in two steps. First the party itself, which is authoritative because
+ * nobody can join or leave mid-raid: the Wynntils party captured during the raid and read
+ * again at completion, or, without Wynntils, a hidden {@code /party list} (real account names,
+ * never nicknames). Only if that is still short of the gap does proximity fill in, the same
+ * way war attendance is collected: while a raid is running, the players loaded around the
+ * client are sampled periodically and their appearances counted, and the most-seen remainder
+ * goes after the party. A player entity carries a game profile, the real account under any
+ * nickname, so proximity also yields account names.
  *
  * <p>Proximity is a fair proxy here in a way it would not be in the open world: a raid is an
  * instance containing only its own party. Counting appearances rather than taking a single
@@ -276,49 +274,51 @@ public final class RaidPartyTracker {
 	}
 
 	/**
-	 * Candidates for the players the completion did not name, most seen first.
+	 * Candidates for the players the completion did not name: the party first, then the
+	 * most-seen nearby players if the party is still short of the gap.
 	 *
-	 * <p>This is a shortlist, not an answer: it is everyone present long enough to have run
-	 * the raid, minus those the announcement already named. The backend decides which of
-	 * them are really allies and caps the party at {@link #RAID_PARTY_SIZE}, because that
-	 * needs the guild member list and the player API, neither of which the client has.
+	 * <p>This is a shortlist, not an answer. The backend decides which of them are really
+	 * allies and caps the party at {@link #RAID_PARTY_SIZE}, because that needs the guild
+	 * member list and the player API, neither of which the client has.
 	 *
-	 * <p>When the tally has nothing (this client relogged mid-raid, or never saw the raid
-	 * sidebar), falls back to the current Wynntils party: the party cannot change until the
-	 * raid is completed and the completion line follows within a couple of seconds, so it is
-	 * still the raid's party. Empty when the completion already names a full party or neither
-	 * source has anyone else. Comparison with the announced party is case-insensitive so a
-	 * casing difference cannot duplicate a player.
+	 * <p>The party is the roster captured during the raid plus the live Wynntils party now;
+	 * the live read covers a client that relogged mid-raid or never saw the raid sidebar, and
+	 * is still the raid's party because it cannot change until the raid is completed. Empty
+	 * when the completion already names a full party. Comparison with the announced party is
+	 * case-insensitive so a casing difference cannot duplicate a player.
 	 */
 	public static List<String> extraPlayers(List<String> announcedParty) {
 		if (announcedParty.size() >= RAID_PARTY_SIZE) {
 			return List.of();
 		}
+		int missing = RAID_PARTY_SIZE - announcedParty.size();
 		Set<String> seen = announcedParty.stream().map(name -> name.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
 		List<String> result = new ArrayList<>();
 		synchronized (LOCK) {
 			for (String member : partyMembers) {
-				if (seen.add(member.toLowerCase(Locale.ROOT))) {
-					result.add(member);
-				}
+				addUnseen(member, seen, result);
 			}
-			int missing = RAID_PARTY_SIZE - announcedParty.size();
+			for (String member : liveParty) {
+				addUnseen(member, seen, result);
+			}
 			if (result.size() < missing) {
-				sightings.entrySet().stream().filter(entry -> entry.getValue() >= MIN_SIGHTINGS).filter(entry -> !seen.contains(entry.getKey().toLowerCase(Locale.ROOT))).sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).limit(MAX_CANDIDATES - result.size()).forEach(entry -> {
-					seen.add(entry.getKey().toLowerCase(Locale.ROOT));
-					result.add(entry.getKey());
+				sightings.entrySet().stream().filter(entry -> entry.getValue() >= MIN_SIGHTINGS).sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).forEach(entry -> {
+					if (result.size() < MAX_CANDIDATES) {
+						addUnseen(entry.getKey(), seen, result);
+					}
 				});
 			}
-			if (result.isEmpty()) {
-				for (String member : liveParty) {
-					if (seen.add(member.toLowerCase(Locale.ROOT))) {
-						result.add(member);
-					}
-				}
-				LOGGER.info("[RaidParty] tally had no extras for {} {}; live Wynntils party {} gives {}", announcedParty, tallySummary(), liveParty, result);
+			if (result.size() < missing) {
+				LOGGER.info("[RaidParty] only {} of {} missing for {}: live={} {}", result.size(), missing, announcedParty, liveParty, tallySummary());
 			}
 		}
 		return Collections.unmodifiableList(result);
+	}
+
+	private static void addUnseen(String name, Set<String> seen, List<String> result) {
+		if (seen.add(name.toLowerCase(Locale.ROOT))) {
+			result.add(name);
+		}
 	}
 
 	/** Drop the tally once a completion has consumed it, or on disconnect. */
