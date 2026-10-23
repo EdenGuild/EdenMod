@@ -21,6 +21,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemLore;
 import org.lwjgl.glfw.GLFW;
+import tel.eden.mod.EdenLogger;
 import tel.eden.mod.config.BridgeConfig;
 
 /**
@@ -37,6 +38,7 @@ public final class RaidGambitSafety {
 	public static final int CONTAINER_SLOTS = 36;
 	public static final int TOTAL_SLOTS = 72;
 
+	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final Identifier LOGO_TEXTURE = Identifier.parse("edenmod:icon.png");
 	private static final int LOGO_SRC_SIZE = 256;
 	private static List<String> activePopupMessages = null;
@@ -265,7 +267,32 @@ public final class RaidGambitSafety {
 		}
 		int enabled = countEnabledGambits(menu);
 		boolean isGuildRaid = isGuildRaidAvailable(menu);
-		return getActiveBlockReasons(slot.index, true, false, enabled, isGuildRaid, clickType, isShiftKeyDown(), config);
+		List<String> reasons = getActiveBlockReasons(slot.index, true, false, enabled, isGuildRaid, clickType, isShiftKeyDown(), config);
+		if (!reasons.isEmpty()) {
+			logBlock(menu, slot, enabled, config.raidGambitMinimum, reasons);
+		}
+		return reasons;
+	}
+
+	/**
+	 * Record what the blocker saw, since reports of it blocking with gambits enabled could not
+	 * be reproduced from a container dump. Each gambit's lore is escaped so hidden characters show.
+	 */
+	private static void logBlock(AbstractContainerMenu menu, Slot slot, int enabled, int minimum, List<String> reasons) {
+		StringBuilder gambits = new StringBuilder();
+		for (int i = 0; i < Math.min(CONTAINER_SLOTS, menu.slots.size()); i++) {
+			ItemStack stack = menu.getSlot(i).getItem();
+			if (isGambitItem(stack)) {
+				gambits.append("\n  slot ").append(i).append(isGambitEnabled(stack) ? " counted " : " not counted ").append(escape(getLoreLines(stack).toString()));
+			}
+		}
+		LOGGER.info("[GambitSafety] blocked ready-up at slot {} (menu {} slots, {} enabled, minimum {}): {}{}", slot.index, menu.slots.size(), enabled, minimum, reasons, gambits);
+	}
+
+	private static String escape(String text) {
+		StringBuilder out = new StringBuilder(text.length());
+		text.codePoints().forEach(cp -> out.append(cp >= 0x20 && cp <= 0x7E || cp == '§' ? Character.toString(cp) : String.format("\\u%04X", cp)));
+		return out.toString();
 	}
 
 	/** Evaluates whether a ready click should be blocked based on active gambits and settings. */
