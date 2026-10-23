@@ -259,7 +259,8 @@ public final class DiscordChatFormatter {
 		// (see pillLabel) — Minecraft's bold rendering does a synthetic pixel-shift
 		// on the glyph bitmap that corrupts non-standard glyphs like these, so bold
 		// only ever applies to the plain-text content segment, never the label.
-		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(rgb))).append(Component.literal(" " + content).withStyle(style -> style.withColor(rgb).withBold(bold)));
+		// Emotes are swapped in before wrapping, so a :shortcode: can't be split across lines.
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(rgb))).append(processEmotes(Component.literal(" " + content).withStyle(style -> style.withColor(rgb).withBold(bold))));
 		return withGuildPrefix(body);
 	}
 
