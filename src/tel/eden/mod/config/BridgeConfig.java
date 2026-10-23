@@ -55,6 +55,9 @@ public final class BridgeConfig {
 	 */
 	public boolean announceSelfPresence = true;
 
+	/** Play a short chime when Eden mail arrives. On by default. */
+	public boolean mailSound = true;
+
 	/**
 	 * Whether open/full raid parties are auto-announced in chat with a clickable
 	 * {@code [JOIN #id]} feed. When false, parties are only shown on demand via

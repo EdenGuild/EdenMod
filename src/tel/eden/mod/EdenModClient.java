@@ -114,7 +114,9 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
@@ -1219,6 +1221,12 @@ public final class EdenModClient implements ClientModInitializer {
 							Component title = Component.literal(fresh.size() == 1 ? "New Eden mail" : fresh.size() + " new Eden mails");
 							Component body = Component.literal("From " + String.join(", ", fresh.stream().map(MailEntry::from).distinct().toList()) + " — see chat");
 							SystemToast.addOrUpdate(mc.getToastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION, title, body);
+							if (config.mailSound) {
+								// Envelope rustle, then a two-note "ding-ding": vanilla sounds no Wynncraft cue uses.
+								mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.BOOK_PAGE_TURN, 1.0f));
+								mc.getSoundManager().playDelayed(SimpleSoundInstance.forUI(SoundEvents.NOTE_BLOCK_CHIME, 1.0f), 4);
+								mc.getSoundManager().playDelayed(SimpleSoundInstance.forUI(SoundEvents.NOTE_BLOCK_CHIME, 1.5f), 8);
+							}
 						}
 						BridgeWebSocketClient current = socket;
 						if (current != null) {
