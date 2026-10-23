@@ -172,6 +172,20 @@ class RaidGambitSafetyTest {
 	}
 
 	@Test
+	void gambitOnTheCursorCountsByTheToggleItIsMaking() {
+		// Clicking a gambit lifts it onto the cursor until the server puts it back.
+		ItemStack[] items = new ItemStack[36];
+		items[1] = createItem("Sadist's Gambit", "§bRewards for Enabling", "§eClick to Disable");
+		AbstractContainerMenu menu = createMenu(items);
+
+		menu.setCarried(createItem("Anemic's Gambit", "§bRewards for Enabling", "§aClick to Enable"));
+		assertEquals(2, RaidGambitSafety.countEnabledGambits(menu), "being enabled");
+
+		menu.setCarried(createItem("Anemic's Gambit", "§bRewards for Enabling", "§eClick to Disable"));
+		assertEquals(1, RaidGambitSafety.countEnabledGambits(menu), "being disabled");
+	}
+
+	@Test
 	void neverBlocksInUnrelatedMenus() {
 		boolean blocked = RaidGambitSafety.evaluateSafetyBlock(33, false, false, 0, ClickType.PICKUP, false, config);
 		assertFalse(blocked, "Must not block outside raid menus");
