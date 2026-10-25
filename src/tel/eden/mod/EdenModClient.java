@@ -275,6 +275,9 @@ public final class EdenModClient implements ClientModInitializer {
 	private volatile String giveawayError;
 	private final java.util.concurrent.atomic.AtomicInteger giveawayGeneration = new java.util.concurrent.atomic.AtomicInteger();
 	private volatile LongEventState knownLongEventState;
+	// Last long-event error (a refused reroll, a failed request), shown briefly on the Event screen.
+	private volatile String longEventError = "";
+	private volatile long longEventErrorAtMs;
 	private final java.util.concurrent.atomic.AtomicInteger longEventGeneration = new java.util.concurrent.atomic.AtomicInteger();
 	// GitHub update check: run once per game session; the prompt offers a one-click
 	// download (applied on game close) and a link to the release page.
@@ -515,6 +518,11 @@ public final class EdenModClient implements ClientModInitializer {
 	/** Latest long-event mission state from the backend, or {@code null} before first reply. */
 	public LongEventState knownLongEventState() {
 		return knownLongEventState;
+	}
+
+	/** The last long-event error if it arrived in the past 5 seconds, else {@code ""}. */
+	public String recentLongEventError() {
+		return System.currentTimeMillis() - longEventErrorAtMs < 5_000L ? longEventError : "";
 	}
 
 	/** Bumped on every long-event state snapshot; 0 means none has arrived yet. */
@@ -1245,7 +1253,7 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onPillMessage(String label, String content, String colorHex, boolean bold) {
+				public void onPillMessage(String label, String content, String colorHex, boolean bold, boolean own) {
 					if (GAMES_PILL_LABEL.equals(label) && config.gameDisplayMode != BridgeConfig.GameDisplayMode.ALL) {
 						// React Only still shows your own coinflip/diceroll result; every
 						// other "eden"-labelled message (streaks, gambit resets, reward
@@ -1268,15 +1276,12 @@ public final class EdenModClient implements ClientModInitializer {
 					}
 					Integer finalColorRgb = colorRgb;
 					if ("EVENT".equals(label)) {
-						display(() -> {
-							String self = playerName();
-							boolean isOwn = isOwnEventAnnouncement(content, self);
-							if (!isOwn && !config.eventAnnouncements) {
-								return null;
-							}
-							String finalContent = isOwn ? formatOwnEventAnnouncement(content, self) : content;
-							return DiscordChatFormatter.pill(label, finalContent, finalColorRgb, bold);
-						});
+						// The bot flags your own completions (own), so this never depends on name matching.
+						if (!own && !config.eventAnnouncements) {
+							return;
+						}
+						String finalContent = own ? formatOwnEventAnnouncement(content) : content;
+						display(() -> DiscordChatFormatter.pill(label, finalContent, finalColorRgb, bold));
 						return;
 					}
 					display(() -> DiscordChatFormatter.pill(label, content, finalColorRgb, bold));
@@ -1330,6 +1335,8 @@ public final class EdenModClient implements ClientModInitializer {
 				@Override
 				public void onLongEventState(LongEventState state, boolean hasSnapshot) {
 					if (state.error() != null && !state.error().isEmpty()) {
+						longEventError = state.error();
+						longEventErrorAtMs = System.currentTimeMillis();
 						display(() -> DiscordChatFormatter.systemLine(state.error(), ChatFormatting.RED));
 					}
 					if (hasSnapshot || knownLongEventState == null) {
@@ -1829,22 +1836,14 @@ public final class EdenModClient implements ClientModInitializer {
 		return name != null && content.contains(name);
 	}
 
-	public static boolean isOwnEventAnnouncement(String content, String self) {
-		if (content == null || self == null || self.isBlank()) {
-			return false;
-		}
-		String pattern = "^\\S+\\s+" + java.util.regex.Pattern.quote(self) + "\\s+(completed|unlocked)\\b";
-		return java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE).matcher(content).find();
-	}
+	private static final java.util.regex.Pattern OWN_EVENT_LINE = java.util.regex.Pattern.compile("\\A(\\S+\\s+)\\S+\\s+(completed|unlocked)\\b");
 
-	public static String formatOwnEventAnnouncement(String content, String self) {
-		if (content == null || self == null || self.isBlank()) {
-			return content;
+	/** Reword your own event line: "⭐ Name completed …" becomes "⭐ You've completed …". */
+	public static String formatOwnEventAnnouncement(String content) {
+		if (content == null) {
+			return null;
 		}
-		String regexCompleted = "(?i)(\\A\\S+\\s+)" + java.util.regex.Pattern.quote(self) + "\\s+completed\\b";
-		String replaced = content.replaceFirst(regexCompleted, "$1You've completed");
-		String regexUnlocked = "(?i)(\\A\\S+\\s+)" + java.util.regex.Pattern.quote(self) + "\\s+unlocked\\b";
-		return replaced.replaceFirst(regexUnlocked, "$1You've unlocked");
+		return OWN_EVENT_LINE.matcher(content).replaceFirst("$1You've $2");
 	}
 
 	private int openOverviewGui(FabricClientCommandSource source) {
@@ -2743,6 +2742,8 @@ public final class EdenModClient implements ClientModInitializer {
 		eventRewardsPendingId.set(0);
 		knownLongEventState = null;
 		longEventGeneration.set(0);
+		longEventError = "";
+		longEventErrorAtMs = 0L;
 		// Before the socket goes: an outstanding deduct must not outlive the session that
 		// made it, or it resurfaces at the next connect naming a player from another
 		// server — or, after an account switch, another guild.

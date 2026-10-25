@@ -132,9 +132,10 @@ public final class BridgeWebSocketClient {
 		 * announcements): a pill labelled {@code label}, then {@code content}.
 		 * {@code colorHex} is an optional {@code "RRGGBB"} override; empty means the
 		 * default gold. {@code bold} makes a message that needs to stand out further
-		 * than color alone (e.g. the storage-nearly-full warning).
+		 * than color alone (e.g. the storage-nearly-full warning). {@code own} is the
+		 * bot's {@code self} flag: the line is about this player (their own event win).
 		 */
-		void onPillMessage(String label, String content, String colorHex, boolean bold);
+		void onPillMessage(String label, String content, String colorHex, boolean bold, boolean own);
 
 		/**
 		 * Offline mail the bot held for this player ({@code mailDelivery}), sent when the
@@ -1394,7 +1395,7 @@ public final class BridgeWebSocketClient {
 				case "partyListReply" -> sink.onPartyList(parsePartyList(obj), get(obj, "color"));
 				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"), get(obj, "color"));
 				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
-				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"));
+				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"), getBool(obj, "self"));
 				case "mailDelivery" -> sink.onMailDelivery(parseMail(obj));
 				case "warCountsReply" -> sink.onWarCounts(getInt(obj, "days", 7), parseWarCounts(obj), get(obj, "requester"), get(obj, "color"));
 				case "allyActivityReply" -> sink.onAllyActivity(parseAllyActivity(obj));
@@ -1405,7 +1406,10 @@ public final class BridgeWebSocketClient {
 				case "tccMapPos" -> sink.onTccMapPos(get(obj, "sender"), get(obj, "senderUuid"), getDouble(obj, "x", 0.0), getDouble(obj, "y", 0.0), getDouble(obj, "z", 0.0), getFloat(obj, "yaw", 0.0f), getBool(obj, "isWings"));
 				case "tccGolemDefeated" -> sink.onTccGolemDefeated(get(obj, "sender"), get(obj, "golemId"));
 				case "tccExitReached" -> sink.onTccExitReached(get(obj, "sender"), get(obj, "path"), getDouble(obj, "x", 0.0), getDouble(obj, "z", 0.0));
-				case "longEventState" -> sink.onLongEventState(parseLongEventState(obj), obj.has("active") || obj.has("slots"));
+				case "longEventState" -> {
+					LongEventState state = parseLongEventState(obj);
+					sink.onLongEventState(state, state.isSnapshot());
+				}
 				case "longEventRewards" -> sink.onLongEventRewards(getInt(obj, "pendingLe", 0), get(obj, "error"));
 				case "authChallenge" -> handleAuthChallenge(get(obj, "serverId"));
 				case "authOk" -> {

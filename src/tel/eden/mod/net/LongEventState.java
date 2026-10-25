@@ -42,6 +42,14 @@ public record LongEventState(boolean active, long endsAtMs, int pendingLe, int r
 		}
 	}
 
+	/**
+	 * Whether this reply carries the player's real state. The bot's error fallback
+	 * ({@code active=false}, no slots, an error) doesn't, so it must not replace a good snapshot.
+	 */
+	public boolean isSnapshot() {
+		return error.isEmpty() || !slots.isEmpty();
+	}
+
 	/** Find a slot by its identifier ({@code "daily"}, {@code "special"}, {@code "repeatable"}, {@code "repeatable2"}). */
 	public Slot findSlot(String slotName) {
 		for (Slot s : slots) {

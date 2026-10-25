@@ -162,7 +162,13 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		super.render(g, scaledMouseX, scaledMouseY, delta);
 
 		// Header
-		g.drawCenteredString(this.font, "Event", layout.centerX(), layout.y(10), 0xFFFFFFFF);
+		// A refused reroll or failed request replaces the title for a few seconds; chat is hidden here.
+		String recentError = mod.recentLongEventError();
+		if (recentError.isEmpty()) {
+			g.drawCenteredString(this.font, "Event", layout.centerX(), layout.y(10), 0xFFFFFFFF);
+		} else {
+			drawFittedCenteredString(g, recentError, layout.centerX(), layout.y(10), layout.w(250), 0xFFFF5555);
+		}
 		if (state != null && state.active()) {
 			String pendingText = "Pending: " + state.pendingLe() + " LE";
 			g.drawString(this.font, pendingText, layout.x(12), layout.y(10), 0xFFFFD24A);
@@ -513,10 +519,10 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				lines.add(Component.empty());
 				if (slot.canBuyReroll()) {
 					lines.add(Component.literal("Shift-Click to buy extra reroll").withStyle(ChatFormatting.AQUA));
-					lines.add(Component.literal("Cost: " + cost + " Trivia Points (You have " + pts + ")").withStyle(ChatFormatting.DARK_AQUA));
+					lines.add(Component.literal("Cost: " + cost + " Points (You have " + pts + ")").withStyle(ChatFormatting.DARK_AQUA));
 				} else {
 					lines.add(Component.literal("Shift-Click to buy extra reroll").withStyle(ChatFormatting.DARK_GRAY));
-					lines.add(Component.literal("Requires " + cost + " Trivia Points (You have " + pts + ")").withStyle(ChatFormatting.RED));
+					lines.add(Component.literal("Requires " + cost + " Points (You have " + pts + ")").withStyle(ChatFormatting.RED));
 				}
 			}
 		}

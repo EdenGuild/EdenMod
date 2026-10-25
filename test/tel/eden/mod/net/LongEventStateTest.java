@@ -62,6 +62,22 @@ class LongEventStateTest {
 	}
 
 	@Test
+	void errorFallbackIsNotASnapshot() {
+		LongEventState.Slot daily = new LongEventState.Slot("daily", 100L, 1, "WTP", "WTP 1", 0, 3, 10, false, true, 0L, "", "");
+		// The bot's fallback after an internal error: inactive, no slots, an error.
+		assertFalse(new LongEventState(false, 0L, 0, "Something went wrong - try again.", List.of(), List.of()).isSnapshot());
+		// A refused reroll still carries the real slots, and a quiet "no event" reply has no error.
+		assertTrue(new LongEventState(true, 1000L, 0, "Daily reroll already used today.", List.of(daily), List.of()).isSnapshot());
+		assertTrue(new LongEventState(false, 0L, 0, "", List.of(), List.of()).isSnapshot());
+	}
+
+	@Test
+	void parsedFallbackKeepsTheLastGoodState() {
+		com.google.gson.JsonObject fallback = com.google.gson.JsonParser.parseString("{\"type\":\"longEventState\",\"active\":false,\"endsAtMs\":0,\"pendingLe\":0,\"error\":\"Something went wrong - try again.\",\"slots\":[],\"masters\":[]}").getAsJsonObject();
+		assertFalse(BridgeWebSocketClient.parseLongEventState(fallback).isSnapshot());
+	}
+
+	@Test
 	void slotPurchasedRerollState() {
 		LongEventState.Slot daily = new LongEventState.Slot("daily", 100L, 1, "WTP", "WTP 1", 0, 3, 10, false, false, true, 5000L, "", "");
 		LongEventState state = new LongEventState(true, 1000L, 0, 5, 8, "", List.of(daily), List.of());
