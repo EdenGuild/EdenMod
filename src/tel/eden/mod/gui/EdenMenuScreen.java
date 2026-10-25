@@ -60,18 +60,11 @@ public class EdenMenuScreen extends Screen {
 		}).bounds(metrics.buttonX, metrics.startY + metrics.buttonPitch, metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Manage Party"), button -> {
-			String ign = EdenModClient.instance().playerName();
-			tel.eden.mod.net.PartyInfo myParty = null;
-			for (tel.eden.mod.net.PartyInfo p : EdenModClient.instance().knownParties()) {
-				if (ign != null && p.host().equalsIgnoreCase(ign)) {
-					myParty = p;
-					break;
-				}
-			}
+			tel.eden.mod.net.PartyInfo myParty = EdenModClient.instance() != null ? EdenModClient.instance().activeParty() : null;
 			if (myParty != null) {
 				this.minecraft.setScreen(new PartyManageScreen(this, EdenModClient.instance(), myParty));
-			} else {
-				this.minecraft.player.displayClientMessage(Component.literal("You are not hosting a party!").withStyle(net.minecraft.ChatFormatting.RED), false);
+			} else if (this.minecraft.player != null) {
+				this.minecraft.player.displayClientMessage(Component.literal("You are not in an active party!").withStyle(net.minecraft.ChatFormatting.RED), false);
 			}
 		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 2), metrics.buttonWidth, metrics.buttonHeight).build());
 

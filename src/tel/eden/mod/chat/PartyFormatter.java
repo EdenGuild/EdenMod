@@ -22,7 +22,15 @@ public final class PartyFormatter {
 
 	/** "<host> wants to raid <raid> (n/max)  [JOIN #id]" with the open note, if any. */
 	public static Component partyOpen(PartyInfo party) {
-		MutableComponent body = Component.empty().append(Component.literal(party.host()).withStyle(ChatFormatting.AQUA)).append(Component.literal(" wants to raid ").withStyle(ChatFormatting.GREEN)).append(Component.literal(party.raid()).withStyle(ChatFormatting.YELLOW)).append(Component.literal(" (" + party.size() + "/" + party.max() + ") ").withStyle(ChatFormatting.GRAY)).append(joinButton(party.id()));
+		MutableComponent body = Component.empty();
+		if (party.ally()) {
+			body.append(Component.literal("[Ally] ").withStyle(ChatFormatting.LIGHT_PURPLE));
+		}
+		body.append(Component.literal(party.host()).withStyle(ChatFormatting.AQUA)).append(Component.literal(" wants to raid ").withStyle(ChatFormatting.GREEN)).append(Component.literal(party.raid()).withStyle(ChatFormatting.YELLOW)).append(Component.literal(" (" + party.size() + "/" + party.max() + ") ").withStyle(ChatFormatting.GRAY));
+		if (party.world() != null && !party.world().isBlank()) {
+			body.append(Component.literal("[" + party.world() + "] ").withStyle(ChatFormatting.DARK_AQUA));
+		}
+		body.append(joinButton(party.id()));
 		if (!party.note().isBlank()) {
 			body.append(Component.literal(" — ").withStyle(ChatFormatting.GRAY)).append(Component.literal("\"" + party.note() + "\"").withStyle(Style.EMPTY.withColor(ChatFormatting.WHITE).withItalic(true)));
 		}
@@ -43,7 +51,12 @@ public final class PartyFormatter {
 
 	/** "Party #id (<raid>) is full!  [Create party]" (the button shows for the host). */
 	public static Component partyFull(PartyInfo party) {
-		MutableComponent body = Component.empty().append(Component.literal("Party #" + party.id() + " ").withStyle(ChatFormatting.GOLD)).append(Component.literal("(" + party.raid() + ") ").withStyle(ChatFormatting.YELLOW)).append(Component.literal("is full! ").withStyle(ChatFormatting.GREEN)).append(Component.literal(String.join(", ", party.members())).withStyle(ChatFormatting.GRAY));
+		MutableComponent body = Component.empty();
+		if (party.ally()) {
+			body.append(Component.literal("[Ally] ").withStyle(ChatFormatting.LIGHT_PURPLE));
+		}
+		List<String> realMembers = party.members().stream().filter(m -> !m.equals("*filled*")).toList();
+		body.append(Component.literal("Party #" + party.id() + " ").withStyle(ChatFormatting.GOLD)).append(Component.literal("(" + party.raid() + ") ").withStyle(ChatFormatting.YELLOW)).append(Component.literal("is full! ").withStyle(ChatFormatting.GREEN)).append(Component.literal(String.join(", ", realMembers)).withStyle(ChatFormatting.GRAY));
 		// Offer the host a one-click "make the in-game party" prompt.
 		String self = localName();
 		if (self != null && self.equalsIgnoreCase(party.host()) && !party.members().isEmpty()) {
@@ -54,7 +67,8 @@ public final class PartyFormatter {
 
 	/** Clickable that runs {@code /eden party makeingame <igns...>} to form the in-game party. */
 	private static Component createButton(PartyInfo party) {
-		Style style = Style.EMPTY.withColor(ChatFormatting.GOLD).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden party makeingame " + String.join(" ", party.members()))).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to create the in-game party and invite everyone")));
+		List<String> realMembers = party.members().stream().filter(m -> !m.equals("*filled*")).toList();
+		Style style = Style.EMPTY.withColor(ChatFormatting.GOLD).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden party makeingame " + String.join(" ", realMembers))).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to create the in-game party and invite everyone")));
 		return Component.literal("[Create party]").setStyle(style);
 	}
 
@@ -71,8 +85,16 @@ public final class PartyFormatter {
 		MutableComponent out = line(Component.literal("Open Eden parties (" + parties.size() + "):").withStyle(ChatFormatting.GREEN));
 		for (PartyInfo party : parties) {
 			out.append("\n");
+			if (party.ally()) {
+				out.append(Component.literal("[Ally] ").withStyle(ChatFormatting.LIGHT_PURPLE));
+			} else {
+				out.append(Component.literal("[Guild] ").withStyle(ChatFormatting.DARK_GREEN));
+			}
 			out.append(Component.literal("  " + party.raid() + " ").withStyle(ChatFormatting.YELLOW));
 			out.append(Component.literal(party.size() + "/" + party.max() + " | ").withStyle(ChatFormatting.GRAY));
+			if (party.world() != null && !party.world().isBlank()) {
+				out.append(Component.literal("[" + party.world() + "] ").withStyle(ChatFormatting.DARK_AQUA));
+			}
 			out.append(Component.literal(party.host() + " ").withStyle(ChatFormatting.AQUA));
 			out.append(joinButton(party.id()));
 			if (!party.note().isBlank()) {

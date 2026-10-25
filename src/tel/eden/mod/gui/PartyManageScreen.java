@@ -25,20 +25,23 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 
 	private final Screen parent;
 	private final EdenModClient mod;
-	private final PartyInfo party;
+	private PartyInfo party;
 
 	private int filledSlots;
 	private int maxSize;
 	private EditBox noteField;
+	private EditBox addPlayerField;
 
 	private Button btnPlayersMinus;
 	private Button btnPlayersPlus;
 	private Button btnMaxMinus;
 	private Button btnMaxPlus;
+	private Button btnOpenToAllies;
+	private Button btnAddPlayer;
 
 	private Identifier iconTarget;
-	private final Map<String, Identifier> headCache = new HashMap<>();
-	private final Set<String> headFetching = new HashSet<>();
+	private static final Map<String, Identifier> HEAD_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+	private static final Set<String> HEAD_FETCHING = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	private EdenPanelLayout layout;
 
 	public PartyManageScreen(Screen parent, EdenModClient mod, PartyInfo party) {
@@ -58,68 +61,190 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 	}
 
 	@Override
+	public void tick() {
+		super.tick();
+		if (mod != null) {
+			boolean found = false;
+			for (PartyInfo p : mod.knownParties()) {
+				if (p.id() == party.id()) {
+					found = true;
+					if (!p.equals(party)) {
+						this.party = p;
+						this.maxSize = p.max();
+						int fSlots = 0;
+						for (String m : p.members()) {
+							if (m.equals("*filled*"))
+								fSlots++;
+						}
+						this.filledSlots = fSlots;
+
+						String curNote = noteField != null ? noteField.getValue() : null;
+						boolean noteFocused = noteField != null && noteField.isFocused();
+						String curAdd = addPlayerField != null ? addPlayerField.getValue() : null;
+						boolean addFocused = addPlayerField != null && addPlayerField.isFocused();
+
+						rebuildWidgets();
+
+						if (noteField != null) {
+							if (noteFocused && curNote != null) {
+								noteField.setValue(curNote);
+								noteField.setFocused(true);
+							} else {
+								noteField.setValue(p.note());
+							}
+						}
+						if (addPlayerField != null && curAdd != null) {
+							addPlayerField.setValue(curAdd);
+							if (addFocused) {
+								addPlayerField.setFocused(true);
+							}
+						}
+					}
+					return;
+				}
+			}
+			if (!found && mod.socket() != null && mod.socket().isConnected()) {
+				onClose();
+			}
+		}
+	}
+
+	@Override
 	protected void init() {
 		updateReferenceSpace();
 		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 		int rightColX = layout.x(190);
 
-		btnMaxMinus = Button.builder(Component.literal("-"), b -> adjustMax(-1)).bounds(layout.x(245), layout.y(100), layout.w(20), layout.h(20)).build();
-		btnMaxPlus = Button.builder(Component.literal("+"), b -> adjustMax(1)).bounds(layout.x(295), layout.y(100), layout.w(20), layout.h(20)).build();
+		String self = mod != null ? mod.playerName() : null;
+		boolean isHost = self != null && party.host().equalsIgnoreCase(self);
+
+		// Max size adjusters
+		btnMaxMinus = Button.builder(Component.literal("-"), b -> adjustMax(-1)).bounds(layout.x(245), layout.y(106), layout.w(20), layout.h(18)).build();
+		btnMaxPlus = Button.builder(Component.literal("+"), b -> adjustMax(1)).bounds(layout.x(295), layout.y(106), layout.w(20), layout.h(18)).build();
+		btnMaxMinus.active = isHost && party.isCustomSize();
+		btnMaxPlus.active = isHost && party.isCustomSize();
 		this.addRenderableWidget(btnMaxMinus);
 		this.addRenderableWidget(btnMaxPlus);
 
-		btnPlayersMinus = Button.builder(Component.literal("-"), b -> adjustFilledSlots(-1)).bounds(layout.x(245), layout.y(124), layout.w(20), layout.h(20)).build();
-		btnPlayersPlus = Button.builder(Component.literal("+"), b -> adjustFilledSlots(1)).bounds(layout.x(295), layout.y(124), layout.w(20), layout.h(20)).build();
+		// Filled slots adjusters
+		btnPlayersMinus = Button.builder(Component.literal("-"), b -> adjustFilledSlots(-1)).bounds(layout.x(245), layout.y(128), layout.w(20), layout.h(18)).build();
+		btnPlayersPlus = Button.builder(Component.literal("+"), b -> adjustFilledSlots(1)).bounds(layout.x(295), layout.y(128), layout.w(20), layout.h(18)).build();
+		btnPlayersMinus.active = isHost;
+		btnPlayersPlus.active = isHost;
 		this.addRenderableWidget(btnPlayersMinus);
 		this.addRenderableWidget(btnPlayersPlus);
 
-		noteField = new EditBox(this.font, rightColX, layout.y(175), layout.w(160), layout.h(20), Component.literal("Party Note"));
+		// Open to Allies toggle button
+		btnOpenToAllies = Button.builder(Component.literal(party.ally() ? "§a[✔] Open to Allies" : "§7[ ] Open to Allies"), b -> onToggleAlly()).bounds(rightColX, layout.y(152), layout.w(160), layout.h(18)).build();
+		btnOpenToAllies.active = isHost;
+		this.addRenderableWidget(btnOpenToAllies);
+
+		// Note field
+		noteField = new EditBox(this.font, rightColX, layout.y(186), layout.w(160), layout.h(18), Component.literal("Party Note"));
 		noteField.setMaxLength(100);
 		noteField.setValue(party.note());
+		noteField.setEditable(isHost);
 		this.addRenderableWidget(noteField);
 
-		Button btnCreateInGame = Button.builder(Component.literal("Create In-game"), b -> {
-			mod.createInGameParty(party.members());
-			onClose();
-		}).bounds(rightColX, layout.y(220), layout.w(160), layout.h(20)).build();
-		Button btnUpdate = Button.builder(Component.literal("Update Party"), b -> onUpdate()).bounds(rightColX, layout.y(245), layout.w(160), layout.h(20)).build();
-		Button btnDisband = Button.builder(Component.literal("§cDisband Party"), b -> onDisband()).bounds(rightColX, layout.y(270), layout.w(160), layout.h(20)).build();
-		Button btnCancel = Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(rightColX, layout.y(295), layout.w(160), layout.h(20)).build();
+		if (isHost) {
+			Button btnCreateInGame = Button.builder(Component.literal("Create In-game"), b -> {
+				mod.createInGameParty(party.members());
+				onClose();
+			}).bounds(rightColX, layout.y(214), layout.w(160), layout.h(18)).build();
+			Button btnUpdate = Button.builder(Component.literal("Update Party"), b -> onUpdate()).bounds(rightColX, layout.y(236), layout.w(160), layout.h(18)).build();
+			Button btnDisband = Button.builder(Component.literal("§cDisband Party"), b -> onDisband()).bounds(rightColX, layout.y(258), layout.w(160), layout.h(18)).build();
+			Button btnCancel = Button.builder(Component.literal("Close"), b -> onClose()).bounds(rightColX, layout.y(280), layout.w(160), layout.h(18)).build();
 
-		this.addRenderableWidget(btnCreateInGame);
-		this.addRenderableWidget(btnUpdate);
-		this.addRenderableWidget(btnDisband);
-		this.addRenderableWidget(btnCancel);
+			this.addRenderableWidget(btnCreateInGame);
+			this.addRenderableWidget(btnUpdate);
+			this.addRenderableWidget(btnDisband);
+			this.addRenderableWidget(btnCancel);
+		} else {
+			Button btnLeave = Button.builder(Component.literal("§cLeave Party"), b -> onLeave()).bounds(rightColX, layout.y(258), layout.w(160), layout.h(18)).build();
+			Button btnCancel = Button.builder(Component.literal("Close"), b -> onClose()).bounds(rightColX, layout.y(280), layout.w(160), layout.h(18)).build();
 
+			this.addRenderableWidget(btnLeave);
+			this.addRenderableWidget(btnCancel);
+		}
+
+		// Target icon
 		String target = party.raid().toLowerCase();
 		if (target.contains("grootslangs"))
-			iconTarget = registerDynamicIcon("notg");
+			iconTarget = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/notg.png");
 		else if (target.contains("nexus"))
-			iconTarget = registerDynamicIcon("nol");
+			iconTarget = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/nol.png");
 		else if (target.contains("colossus"))
-			iconTarget = registerDynamicIcon("tcc");
+			iconTarget = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/tcc.png");
 		else if (target.contains("anomaly"))
-			iconTarget = registerDynamicIcon("tna");
+			iconTarget = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/tna.png");
 		else if (target.contains("palace"))
-			iconTarget = registerDynamicIcon("wtp");
+			iconTarget = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/wtp.png");
 		else if (target.contains("annihilation"))
-			iconTarget = registerDynamicIcon("annihilation");
+			iconTarget = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/annihilation.png");
+		else if (target.contains("festival"))
+			iconTarget = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/festival.png");
 		else
-			iconTarget = registerDynamicIcon("other");
+			iconTarget = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/other.png");
 
-		int yPos = layout.y(40);
+		// Left column: Member rows (Kick button)
+		int yPos = layout.y(38);
+		int memberIdx = 0;
 		for (String member : party.members()) {
-			if (member.equals("*filled*"))
+			if (member.equals("*filled*")) {
+				memberIdx++;
 				continue;
-			if (!member.equalsIgnoreCase(party.host())) {
-				String finalMember = member;
-				Button btnKick = Button.builder(Component.literal("§c\u2716"), b -> onKick(finalMember)).bounds(layout.x(145), yPos - Math.max(1, layout.h(3)), layout.w(20), layout.h(20)).build();
+			}
+			final String currentMember = member;
+
+			// Kick button (host only, cannot kick self)
+			if (isHost && !member.equalsIgnoreCase(party.host())) {
+				Button btnKick = Button.builder(Component.literal("§c\u2716"), b -> onKick(currentMember)).bounds(layout.x(148), yPos - Math.max(1, layout.h(2)), layout.w(18), layout.h(16)).build();
 				this.addRenderableWidget(btnKick);
 			}
+
 			yPos += layout.h(24);
+			memberIdx++;
+		}
+
+		// Add Player by IGN (Host only, bottom of left column)
+		if (isHost) {
+			addPlayerField = new EditBox(this.font, layout.x(10), layout.y(280), layout.w(110), layout.h(18), Component.literal("IGN"));
+			addPlayerField.setMaxLength(16);
+			this.addRenderableWidget(addPlayerField);
+
+			btnAddPlayer = Button.builder(Component.literal("Add"), b -> onAddPlayer()).bounds(layout.x(124), layout.y(280), layout.w(44), layout.h(18)).build();
+			this.addRenderableWidget(btnAddPlayer);
 		}
 
 		updateWidgetStates();
+	}
+
+	private void onToggleAlly() {
+		var ws = mod != null ? mod.socket() : null;
+		if (ws != null) {
+			ws.sendPartyAllyToggle(!party.ally());
+		}
+	}
+
+	private void onAddPlayer() {
+		if (addPlayerField == null)
+			return;
+		String ign = addPlayerField.getValue().trim();
+		if (ign.matches("[A-Za-z0-9_]{1,16}") && (realMembers() + filledSlots < maxSize) && party.members().stream().noneMatch(m -> m.equalsIgnoreCase(ign))) {
+			var ws = mod != null ? mod.socket() : null;
+			if (ws != null) {
+				ws.sendPartyManage("add", null, 0, ign);
+				addPlayerField.setValue("");
+			}
+		}
+	}
+
+	private void onLeave() {
+		var ws = mod != null ? mod.socket() : null;
+		if (ws != null) {
+			ws.sendPartyLeave(party.id());
+		}
+		onClose();
 	}
 
 	/** Members occupying a real slot (i.e. excluding the ``*filled*`` placeholders). */
@@ -134,24 +259,48 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 
 	private void adjustFilledSlots(int amount) {
 		int limit = maxSize - realMembers();
-		filledSlots = Math.max(0, Math.min(limit, filledSlots + amount));
-		updateWidgetStates();
+		int next = Math.max(0, Math.min(limit, filledSlots + amount));
+		if (next != filledSlots) {
+			filledSlots = next;
+			updateWidgetStates();
+			var ws = mod != null ? mod.socket() : null;
+			if (ws != null) {
+				ws.sendPartyManage("filled", null, filledSlots, null);
+			}
+		}
 	}
 
 	private void adjustMax(int amount) {
 		int floor = Math.max(2, realMembers() + filledSlots);
-		maxSize = Math.max(floor, Math.min(10, maxSize + amount));
-		filledSlots = Math.min(filledSlots, Math.max(0, maxSize - realMembers()));
-		updateWidgetStates();
+		int next = Math.max(floor, Math.min(10, maxSize + amount));
+		if (next != maxSize) {
+			maxSize = next;
+			filledSlots = Math.min(filledSlots, Math.max(0, maxSize - realMembers()));
+			updateWidgetStates();
+			var ws = mod != null ? mod.socket() : null;
+			if (ws != null) {
+				ws.sendPartyManage("max", null, maxSize, null);
+			}
+		}
 	}
 
 	private void updateWidgetStates() {
+		String self = mod != null ? mod.playerName() : null;
+		boolean isHost = self != null && party.host().equalsIgnoreCase(self);
+
 		int real = realMembers();
 		int occupancy = real + filledSlots;
-		btnPlayersMinus.active = filledSlots > 0;
-		btnPlayersPlus.active = occupancy < maxSize;
-		btnMaxMinus.active = maxSize > Math.max(2, occupancy);
-		btnMaxPlus.active = maxSize < 10;
+		btnPlayersMinus.active = isHost && filledSlots > 0;
+		btnPlayersPlus.active = isHost && occupancy < maxSize;
+		btnMaxMinus.active = isHost && party.isCustomSize() && maxSize > Math.max(2, occupancy);
+		btnMaxPlus.active = isHost && party.isCustomSize() && maxSize < 10;
+		if (btnOpenToAllies != null) {
+			btnOpenToAllies.active = isHost;
+			btnOpenToAllies.setMessage(Component.literal(party.ally() ? "§a[✔] Open to Allies" : "§7[ ] Open to Allies"));
+		}
+		if (btnAddPlayer != null) {
+			btnAddPlayer.active = isHost && occupancy < maxSize;
+		}
 	}
 
 	@Override
@@ -167,19 +316,23 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		super.render(g, scaledMouseX, scaledMouseY, delta);
 
 		g.drawCenteredString(this.font, this.title, layout.centerX(), layout.y(12), 0xFFFFFFFF);
-		g.drawCenteredString(this.font, "Party Members (" + (realMembers() + filledSlots) + "/" + maxSize + ")", layout.x(87), layout.y(20), 0xFF55FF55);
+		String scopeTag = party.ally() ? "§b[Ally] " : "§6[Guild] ";
+		g.drawCenteredString(this.font, scopeTag + "Party (" + (realMembers() + filledSlots) + "/" + maxSize + ")", layout.x(87), layout.y(20), 0xFF55FF55);
 
-		int yPos = layout.y(40);
+		int yPos = layout.y(38);
 		int headSize = Math.max(8, layout.h(12));
+		int memberIdx = 0;
 		for (String member : party.members()) {
-			if (member.equals("*filled*"))
+			if (member.equals("*filled*")) {
+				memberIdx++;
 				continue;
+			}
 
-			Identifier headId = headCache.get(member);
+			Identifier headId = HEAD_CACHE.get(member);
 			if (headId == null) {
 				g.fill(layout.x(10), yPos - 1, layout.x(10) + headSize, yPos - 1 + headSize, 0xFF444444);
-				if (!headFetching.contains(member)) {
-					headFetching.add(member);
+				if (!HEAD_FETCHING.contains(member)) {
+					HEAD_FETCHING.add(member);
 					java.util.concurrent.CompletableFuture.runAsync(() -> fetchHead(member));
 				}
 			} else {
@@ -190,62 +343,56 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 				g.pose().popMatrix();
 			}
 
-			g.drawString(this.font, member, layout.x(28), yPos + 1, member.equalsIgnoreCase(party.host()) ? 0xFFFFD700 : 0xFFFFFFFF);
+			String displayName = party.displayMember(memberIdx);
+			g.drawString(this.font, displayName, layout.x(26), yPos + 2, member.equalsIgnoreCase(party.host()) ? 0xFFFFD700 : 0xFFFFFFFF);
 			yPos += layout.h(24);
+			memberIdx++;
 		}
 
 		int extraRows = Math.max(0, maxSize - realMembers());
 		for (int i = 0; i < extraRows; i++) {
+			if (yPos > layout.y(270))
+				break;
 			g.fill(layout.x(10), yPos - 1, layout.x(10) + headSize, yPos - 1 + headSize, 0xFF222222);
-			g.drawString(this.font, i < filledSlots ? "§7*Filled Slot*" : "§8*Empty*", layout.x(28), yPos + 1, 0xFFAAAAAA);
+			g.drawString(this.font, i < filledSlots ? "§7*Filled Slot*" : "§8*Empty*", layout.x(26), yPos + 2, 0xFFAAAAAA);
 			yPos += layout.h(24);
 		}
 
 		if (iconTarget != null) {
-			int iconSize = Math.max(16, layout.h(28));
+			int iconSize = Math.max(16, layout.h(24));
 			g.pose().pushMatrix();
-			g.pose().translate(layout.x(256), layout.y(40));
+			g.pose().translate(layout.x(258), layout.y(34));
 			g.pose().scale(iconSize / 64.0f, iconSize / 64.0f);
 			g.blit(RenderPipelines.GUI_TEXTURED, iconTarget, 0, 0, 0.0f, 0.0f, 64, 64, 64, 64);
 			g.pose().popMatrix();
 		}
-		g.drawCenteredString(this.font, party.raid(), layout.x(270), layout.y(74), 0xFF55FF55);
+		g.drawCenteredString(this.font, party.raid(), layout.x(270), layout.y(62), 0xFF55FF55);
+		if (party.world() != null && !party.world().isBlank()) {
+			g.drawCenteredString(this.font, "§eServer: " + party.world(), layout.x(270), layout.y(74), 0xFFFFFF55);
+		}
 
-		g.drawString(this.font, "Max Size:", layout.x(190), layout.y(106), 0xFFAAAAAA);
-		g.drawCenteredString(this.font, String.valueOf(this.maxSize), layout.x(280), layout.y(106), 0xFFFFFFFF);
+		g.drawString(this.font, "Max Size:", layout.x(190), layout.y(110), 0xFFAAAAAA);
+		g.drawCenteredString(this.font, String.valueOf(this.maxSize), layout.x(275), layout.y(110), 0xFFFFFFFF);
 
-		g.drawString(this.font, "Filled Slots:", layout.x(190), layout.y(130), 0xFFAAAAAA);
-		g.drawCenteredString(this.font, String.valueOf(this.filledSlots), layout.x(280), layout.y(130), 0xFFFFFFFF);
+		g.drawString(this.font, "Filled Slots:", layout.x(190), layout.y(132), 0xFFAAAAAA);
+		g.drawCenteredString(this.font, String.valueOf(this.filledSlots), layout.x(275), layout.y(132), 0xFFFFFFFF);
 
-		g.drawString(this.font, "Party Note:", layout.x(190), layout.y(162), 0xFFAAAAAA);
+		g.drawString(this.font, "Party Note:", layout.x(190), layout.y(174), 0xFFAAAAAA);
 		popReferencePose(g);
 	}
 
 	private void onUpdate() {
-		var ws = mod.socket();
+		var ws = mod != null ? mod.socket() : null;
 		if (ws != null) {
-			if (this.maxSize != party.max()) {
-				ws.sendPartyManage("max", null, this.maxSize, null);
-			}
-
-			if (!noteField.getValue().equals(party.note())) {
+			if (noteField != null && !noteField.getValue().equals(party.note())) {
 				ws.sendPartyManage("note", noteField.getValue(), 0, null);
-			}
-
-			int fSlots = 0;
-			for (String member : party.members()) {
-				if (member.equals("*filled*"))
-					fSlots++;
-			}
-			if (this.filledSlots != fSlots) {
-				ws.sendPartyManage("filled", null, this.filledSlots, null);
 			}
 		}
 		onClose();
 	}
 
 	private void onDisband() {
-		var ws = mod.socket();
+		var ws = mod != null ? mod.socket() : null;
 		if (ws != null) {
 			ws.sendPartyManage("close", null, 0, null);
 		}
@@ -253,11 +400,10 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 	}
 
 	private void onKick(String ign) {
-		var ws = mod.socket();
+		var ws = mod != null ? mod.socket() : null;
 		if (ws != null) {
 			ws.sendPartyManage("remove", null, 0, ign);
 		}
-		onClose();
 	}
 
 	@Override
@@ -284,23 +430,6 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 	public boolean mouseScrolled(double mouseX, double mouseY, double d, double e) {
 		return super.mouseScrolled(mouseX / uiScale, mouseY / uiScale, d, e);
 	}
-	private Identifier registerDynamicIcon(String name) {
-		Identifier loc = Identifier.parse("edenmod:dynamic_icon/" + name);
-		var tm = Minecraft.getInstance().getTextureManager();
-		try {
-			var stream = PartyManageScreen.class.getClassLoader().getResourceAsStream("assets/edenmod/textures/gui/icons/" + name + ".png");
-			if (stream != null) {
-				var img = NativeImage.read(stream);
-				var texture = new DynamicTexture(() -> name, img);
-				tm.register(loc, texture);
-				stream.close();
-				return loc;
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-		return null;
-	}
 
 	private void fetchHead(String member) {
 		if (!member.matches("[A-Za-z0-9_]{1,16}"))
@@ -315,7 +444,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 					Identifier loc = Identifier.parse("edenmod:head/" + member.toLowerCase());
 					var texture = new DynamicTexture(() -> member, img);
 					Minecraft.getInstance().getTextureManager().register(loc, texture);
-					headCache.put(member, loc);
+					HEAD_CACHE.put(member, loc);
 				});
 			}
 		} catch (Exception e) {

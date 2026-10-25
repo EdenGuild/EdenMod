@@ -414,6 +414,35 @@ public final class EdenModClient implements ClientModInitializer {
 		});
 	}
 
+	private volatile String currentWynnWorld = "";
+	private volatile boolean festivalEnabled = false;
+	private volatile boolean annihilationActive = false;
+
+	public String currentWynnWorld() {
+		return currentWynnWorld;
+	}
+
+	public boolean isFestivalEnabled() {
+		return festivalEnabled;
+	}
+
+	public boolean isAnnihilationActive() {
+		return annihilationActive;
+	}
+
+	public PartyInfo activeParty() {
+		String ign = playerName();
+		if (ign == null || ign.isBlank()) {
+			return null;
+		}
+		for (PartyInfo party : knownParties) {
+			if (party.host().equalsIgnoreCase(ign) || party.members().stream().anyMatch(m -> m.equalsIgnoreCase(ign))) {
+				return party;
+			}
+		}
+		return null;
+	}
+
 	/** An immutable snapshot of the currently known parties, safe to read off-thread. */
 	public java.util.List<PartyInfo> knownParties() {
 		return knownParties;
@@ -1132,6 +1161,12 @@ public final class EdenModClient implements ClientModInitializer {
 						default -> {
 							/* closed/other: nothing to announce */ }
 					}
+				}
+
+				@Override
+				public void onPartyConfig(boolean festivalEnabled, boolean annihilationActive) {
+					EdenModClient.this.festivalEnabled = festivalEnabled;
+					EdenModClient.this.annihilationActive = annihilationActive;
 				}
 
 				@Override
@@ -2588,14 +2623,27 @@ public final class EdenModClient implements ClientModInitializer {
 	/** Returns true when the Wynncraft tab list is visible (game world or /class screen). */
 	private boolean checkWynncraftTabActive(Minecraft mc) {
 		net.minecraft.client.multiplayer.ClientPacketListener conn = mc.getConnection();
-		if (conn == null)
+		if (conn == null) {
+			currentWynnWorld = "";
 			return false;
+		}
 		for (net.minecraft.client.multiplayer.PlayerInfo info : conn.getOnlinePlayers()) {
 			net.minecraft.network.chat.Component name = info.getTabListDisplayName();
-			if (name != null && (name.getString().contains("Global [") || name.getString().contains("Island Info"))) {
-				return true;
+			if (name != null) {
+				String str = name.getString();
+				if (str.contains("Global [") || str.contains("Island Info")) {
+					if (str.contains("Global [")) {
+						int start = str.indexOf("Global [") + 8;
+						int end = str.indexOf(']', start);
+						if (end > start) {
+							currentWynnWorld = str.substring(start, end).trim();
+						}
+					}
+					return true;
+				}
 			}
 		}
+		currentWynnWorld = "";
 		return false;
 	}
 
@@ -2690,6 +2738,7 @@ public final class EdenModClient implements ClientModInitializer {
 		partyCommandGeneration.incrementAndGet();
 		onWynncraft = false;
 		loginPending = false;
+		currentWynnWorld = "";
 		bridgeStatus = BridgeStatus.UNKNOWN;
 		liveGuildRank = "";
 		liveDiscordRank = "";
@@ -2854,6 +2903,7 @@ public final class EdenModClient implements ClientModInitializer {
 		// Annihilation world-event warning (the only advance timing signal we get).
 		java.util.OptionalInt anni = AnnihilationParser.parse(message);
 		if (anni.isPresent()) {
+			annihilationActive = true;
 			int seconds = anni.getAsInt();
 			if (annihilationRelay.shouldSend(new CapturedMessage("annihilation", null, String.valueOf(seconds)))) {
 				current.sendAnnihilation(seconds);

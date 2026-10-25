@@ -13,8 +13,8 @@ import tel.eden.mod.net.PartyInfo;
 public final class PartyListScreen extends EdenReferenceScreen {
 	private static final int BASE_PANEL_WIDTH = 420;
 	private static final int BASE_PANEL_HEIGHT = 300;
-	private static final int ROW_HEIGHT = 28;
-	private static final int VISIBLE_ROWS = 8;
+	private static final int ROW_HEIGHT = 44;
+	private static final int VISIBLE_ROWS = 5;
 
 	private final Screen parent;
 	private final EdenModClient mod;
@@ -88,6 +88,8 @@ public final class PartyListScreen extends EdenReferenceScreen {
 		int listHeight = layout.h(ROW_HEIGHT * VISIBLE_ROWS);
 		g.fill(listLeft, listTop, listLeft + listWidth, listTop + listHeight, 0x22000000);
 
+		PartyInfo hoveredParty = null;
+
 		if (lastKnownParties.isEmpty()) {
 			g.drawCenteredString(this.font, "No active parties", layout.centerX(), layout.y(122), 0xFFAAAAAA);
 		} else {
@@ -97,32 +99,141 @@ public final class PartyListScreen extends EdenReferenceScreen {
 					break;
 				}
 
-				int rowTop = layout.y(38 + visible * ROW_HEIGHT);
-				int rowBottom = rowTop + layout.h(24);
-				int joinLeft = layout.x(333);
-				int joinRight = layout.x(389);
-
-				g.fill(layout.x(17), rowTop, layout.x(391), rowBottom, 0x44282828);
-				drawJoinButton(g, joinLeft, rowTop, joinRight - joinLeft, layout.h(24), isJoinHovered(scaledMouseX, scaledMouseY, index));
-
 				PartyInfo party = lastKnownParties.get(index);
-				String text = "#" + party.id() + " | " + party.raid() + " | Host: " + party.host() + " | [" + party.members().size() + "/" + party.max() + "]";
-				g.drawString(this.font, trimToWidth(text, layout.w(306)), layout.x(24), rowTop + layout.h(8), 0xFFFFFFFF);
-				g.drawCenteredString(this.font, "Join", joinLeft + (layout.w(56) / 2), rowTop + layout.h(8), 0xFFFFFFFF);
+				int cardTop = layout.y(38 + visible * ROW_HEIGHT);
+				int cardBottom = cardTop + layout.h(40);
+				int cardLeft = layout.x(17);
+				int cardRight = layout.x(391);
+
+				boolean cardHovered = scaledMouseX >= cardLeft && scaledMouseX <= cardRight && scaledMouseY >= cardTop && scaledMouseY <= cardBottom;
+				if (cardHovered) {
+					hoveredParty = party;
+				}
+
+				// Card background and subtle borders
+				g.fill(cardLeft, cardTop, cardRight, cardBottom, cardHovered ? 0x55353535 : 0x44252525);
+				g.fill(cardLeft, cardTop, cardRight, cardTop + 1, cardHovered ? 0x44FFFFFF : 0x22FFFFFF);
+				g.fill(cardLeft, cardBottom - 1, cardRight, cardBottom, 0x22000000);
+
+				// Right side: Join / Full / In Party button
+				int btnLeft = layout.x(335);
+				int btnRight = layout.x(387);
+				int btnWidth = btnRight - btnLeft;
+				int btnTop = cardTop + layout.h(9);
+				int btnHeight = layout.h(22);
+
+				boolean isSelf = mod != null && party.members().stream().anyMatch(m -> m.equalsIgnoreCase(mod.playerName()));
+				boolean isFull = isFull(party);
+				boolean joinHovered = cardHovered && scaledMouseX >= btnLeft && scaledMouseX <= btnRight && scaledMouseY >= btnTop && scaledMouseY <= btnTop + btnHeight;
+
+				String btnLabel;
+				int btnTextColor;
+				boolean btnActive;
+				if (isSelf) {
+					btnLabel = "In Party";
+					btnTextColor = 0xFFAAAAAA;
+					btnActive = false;
+				} else if (isFull) {
+					btnLabel = "Full";
+					btnTextColor = 0xFFFF7777;
+					btnActive = false;
+				} else {
+					btnLabel = "Join";
+					btnTextColor = 0xFFFFFFFF;
+					btnActive = true;
+				}
+				drawJoinButton(g, btnLeft, btnTop, btnWidth, btnHeight, btnLabel, btnTextColor, btnActive, joinHovered && btnActive);
+
+				// Occupancy count badge before the button
+				int badgeRight = layout.x(330);
+				String countStr = party.size() + "/" + party.max();
+				int countWidth = this.font.width(countStr);
+				g.drawString(this.font, countStr, badgeRight - countWidth, cardTop + layout.h(16), isFull ? 0xFFFF6666 : 0xFF55FF55);
+
+				// Text lines on left
+				int textLeft = layout.x(22);
+				int textWidth = badgeRight - countWidth - textLeft - layout.w(8);
+
+				// Line 1: Scope, ID, World, Raid name
+				String scope = party.ally() ? "§b[Ally] " : "§6[Guild] ";
+				String worldStr = party.world() != null && !party.world().isBlank() ? "§a[" + party.world() + "] " : "";
+				String line1 = scope + "§f#" + party.id() + " " + worldStr + "§f§l" + party.raid();
+				g.drawString(this.font, trimToWidth(line1, textWidth), textLeft, cardTop + layout.h(5), 0xFFFFFFFF);
+
+				// Line 2: Host & Members
+				String hostStr = "§eHost: §f" + party.displayMember(0);
+				String line2;
+				if (party.size() > 1) {
+					List<String> others = new ArrayList<>();
+					for (int i = 1; i < party.size(); i++) {
+						others.add(party.displayMember(i));
+					}
+					line2 = hostStr + " §7| §bMembers: §f" + String.join(", ", others);
+				} else {
+					line2 = hostStr + " §7| §8(Waiting for members)";
+				}
+				g.drawString(this.font, trimToWidth(line2, textWidth), textLeft, cardTop + layout.h(17), 0xFFFFFFFF);
+
+				// Line 3: Note (if present)
+				if (party.note() != null && !party.note().isBlank()) {
+					String line3 = "§8Note: §7" + party.note();
+					g.drawString(this.font, trimToWidth(line3, textWidth), textLeft, cardTop + layout.h(28), 0xFFFFFFFF);
+				}
 			}
 		}
 
 		layout.drawScrollbar(g, layout.x(393), listTop, layout.w(8), listHeight, VISIBLE_ROWS, lastKnownParties.size(), scrollOffset);
 		popReferencePose(g);
+
+		if (hoveredParty != null) {
+			g.setComponentTooltipForNextFrame(this.font, buildPartyTooltip(hoveredParty), mouseX, mouseY);
+		}
 	}
 
-	private void drawJoinButton(GuiGraphics g, int x, int y, int width, int height, boolean hovered) {
-		int fill = hovered ? 0xFF777777 : 0xFF5A5A5A;
+	private List<Component> buildPartyTooltip(PartyInfo party) {
+		List<Component> lines = new ArrayList<>();
+		String scope = party.ally() ? "§b[Ally Party]" : "§6[Guild Party]";
+		lines.add(Component.literal(scope + " §f#" + party.id() + " - §a§l" + party.raid()));
+		if (party.world() != null && !party.world().isBlank()) {
+			lines.add(Component.literal("§7World: §e" + party.world()));
+		}
+		lines.add(Component.literal("§eHost: §f" + party.displayMember(0)));
+		if (party.size() > 1) {
+			lines.add(Component.literal("§bMembers (" + (party.size() - 1) + "):"));
+			for (int i = 1; i < party.size(); i++) {
+				lines.add(Component.literal("  §7- §f" + party.displayMember(i)));
+			}
+		}
+		int openSlots = party.max() - party.size();
+		if (openSlots > 0) {
+			lines.add(Component.literal("§8  + " + openSlots + " open slot" + (openSlots == 1 ? "" : "s")));
+		}
+		if (party.note() != null && !party.note().isBlank()) {
+			lines.add(Component.literal("§8Note: §f" + party.note()));
+		}
+		boolean isSelf = mod != null && party.members().stream().anyMatch(m -> m.equalsIgnoreCase(mod.playerName()));
+		if (isSelf) {
+			lines.add(Component.literal("§7(You are already in this party)"));
+		} else if (isFull(party)) {
+			lines.add(Component.literal("§c(Party is full)"));
+		} else {
+			lines.add(Component.literal("§aClick \"Join\" to join this party"));
+		}
+		return lines;
+	}
+
+	private void drawJoinButton(GuiGraphics g, int x, int y, int width, int height, String label, int textColor, boolean active, boolean hovered) {
+		int fill = !active ? 0xFF353535 : (hovered ? 0xFF2E7D32 : 0xFF1E5224);
+		int borderTop = !active ? 0xFF4A4A4A : (hovered ? 0xFF4CAF50 : 0xFF2E7D32);
+		int borderBottom = !active ? 0xFF222222 : (hovered ? 0xFF1B5E20 : 0xFF143B17);
+
 		g.fill(x, y, x + width, y + height, fill);
-		g.fill(x, y, x + width, y + 1, 0xFFD8D8D8);
-		g.fill(x, y, x + 1, y + height, 0xFFD8D8D8);
-		g.fill(x + width - 1, y, x + width, y + height, 0xFF222222);
-		g.fill(x, y + height - 1, x + width, y + height, 0xFF222222);
+		g.fill(x, y, x + width, y + 1, borderTop);
+		g.fill(x, y, x + 1, y + height, borderTop);
+		g.fill(x + width - 1, y, x + width, y + height, borderBottom);
+		g.fill(x, y + height - 1, x + width, y + height, borderBottom);
+
+		g.drawCenteredString(this.font, label, x + (width / 2), y + ((height - 8) / 2), textColor);
 	}
 
 	@Override
@@ -203,7 +314,7 @@ public final class PartyListScreen extends EdenReferenceScreen {
 		}
 		int row = ((int) mouseY - layout.y(36)) / layout.h(ROW_HEIGHT);
 		int index = scrollOffset + row;
-		return index >= 0 && index < lastKnownParties.size() ? index : -1;
+		return index >= 0 && index < lastKnownParties.size() && row < VISIBLE_ROWS ? index : -1;
 	}
 
 	private boolean isJoinHovered(double mouseX, double mouseY, int index) {
@@ -211,8 +322,14 @@ public final class PartyListScreen extends EdenReferenceScreen {
 		if (visibleRow < 0 || visibleRow >= VISIBLE_ROWS) {
 			return false;
 		}
-		int rowTop = layout.y(38 + visibleRow * ROW_HEIGHT);
-		return mouseX >= layout.x(333) && mouseX <= layout.x(389) && mouseY >= rowTop && mouseY <= rowTop + layout.h(24);
+		PartyInfo party = lastKnownParties.get(index);
+		boolean isSelf = mod != null && party.members().stream().anyMatch(m -> m.equalsIgnoreCase(mod.playerName()));
+		if (isSelf || isFull(party)) {
+			return false;
+		}
+		int cardTop = layout.y(38 + visibleRow * ROW_HEIGHT);
+		int btnTop = cardTop + layout.h(9);
+		return mouseX >= layout.x(335) && mouseX <= layout.x(387) && mouseY >= btnTop && mouseY <= btnTop + layout.h(22);
 	}
 
 	private void updateScrollFromMouse(double mouseY) {
