@@ -8,7 +8,9 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
+import net.minecraft.sounds.SoundEvents;
 import org.lwjgl.glfw.GLFW;
 import tel.eden.mod.config.BridgeConfig;
 
@@ -187,10 +189,14 @@ public final class TerritoryLossBlacklistScreen extends EdenReferenceScreen {
 				return true;
 			}
 
-			int row = rowAt(scaled.x(), scaled.y());
-			if (row >= 0 && isRemoveHovered(scaled.x(), scaled.y(), row)) {
-				onDelete(config.territoryLossBlacklist.get(row));
-				return true;
+			// Hit-test the drawn Remove boxes directly; they're drawn by hand, so play the click ourselves.
+			int end = Math.min(config.territoryLossBlacklist.size(), scrollOffset + VISIBLE_ROWS);
+			for (int index = scrollOffset; index < end; index++) {
+				if (isRemoveHovered(scaled.x(), scaled.y(), index)) {
+					this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
+					onDelete(config.territoryLossBlacklist.get(index));
+					return true;
+				}
 			}
 		}
 		if (scaled.button() == 0 && addBox != null) {
@@ -202,15 +208,6 @@ public final class TerritoryLossBlacklistScreen extends EdenReferenceScreen {
 			}
 		}
 		return super.mouseClicked(scaled, doubleClick);
-	}
-
-	private int rowAt(double mouseX, double mouseY) {
-		if (!isOverList(mouseX, mouseY)) {
-			return -1;
-		}
-		int row = ((int) mouseY - layout.y(LIST_Y)) / layout.h(ROW_HEIGHT);
-		int index = scrollOffset + row;
-		return index >= 0 && index < config.territoryLossBlacklist.size() ? index : -1;
 	}
 
 	private boolean isRemoveHovered(double mouseX, double mouseY, int index) {
