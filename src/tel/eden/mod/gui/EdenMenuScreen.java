@@ -17,7 +17,7 @@ public class EdenMenuScreen extends Screen {
 	private static final int BASE_CONTENT_WIDTH = 200;
 	private static final int BUTTON_HEIGHT = 20;
 	private static final int BUTTON_SPACING = 24;
-	private static final int BUTTON_COUNT = 7;
+	private static final int BUTTON_COUNT = 8;
 	private static final int LOGO_WIDTH = 128;
 	private static final int LOGO_GAP = 20;
 	private static final int CONTENT_MARGIN = 12;
@@ -55,9 +55,17 @@ public class EdenMenuScreen extends Screen {
 			this.minecraft.setScreen(BridgeConfigScreen.create(this, EdenModClient.instance()));
 		}).bounds(metrics.buttonX, metrics.startY, metrics.buttonWidth, metrics.buttonHeight).build());
 
+		this.addRenderableWidget(Button.builder(Component.literal("Event"), button -> {
+			EdenModClient mod = EdenModClient.instance();
+			if (mod != null && mod.socket() != null && mod.socket().isConnected()) {
+				mod.socket().sendLongEventStateRequest();
+			}
+			this.minecraft.setScreen(new LongEventScreen(this, mod));
+		}).bounds(metrics.buttonX, metrics.startY + metrics.buttonPitch, metrics.buttonWidth, metrics.buttonHeight).build());
+
 		this.addRenderableWidget(Button.builder(Component.literal("Create Party"), button -> {
 			this.minecraft.setScreen(new PartyCreateScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + metrics.buttonPitch, metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 2), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Manage Party"), button -> {
 			String ign = EdenModClient.instance().playerName();
@@ -73,23 +81,23 @@ public class EdenMenuScreen extends Screen {
 			} else {
 				this.minecraft.player.displayClientMessage(Component.literal("You are not hosting a party!").withStyle(net.minecraft.ChatFormatting.RED), false);
 			}
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 2), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 3), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Party List"), button -> {
 			this.minecraft.setScreen(new PartyListScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 3), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 4), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Payouts"), button -> {
 			this.minecraft.setScreen(new PayoutScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 4), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 5), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Command Aliases"), button -> {
 			this.minecraft.setScreen(new CommandAliasScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 5), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 6), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Command Keybinds"), button -> {
 			this.minecraft.setScreen(new CommandKeybindScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 6), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 7), metrics.buttonWidth, metrics.buttonHeight).build());
 	}
 
 	@Override
