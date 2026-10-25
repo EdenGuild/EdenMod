@@ -286,13 +286,16 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				int statY = cardY + layout.h(69);
 				int padX = cardX + layout.w(6);
 				int rightX = cardX + cardW - layout.w(6);
-				String progStr = slot.progress() + "/" + slot.target();
 				String rewardStr = "+" + slot.rewardLe() + " LE";
-				g.drawString(this.font, progStr, padX, statY, 0xFFDDDDDD);
+				int rewardW = this.font.width(rewardStr);
+				int maxLeftW = Math.max(10, rightX - padX - rewardW - 4);
 				if (completed) {
-					g.drawCenteredString(this.font, "Completed", cardCenterX, statY, 0xFF55FF55);
+					drawFittedString(g, "Completed", padX, statY, maxLeftW, 0xFF55FF55);
+				} else {
+					String progStr = slot.progress() + "/" + slot.target();
+					drawFittedString(g, progStr, padX, statY, maxLeftW, 0xFFDDDDDD);
 				}
-				g.drawString(this.font, rewardStr, rightX - this.font.width(rewardStr), statY, 0xFFFFD24A);
+				g.drawString(this.font, rewardStr, rightX - rewardW, statY, 0xFFFFD24A);
 
 				// Progress bar
 				int barY = cardY + layout.h(80);
@@ -527,6 +530,20 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			}
 		}
 		return lines;
+	}
+
+	private void drawFittedString(GuiGraphics g, String text, int x, int y, int maxWidth, int color) {
+		int textW = this.font.width(text);
+		if (textW <= maxWidth || textW <= 0) {
+			g.drawString(this.font, text, x, y, color);
+			return;
+		}
+		float s = maxWidth / (float) textW;
+		g.pose().pushMatrix();
+		g.pose().translate(x, y);
+		g.pose().scale(s, s);
+		g.drawString(this.font, text, 0, 0, color);
+		g.pose().popMatrix();
 	}
 
 	private void drawFittedCenteredString(GuiGraphics g, String text, int centerX, int y, int maxWidth, int color) {
