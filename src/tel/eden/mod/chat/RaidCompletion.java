@@ -12,8 +12,11 @@ import java.util.List;
  * @param emeralds  emeralds claimed (per participant)
  * @param guildExp  the guild-experience reward as shown in chat (e.g. {@code "633"}
  *     from {@code "+633m Guild Experience"}); kept verbatim for display only
+ * @param seasonalRating  the guild's total Seasonal Rating for the raid (the sum over the
+ *     named party, e.g. {@code 440} from {@code "+440 Seasonal Rating"}), or {@code null}
+ *     when the line carried none
  */
-public record RaidCompletion(List<String> party, String raidName, int aspects, int emeralds, String guildExp) {
+public record RaidCompletion(List<String> party, String raidName, int aspects, int emeralds, String guildExp, Integer seasonalRating) {
 	public RaidCompletion {
 		party = List.copyOf(party);
 	}

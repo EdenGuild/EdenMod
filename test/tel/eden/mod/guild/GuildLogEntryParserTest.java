@@ -16,6 +16,13 @@ class GuildLogEntryParserTest {
 	}
 
 	@Test
+	void readsRowsStampedInAnyTimeZoneNotJustEastern() {
+		var entry = GuildLogEntryParser.parseLines("2 hours ago (09/22/26 03:30 PM CEST)", List.of("", "FadeDave rewarded 1024 Emeralds to Asthae", "")).orElseThrow();
+
+		assertEquals("2 hours ago (09/22/26 03:30 PM CEST)", entry.occurredAt());
+	}
+
+	@Test
 	void ignoresSpacerAndIncompleteRows() {
 		assertTrue(GuildLogEntryParser.parseLines("2 minutes ago", List.of()).isEmpty());
 		assertTrue(GuildLogEntryParser.parseLines("not a timestamp", List.of("", "line", "")).isEmpty());

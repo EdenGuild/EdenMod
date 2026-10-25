@@ -104,6 +104,33 @@ public final class BackgroundContainerSession {
 		return true;
 	}
 
+	// The player's own inventory menu (container 0) numbers the hotbar from here.
+	private static final int INVENTORY_HOTBAR_START = 36;
+
+	/**
+	 * Claim the next matching server menu and open it by left-clicking a hotbar item in the
+	 * player's own inventory menu, the way Wynncraft's compass and content book open theirs
+	 * (and how Wynntils queries them). Returns false, with nothing claimed, if that slot holds
+	 * no item or another menu is in the way.
+	 */
+	public boolean openByHotbarClick(String owner, Predicate<String> expectedTitle, int menuSlotCount, int hotbarSlot) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null || mc.getConnection() == null || hotbarSlot < 0 || hotbarSlot > 8) {
+			return false;
+		}
+		int slot = INVENTORY_HOTBAR_START + hotbarSlot;
+		ItemStack clicked = mc.player.inventoryMenu.getSlot(slot).getItem();
+		if (clicked.isEmpty() || !begin(owner, expectedTitle, menuSlotCount)) {
+			return false;
+		}
+		var hashGenerator = mc.getConnection().decoratedHashOpsGenenerator();
+		var changedSlots = new Int2ObjectOpenHashMap<HashedStack>();
+		changedSlots.put(slot, HashedStack.create(new ItemStack(Items.AIR), hashGenerator));
+		HashedStack carried = HashedStack.create(clicked, hashGenerator);
+		mc.getConnection().send(new ServerboundContainerClickPacket(mc.player.inventoryMenu.containerId, 0, (short) slot, (byte) 0, ClickType.PICKUP, changedSlots, carried));
+		return true;
+	}
+
 	/** Change the expected next menu after a background click. */
 	public boolean expectTransition(Predicate<String> expectedTitle, int menuSlotCount) {
 		if (owner.isEmpty() || !open || expectedTitle == null || menuSlotCount <= 0) {
@@ -219,6 +246,11 @@ public final class BackgroundContainerSession {
 		String screen = mc.screen == null ? "none" : mc.screen.getClass().getName();
 		long untilCommands = Math.max(0L, WORLD_COMMAND_GRACE_MS - (System.currentTimeMillis() - joinedAt));
 		return "screen=" + screen + ", containerId=" + mc.player.containerMenu.containerId + ", inventoryMenu=" + (mc.player.containerMenu == mc.player.inventoryMenu) + ", observedServerContainerId=" + observedServerContainerId + ", observedServerTitle='" + observedServerTitle + "', commandGraceMs=" + untilCommands;
+	}
+
+	/** The title of the most recent menu the server opened (colour codes stripped), or empty. */
+	public String observedTitle() {
+		return observedServerTitle;
 	}
 
 	/** Packet hook: true hides a menu owned by the active background session. */

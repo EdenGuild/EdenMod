@@ -398,7 +398,7 @@ public final class BridgeWebSocketClient {
 	 * consensus (nobody else can corroborate what they never saw), verifies each against
 	 * the alliance list, and uses the survivors only to complete the party for display.
 	 */
-	public void sendRaidCompletion(java.util.List<String> party, String raidName, int aspects, int emeralds, String guildExp, java.util.List<String> extraPlayers) {
+	public void sendRaidCompletion(java.util.List<String> party, String raidName, int aspects, int emeralds, String guildExp, Integer seasonalRating, java.util.List<String> extraPlayers) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
@@ -421,6 +421,9 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("aspects", aspects);
 		obj.addProperty("emeralds", emeralds);
 		obj.addProperty("guildExp", guildExp);
+		if (seasonalRating != null) {
+			obj.addProperty("seasonalRating", seasonalRating);
+		}
 		enqueueSend(current, obj.toString());
 	}
 
@@ -1093,14 +1096,42 @@ public final class BridgeWebSocketClient {
 	 * this stays a faithful, general-purpose snapshot of what the mod actually saw.
 	 */
 	public void sendGuildLogSnapshot(String category, java.util.List<GuildLogEvent> events) {
-		WebSocket current = socket;
 		String source = switch (category) {
 			case "General" -> "general";
 			case "Public Bank" -> "publicBank";
 			case "High Ranked Bank" -> "highRankedBank";
 			default -> null;
 		};
-		if (current == null || source == null) {
+		if (source != null) {
+			sendGuildLogSnapshot(source, false, events);
+		}
+	}
+
+	/**
+	 * Send one page of a whole-log walk (every filter, every page). Flagged {@code fullScan}
+	 * so the backend takes only the raid rows' Seasonal Rating from it: such a page is not
+	 * the newest rows of its filter, which is what the bank fallback's diffing assumes.
+	 */
+	public void sendGuildLogFullScanPage(String category, java.util.List<GuildLogEvent> events) {
+		sendGuildLogSnapshot(sourceKey(category), true, events);
+	}
+
+	/** {@code "High Ranked Bank"} to {@code "highRankedBank"}: a filter's label as a wire key. */
+	static String sourceKey(String category) {
+		StringBuilder key = new StringBuilder();
+		for (String word : category.trim().split("[^A-Za-z0-9]+")) {
+			if (word.isEmpty()) {
+				continue;
+			}
+			String lower = word.toLowerCase(java.util.Locale.ROOT);
+			key.append(key.length() == 0 ? lower : Character.toUpperCase(lower.charAt(0)) + lower.substring(1));
+		}
+		return key.length() == 0 ? "unknown" : key.substring(0, Math.min(key.length(), 64));
+	}
+
+	private void sendGuildLogSnapshot(String source, boolean fullScan, java.util.List<GuildLogEvent> events) {
+		WebSocket current = socket;
+		if (current == null) {
 			return;
 		}
 		JsonArray encoded = new JsonArray();
@@ -1139,6 +1170,10 @@ public final class BridgeWebSocketClient {
 					entry.addProperty("charges", bank.charges());
 				}
 				entry.addProperty("accessTier", bank.accessTier());
+			} else if (event instanceof GuildLogEvent.Text text) {
+				entry.addProperty("kind", "text");
+				entry.addProperty("occurredAt", text.occurredAt());
+				entry.addProperty("text", text.text());
 			} else if (event instanceof GuildLogEvent.Raid raid) {
 				entry.addProperty("kind", "raid");
 				entry.addProperty("occurredAt", raid.occurredAt());
@@ -1172,6 +1207,9 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "guildLogSnapshot");
 		obj.addProperty("version", 1);
 		obj.addProperty("source", source);
+		if (fullScan) {
+			obj.addProperty("fullScan", true);
+		}
 		obj.add("events", encoded);
 		enqueueSend(current, obj.toString());
 	}

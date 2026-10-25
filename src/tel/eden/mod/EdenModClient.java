@@ -601,7 +601,39 @@ public final class EdenModClient implements ClientModInitializer {
 			}
 			current.sendGuildLogSnapshot(category, entries.stream().map(tel.eden.mod.guild.GuildLogEventParser::parse).flatMap(Optional::stream).toList());
 		});
+		guildLogSync.setFullScanReporter((category, page, entries) -> {
+			BridgeWebSocketClient current = socket;
+			if (current == null) {
+				return;
+			}
+			java.util.List<tel.eden.mod.guild.GuildLogEvent> events = GuildLogSync.isTextCategory(category) ? entries.stream().map(GuildLogSync::textEvent).toList() : entries.stream().map(tel.eden.mod.guild.GuildLogEventParser::parse).flatMap(Optional::stream).toList();
+			current.sendGuildLogFullScanPage(category, events);
+		});
+		tel.eden.mod.chat.PlayerNameResolver.setMemberNames(guildRewards::memberNames);
 		guildRewards.setPostGiftReconciler(guildLogSync::requestSoon);
+		guildRewards.setPreRunNicknameReader(() -> {
+			try {
+				guildLogSync.readCharacterInfo().get(10, TimeUnit.SECONDS);
+			} catch (Exception e) {
+				LOGGER.warn("Character info read before the gift run failed", e);
+			}
+		});
+		guildRewards.setPostRunLogScanDue(() -> {
+			boolean recent = guildLogSync.scannedWithin(GuildLogSync.AUTO_SCAN_COOLDOWN_MS);
+			if (recent) {
+				LOGGER.info("Guild log full scan: skipped after the gift run, one finished within the last 5 minutes");
+			}
+			return !recent;
+		});
+		guildRewards.setPostRunLogScan(progress -> {
+			long started = System.currentTimeMillis();
+			try {
+				return guildLogSync.scanWholeLog(progress).get(2, TimeUnit.MINUTES);
+			} catch (Exception e) {
+				LOGGER.warn("Guild log full scan after gift run failed after {}ms", System.currentTimeMillis() - started, e);
+				return -1;
+			}
+		});
 		guildRewards.setPreGiftEvidenceSupplier(() -> {
 			try {
 				return guildLogSync.reconcileNow().get(20, TimeUnit.SECONDS);
@@ -742,7 +774,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
+			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(ClientCommandManager.literal("logscan").executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
 				requestWarCounts(ctx.getSource(), 7);
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
@@ -807,6 +839,7 @@ public final class EdenModClient implements ClientModInitializer {
 			AttackMenuScraper.onTick(client);
 			AllianceMenuScraper.onTick(client);
 			GuildMenuScraper.onTick(client);
+			tel.eden.mod.chat.CharacterInfoNickname.onTick(client);
 			AttackTimerMenu.onTick(socket);
 			tel.eden.mod.emote.EmoteWheel.onTick(client);
 			tel.eden.mod.emote.UnlockedEmoteDetector.onTick(client);
@@ -1653,11 +1686,56 @@ public final class EdenModClient implements ClientModInitializer {
 		return 1;
 	}
 
+	/**
+	 * {@code /eden logscan}: a Chief or Owner reads the whole Guild Log (every filter, five
+	 * pages each) and uploads it, behind the same blocking progress screen a gift run uses.
+	 * The walk stops by itself after 90 seconds; there is no Cancel button.
+	 */
+	private int scanLog(FabricClientCommandSource source) {
+		if (!ensureRewardsReady(source)) {
+			return 0;
+		}
+		if (!guildRewards.isChief()) {
+			source.sendFeedback(Component.literal("Only Chiefs and Owners can scan the Guild Log.").withStyle(net.minecraft.ChatFormatting.RED));
+			return 0;
+		}
+		if (socket == null) {
+			source.sendFeedback(Component.literal("Not connected to the bridge, so there is nowhere to upload the log to.").withStyle(net.minecraft.ChatFormatting.RED));
+			return 0;
+		}
+		if (guildRewards.isGiftInProgress() || guildLogSync.isBusy()) {
+			source.sendFeedback(Component.literal("The Guild Log is already being read — try again in a moment.").withStyle(net.minecraft.ChatFormatting.YELLOW));
+			return 0;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		tel.eden.mod.gui.GiftProgressScreen progress = new tel.eden.mod.gui.GiftProgressScreen("Guild Log Scan");
+		showProgressScreen(progress);
+		long started = System.currentTimeMillis();
+		guildLogSync.scanWholeLog(progress::onProgress).whenComplete((rows, error) -> {
+			progress.onDone();
+			mc.execute(() -> {
+				if (error != null) {
+					LOGGER.warn("Guild log scan failed after {}ms", System.currentTimeMillis() - started, error);
+					source.sendFeedback(Component.literal("Guild Log scan failed: " + error.getMessage()).withStyle(net.minecraft.ChatFormatting.RED));
+				} else if (rows > 0) {
+					source.sendFeedback(Component.literal("Guild Log scan finished: " + rows + " rows uploaded in " + Math.round((System.currentTimeMillis() - started) / 1000.0) + "s.").withStyle(net.minecraft.ChatFormatting.GREEN));
+				} else {
+					source.sendFeedback(Component.literal("Guild Log scan did not run: the log could not be opened.").withStyle(net.minecraft.ChatFormatting.RED));
+				}
+			});
+		});
+		return 1;
+	}
+
 	/** Show the blocking gift-progress screen and attach it as the run's listener, before submitting the run. */
 	private void showGiftProgress(String title) {
-		Minecraft mc = Minecraft.getInstance();
 		tel.eden.mod.gui.GiftProgressScreen progress = new tel.eden.mod.gui.GiftProgressScreen(title, guildRewards);
 		guildRewards.setProgressListener(progress);
+		showProgressScreen(progress);
+	}
+
+	private void showProgressScreen(tel.eden.mod.gui.GiftProgressScreen progress) {
+		Minecraft mc = Minecraft.getInstance();
 		// Deferred, not immediate: this runs from inside chat command dispatch, which
 		// itself is inside ChatScreen's own send-and-close handling — a same-tick
 		// setScreen() here loses the race against that close and gets silently
@@ -2053,6 +2131,8 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private void onCharacterSelection() {
+		// A class change can change our nickname; forget the old one so it is learned afresh.
+		tel.eden.mod.chat.PlayerNameResolver.forgetAliasesFor(playerName());
 		enteredWynnGameWorld = false;
 		guildLogSync.onWorldTransition();
 		setInGameWorld(false);
@@ -2874,9 +2954,9 @@ public final class EdenModClient implements ClientModInitializer {
 		// another group's completion would name whoever we happened to be standing near.
 		boolean ownRaid = isOwnRaid(line.party());
 		java.util.List<String> extras = ownRaid ? RaidPartyTracker.extraPlayers(line.party()) : java.util.List.of();
-		LOGGER.info("Raid {}: {} party={} extras={} aspects={} emeralds={} -> {}", how, line.raidName(), line.party(), extras, line.aspects(), line.emeralds(), sent ? "sent" : "deduped");
+		LOGGER.info("Raid {}: {} party={} extras={} aspects={} emeralds={} sr={} -> {}", how, line.raidName(), line.party(), extras, line.aspects(), line.emeralds(), line.seasonalRating(), sent ? "sent" : "deduped");
 		if (sent) {
-			current.sendRaidCompletion(line.party(), line.raidName(), line.aspects(), line.emeralds(), line.guildExp(), extras);
+			current.sendRaidCompletion(line.party(), line.raidName(), line.aspects(), line.emeralds(), line.guildExp(), line.seasonalRating(), extras);
 		}
 		// One raid, one tally — dropped even when the send was deduped, or a completion
 		// arriving within the retention window would inherit this raid's players.

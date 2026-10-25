@@ -127,6 +127,42 @@ class GuildLogEventParserTest {
 	}
 
 	@Test
+	void keepsRaidParticipantsWhoseNicknamesContainSpaces() {
+		// Nicknames can contain spaces, even " and " ("lightning and the"); a username-shaped
+		// filter used to drop them, so a row of nicknames vanished and the rest were miscounted.
+		var event = (GuildLogEvent.Raid) GuildLogEventParser.parse(new GuildLogEntry("1 minute ago (09/22/26 10:30 AM EDT)", "rolling girl, lightning and the, and Koaci finished The Nameless Anomaly and claimed 2x Aspects, 2048x Emeralds, +6761m Guild Experience, and +330 Seasonal Rating")).orElseThrow();
+
+		assertEquals(java.util.List.of("rolling girl", "lightning and the", "Koaci"), event.participants());
+		assertEquals(330, event.seasonalRating());
+	}
+
+	@Test
+	void splitsATwoNameRaidWithoutCommasOnAnd() {
+		var event = (GuildLogEvent.Raid) GuildLogEventParser.parse(new GuildLogEntry("1 minute ago (09/22/26 10:30 AM EDT)", "YoureMomGood and Tawnyy finished Orphion's Nexus of Light and claimed 2x Aspects, +4507m Guild Experience, and +220 Seasonal Rating")).orElseThrow();
+
+		assertEquals(java.util.List.of("YoureMomGood", "Tawnyy"), event.participants());
+	}
+
+	@Test
+	void parsesARealWrappedRowWithColourCodesAndIconGlyphsOnEveryLine() {
+		// Shape taken from a production log: a colour code and icon glyphs open each wrapped line.
+		String text = "\u00a77\uDAFF\uDFFC\uE006\uDAFF\uDFFF\uE002\uDAFF\uDFFE Lumeniia, Robbedoesgek, and sweetserenity finished Nest\n\u00a77\uDAFF\uDFFC\uE001\uDB00\uDC06 of the Grootslangs and claimed 2x Aspects, 2048x Emeralds,\n\u00a77\uDAFF\uDFFC\uE001\uDB00\uDC06 +6761m Guild Experience, and +330 Seasonal Rating";
+		var event = (GuildLogEvent.Raid) GuildLogEventParser.parse(new GuildLogEntry("6 hours ago (10/25/26 09:17 AM EDT)", text)).orElseThrow();
+
+		assertEquals(java.util.List.of("Lumeniia", "Robbedoesgek", "sweetserenity"), event.participants());
+		assertEquals("Nest of the Grootslangs", event.raid());
+		assertEquals(330, event.seasonalRating());
+		assertEquals(6761L, event.guildExperienceMillions());
+	}
+
+	@Test
+	void namesTheRaidByItsKeywordWhateverTheLogSpellsOut() {
+		var event = (GuildLogEvent.Raid) GuildLogEventParser.parse(new GuildLogEntry("1 minute ago (09/22/26 10:30 AM EDT)", "Koaci finished Orphion\u2019s Nexus of Light and claimed 2x Aspects, and +110 Seasonal Rating")).orElseThrow();
+
+		assertEquals("Orphion's Nexus of Light", event.raid());
+	}
+
+	@Test
 	void parsesMultipleRaidParticipantsAndAspectRewards() {
 		var event = (GuildLogEvent.Raid) GuildLogEventParser.parse(new GuildLogEntry("1 minute ago (09/22/26 10:30 AM EDT)", "AllIWantForXmas, YoureMomGood, threefourteen, and IEAIAIO finished Orphion's\uE000 Nexus of Light and claimed 2x\uE001 Aspects, 2048x Emeralds, +3897m Guild Experience, and +440 Seasonal Rating")).orElseThrow();
 

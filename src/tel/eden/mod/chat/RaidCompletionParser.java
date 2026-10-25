@@ -32,18 +32,21 @@ import net.minecraft.network.chat.Style;
  * ({@link GuildChatParser}).
  */
 public final class RaidCompletionParser {
+	// The five raids, by the keyword that identifies each in any text that mentions it. The one place
+	// raid names are matched from text: the chat announcements here and the Guild Log rows both use it.
+	private static final Map<String, String> RAID_BY_KEYWORD = Map.of("grootslang", "Nest of the Grootslangs", "orphion", "Orphion's Nexus of Light", "canyon", "The Canyon Colossus", "nameless", "The Nameless Anomaly", "wartorn", "The Wartorn Palace");
+	private static final Pattern RAID_DETECT = Pattern.compile("finished\\s+[^:]{0,30}?(" + String.join("|", RAID_BY_KEYWORD.keySet()) + ")", Pattern.CASE_INSENSITIVE);
 	// Detect a raid by "finished" closely followed by a distinctive keyword of one of
 	// the five raids. This is robust because the loot — and sometimes the tail of the
 	// raid name — is rendered in a custom icon font (private-use glyphs), so the literal
 	// "claimed <loot>" text isn't reliably present in the raw chat component (Wynntils
 	// only converts the glyphs to readable text after our capture hook runs).
-	private static final Pattern RAID_DETECT = Pattern.compile("finished\\s+[^:]{0,30}?(Grootslang|Orphion|Canyon|Nameless|Wartorn)", Pattern.CASE_INSENSITIVE);
-	private static final Map<String, String> RAID_BY_KEYWORD = Map.of("grootslang", "Nest of the Grootslangs", "orphion", "Orphion's Nexus of Light", "canyon", "The Canyon Colossus", "nameless", "The Nameless Anomaly", "wartorn", "The Wartorn Palace");
 	private static final Pattern NAMES = Pattern.compile("^(.+?)\\s+finished\\b");
 	// Loot figures, pulled best-effort (each absent when rendered as glyphs).
 	private static final Pattern ASPECTS = Pattern.compile("(\\d+)x Aspects");
 	private static final Pattern EMERALDS = Pattern.compile("(\\d+)x Emeralds");
 	private static final Pattern GUILD_EXP = Pattern.compile("\\+([\\d.]+)m Guild Experience");
+	private static final Pattern SEASONAL_RATING = Pattern.compile("\\+(\\d[\\d,]*) Seasonal Rating");
 	private static final Pattern HOVER_REAL_NAME_PATTERN = Pattern.compile("(?:'(?:s)? real (?:user)?name is\\s+|Real Username:\\s*)([a-zA-Z0-9_]{3,16})", Pattern.CASE_INSENSITIVE);
 	private static final Pattern IGN = Pattern.compile("[a-zA-Z0-9_]{3,16}");
 	private static final Pattern COMMA = Pattern.compile("\\s*,\\s*");
@@ -56,6 +59,12 @@ public final class RaidCompletionParser {
 	}
 
 	private record Masked(String text, Set<String> usernames) {
+	}
+
+	/** The canonical name of the raid that {@code text} mentions by keyword, if it mentions one. */
+	public static Optional<String> raidNameIn(String text) {
+		String lower = text.toLowerCase(Locale.ROOT);
+		return RAID_BY_KEYWORD.entrySet().stream().filter(entry -> lower.contains(entry.getKey())).map(Map.Entry::getValue).findFirst();
 	}
 
 	/** Cheap keyword gate so the regex/cleanup runs only for plausible raid lines. */
@@ -104,7 +113,9 @@ public final class RaidCompletionParser {
 		int aspects = firstInt(ASPECTS, cleaned);
 		int emeralds = firstInt(EMERALDS, cleaned);
 		String guildExp = firstGroup(GUILD_EXP, cleaned);
-		return Optional.of(new RaidCompletion(party, raidName, aspects, emeralds, guildExp));
+		String rating = firstGroup(SEASONAL_RATING, cleaned);
+		Integer seasonalRating = rating.isEmpty() ? null : Integer.valueOf(rating.replace(",", ""));
+		return Optional.of(new RaidCompletion(party, raidName, aspects, emeralds, guildExp, seasonalRating));
 	}
 
 	/** First integer captured by {@code pattern} in {@code text}, or 0 if absent. */

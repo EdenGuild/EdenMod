@@ -27,6 +27,16 @@ final class RewardRetryPolicy {
 		return new Correction(unavailableUnits, silentUnits);
 	}
 
+	/**
+	 * How many clicks a gift counts as attempted. Normally the whole amount: a burst that
+	 * stops early because of a rejection leaves its unsent remainder owed, so reconciliation
+	 * should still look for it. After a cancel the unsent clicks were never meant to happen,
+	 * so only the ones actually sent count.
+	 */
+	static int attempted(boolean cancelled, int amount, int sent) {
+		return cancelled ? Math.max(0, Math.min(sent, amount)) : amount;
+	}
+
 	/** First rejection retries immediately; later ones wait 0.5s, 1s, 2s, ... (capped). */
 	static long backoffMs(int consecutiveUnavailable) {
 		if (consecutiveUnavailable <= 1) {
