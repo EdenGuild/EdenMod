@@ -89,6 +89,24 @@ public final class GuildLogSync {
 	// gift — cleared only on world join/leave. Retained only in memory to mark the
 	// payout boundary; raw lore is never sent to the bridge.
 	private volatile List<GuildLogEntry> lastGeneralBaseline = List.of();
+	private volatile long lastGeneralBaselineAt;
+	// A payout starts from a fresh baseline once the session's one is older than this. The log keeps
+	// only its latest ~120-150 rows, so a baseline left for hours scrolls out of it entirely and the
+	// post-payout scan can no longer find it. Rows from two gifts only look identical within the
+	// same minute, so refreshing across ten minutes does not bring that ambiguity back.
+	static final long BASELINE_MAX_AGE_MS = TimeUnit.MINUTES.toMillis(10);
+
+	/** Whether a baseline taken at {@code takenAt} is too old to start a payout from. */
+	static boolean baselineTooOld(long takenAt, long now) {
+		return now - takenAt > BASELINE_MAX_AGE_MS;
+	}
+
+	/** The post-payout scan read every page without meeting the baseline's rows. */
+	static final class BaselineNotFoundException extends IllegalStateException {
+		BaselineNotFoundException(String message) {
+			super(message);
+		}
+	}
 
 	public GuildLogSync(BackgroundContainerSession session) {
 		this.session = session;
@@ -275,6 +293,11 @@ public final class GuildLogSync {
 			running = true;
 			try {
 				result.complete(syncGeneralRowsAfterBaselineWithRetry(baseline));
+			} catch (BaselineNotFoundException e) {
+				// It can never be found now (it scrolled out of the log), so the next payout must
+				// start from a new one rather than fail the same way.
+				lastGeneralBaseline = List.of();
+				result.completeExceptionally(e);
 			} catch (Exception e) {
 				result.completeExceptionally(e);
 			} finally {
@@ -514,6 +537,10 @@ public final class GuildLogSync {
 
 	/** The General-only counterpart of {@link #syncLogRows()} — see {@link #reconcileNow()}. */
 	private List<GuildLogEvent> syncGeneralRowsOnly() {
+		if (!lastGeneralBaseline.isEmpty() && baselineTooOld(lastGeneralBaselineAt, System.currentTimeMillis())) {
+			LOGGER.info("Guild log: starting this payout from a fresh baseline, the last one is over {} minutes old", TimeUnit.MILLISECONDS.toMinutes(BASELINE_MAX_AGE_MS));
+			lastGeneralBaseline = List.of();
+		}
 		if (worldTransition || !openAndCommand("guild log", title -> title.contains("Log:"), LOG_SLOTS, "gu log")) {
 			return List.of();
 		}
@@ -611,7 +638,7 @@ public final class GuildLogSync {
 					break;
 				}
 			}
-			throw new IllegalStateException("Guild Log baseline was not found within " + MAX_POST_GIFT_LOG_PAGES + " pages");
+			throw new BaselineNotFoundException("Guild Log baseline was not found within " + MAX_POST_GIFT_LOG_PAGES + " pages");
 		} finally {
 			onClientRun(session::close);
 		}
@@ -723,6 +750,7 @@ public final class GuildLogSync {
 			// set like this correctly — it only needed this side to stop discarding the
 			// evidence before ever sending it.
 			lastGeneralBaseline = List.copyOf(entries);
+			lastGeneralBaselineAt = System.currentTimeMillis();
 		}
 		List<GuildLogEvent> events = parseEntries(entries);
 		long rewards = events.stream().filter(GuildLogEvent.Reward.class::isInstance).count();

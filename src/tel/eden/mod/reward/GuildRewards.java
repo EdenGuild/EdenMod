@@ -1930,10 +1930,7 @@ public final class GuildRewards {
 			backgroundSession.close();
 			return;
 		}
-		LocalPlayer player = Minecraft.getInstance().player;
-		if (player != null) {
-			player.closeContainer();
-		}
+		BackgroundContainerSession.closeContainerKeepingScreen(Minecraft.getInstance());
 	}
 
 	private static AbstractContainerMenu menu() {

@@ -88,7 +88,7 @@ public final class BackgroundContainerSession {
 		}
 		if (mc.player.containerMenu != mc.player.inventoryMenu) {
 			LOGGER.info("Background container: closing orphan containerMenu {} ('{}')", mc.player.containerMenu.containerId, observedServerTitle);
-			mc.player.closeContainer();
+			closeContainerKeepingScreen(mc);
 		}
 		if (observedServerContainerId > 0) {
 			LOGGER.info("Background container: closing lingering container {} ('{}')", observedServerContainerId, observedServerTitle);
@@ -102,6 +102,25 @@ public final class BackgroundContainerSession {
 		this.aborted = false;
 		this.serverClosed = false;
 		return true;
+	}
+
+	/**
+	 * Close whatever container the player has open. Vanilla's {@code closeContainer()} also sets the
+	 * screen to null, which would take down a progress screen that is deliberately holding the player
+	 * while a background run finishes; with one showing, only the container is closed.
+	 */
+	public static void closeContainerKeepingScreen(Minecraft mc) {
+		if (mc.player == null) {
+			return;
+		}
+		if (mc.screen instanceof tel.eden.mod.gui.BackgroundProgressScreen) {
+			if (mc.player.containerMenu != mc.player.inventoryMenu && mc.getConnection() != null) {
+				mc.getConnection().send(new ServerboundContainerClosePacket(mc.player.containerMenu.containerId));
+				mc.player.containerMenu = mc.player.inventoryMenu;
+			}
+			return;
+		}
+		mc.player.closeContainer();
 	}
 
 	// The player's own inventory menu (container 0) numbers the hotbar from here.
