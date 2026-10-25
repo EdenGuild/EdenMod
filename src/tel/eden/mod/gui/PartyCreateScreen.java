@@ -16,7 +16,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import tel.eden.mod.EdenModClient;
 
-/** Screen GUI for creating a raid/Annihilation/Festival/Other party with auto-detected party size. */
+/** Screen GUI for creating a raid/Annihilation/Festival/Other party. */
 public final class PartyCreateScreen extends EdenReferenceScreen {
 	private static final int BASE_PANEL_WIDTH = 350;
 	private static final int BASE_PANEL_HEIGHT = 330;

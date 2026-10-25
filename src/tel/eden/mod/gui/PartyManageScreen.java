@@ -49,15 +49,18 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		this.parent = parent;
 		this.mod = mod;
 		this.party = party;
+		this.filledSlots = filledCount(party);
+		this.maxSize = party.max();
+	}
 
-		int fSlots = 0;
+	private static int filledCount(PartyInfo party) {
+		int filled = 0;
 		for (String member : party.members()) {
 			if (member.equals("*filled*")) {
-				fSlots++;
+				filled++;
 			}
 		}
-		this.filledSlots = fSlots;
-		this.maxSize = party.max();
+		return filled;
 	}
 
 	@Override
@@ -69,14 +72,16 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 				if (p.id() == party.id()) {
 					found = true;
 					if (!p.equals(party)) {
+						// Keep the host's unsent size edits; take the server's values for the rest.
+						boolean maxEdited = this.maxSize != party.max();
+						boolean filledEdited = this.filledSlots != filledCount(party);
 						this.party = p;
-						this.maxSize = p.max();
-						int fSlots = 0;
-						for (String m : p.members()) {
-							if (m.equals("*filled*"))
-								fSlots++;
+						if (!maxEdited) {
+							this.maxSize = p.max();
 						}
-						this.filledSlots = fSlots;
+						if (!filledEdited) {
+							this.filledSlots = filledCount(p);
+						}
 
 						String curNote = noteField != null ? noteField.getValue() : null;
 						boolean noteFocused = noteField != null && noteField.isFocused();
@@ -259,29 +264,15 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 
 	private void adjustFilledSlots(int amount) {
 		int limit = maxSize - realMembers();
-		int next = Math.max(0, Math.min(limit, filledSlots + amount));
-		if (next != filledSlots) {
-			filledSlots = next;
-			updateWidgetStates();
-			var ws = mod != null ? mod.socket() : null;
-			if (ws != null) {
-				ws.sendPartyManage("filled", null, filledSlots, null);
-			}
-		}
+		filledSlots = Math.max(0, Math.min(limit, filledSlots + amount));
+		updateWidgetStates();
 	}
 
 	private void adjustMax(int amount) {
 		int floor = Math.max(2, realMembers() + filledSlots);
-		int next = Math.max(floor, Math.min(10, maxSize + amount));
-		if (next != maxSize) {
-			maxSize = next;
-			filledSlots = Math.min(filledSlots, Math.max(0, maxSize - realMembers()));
-			updateWidgetStates();
-			var ws = mod != null ? mod.socket() : null;
-			if (ws != null) {
-				ws.sendPartyManage("max", null, maxSize, null);
-			}
-		}
+		maxSize = Math.max(floor, Math.min(10, maxSize + amount));
+		filledSlots = Math.min(filledSlots, Math.max(0, maxSize - realMembers()));
+		updateWidgetStates();
 	}
 
 	private void updateWidgetStates() {
@@ -384,6 +375,19 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 	private void onUpdate() {
 		var ws = mod != null ? mod.socket() : null;
 		if (ws != null) {
+			// Size edits go out once here, not per click, so +/- doesn't re-render the Discord embed each time.
+			// A shrinking party drops its filled slots before its max, or the bot rejects the max as below occupancy.
+			boolean maxChanged = this.maxSize != party.max();
+			boolean shrinking = this.maxSize < party.max();
+			if (maxChanged && !shrinking) {
+				ws.sendPartyManage("max", null, this.maxSize, null);
+			}
+			if (this.filledSlots != filledCount(party)) {
+				ws.sendPartyManage("filled", null, this.filledSlots, null);
+			}
+			if (maxChanged && shrinking) {
+				ws.sendPartyManage("max", null, this.maxSize, null);
+			}
 			if (noteField != null && !noteField.getValue().equals(party.note())) {
 				ws.sendPartyManage("note", noteField.getValue(), 0, null);
 			}
