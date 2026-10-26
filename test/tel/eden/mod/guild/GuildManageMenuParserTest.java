@@ -1,6 +1,7 @@
 package tel.eden.mod.guild;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -24,6 +25,33 @@ class GuildManageMenuParserTest {
 		assertEquals(30, snapshot.weeklyGoal());
 		assertEquals(0, snapshot.territoryCount());
 		assertEquals(List.of(new GuildManageSnapshot.Alliance("Blood Orchid", "Wilt"), new GuildManageSnapshot.Alliance("Paladins United", "PUN")), snapshot.alliances());
+	}
+
+	@Test
+	void readsTheHoldingRateWhenTheItemShowsIt() {
+		// Observed on Eden (64 territories): the item grows a "Captured Territories" and a "+N SR per Hour" line; only the rate is read from it, the count comes from the Territories item.
+		var lines = List.of("§dSeason 33 Status", "§7Season will end in §d1 month", " ", "§dEden's Status", "§d- §7Season Rating (SR): §f4042943", "§d- §7Position: §f1", " ", "§eCaptured Territories: §f64", "§f+3007 §eSR §7per Hour", " ", "§dEach territory you control");
+		var snapshot = GuildManageMenuParser.parseText(Map.of(11, lines, 13, List.of("§6Current Guild Goal: §f24§7/30"), 14, List.of("§e§lTerritories [64]"), 26, List.of(" ", "§aGuild Alliance:", "§a- §7Blood Orchid [Wilt]"))).orElseThrow();
+
+		assertEquals(3007, snapshot.srPerHour());
+		assertEquals(64, snapshot.territoryCount());
+		assertEquals(4_042_943L, snapshot.seasonRating());
+	}
+
+	@Test
+	void aMissingHoldingRateNeverHoldsTheSnapshotBack() {
+		var snapshot = GuildManageMenuParser.parseText(Map.of(11, seasonLines(), 13, List.of("§6Current Guild Goal: §f24§7/30"), 14, List.of("§e§lTerritories [0]"), 26, List.of(" ", "§aGuild Alliance:", "§a- §7Blood Orchid [Wilt]"))).orElseThrow();
+
+		assertNull(snapshot.srPerHour());
+	}
+
+	@Test
+	void aRateWithoutACapturedTerritoriesLineIsStillRead() {
+		var lines = List.of("§dSeason 33 Status", "§7Season will end in §d1 month", "§d- §7Season Rating (SR): §f4042943", "§d- §7Position: §f1", "§f+3007 §eSR §7per Hour");
+		var snapshot = GuildManageMenuParser.parseText(Map.of(11, lines, 13, List.of("§6Current Guild Goal: §f24§7/30"), 14, List.of("§e§lTerritories [64]"), 26, List.of(" ", "§aGuild Alliance:", "§a- §7Blood Orchid [Wilt]"))).orElseThrow();
+
+		assertEquals(3007, snapshot.srPerHour());
+		assertEquals(64, snapshot.territoryCount());
 	}
 
 	@Test

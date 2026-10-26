@@ -31,7 +31,12 @@ public final class BridgeWebSocketClient {
 	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final int MAX_BACKOFF_SECONDS = 60;
 	private static final int MAX_SESSION_VERIFY_RETRIES = 3;
-	private static final Pattern SERVER_ID_PATTERN = Pattern.compile("[0-9a-fA-F\\-]{1,128}");
+	// The bridge's nonce: 16 random bytes, hex-encoded. Nothing else is worth answering.
+	private static final Pattern SERVER_NONCE_PATTERN = Pattern.compile("[0-9a-fA-F]{32}");
+	private static final String JOIN_ID_PREFIX = "eden-bridge-auth-v2:";
+	private static final int JOIN_ID_CHARS = 40;
+	/** Sent in {@code authResponse}: from 2 on, the Mojang join uses {@link #joinId}, not the raw nonce. */
+	private static final int AUTH_VERSION = 2;
 	/**
 	 * Capability names this build understands. Declared to the server; never
 	 * offered back. Kept as reusable feature-flag infrastructure even when
@@ -203,10 +208,11 @@ public final class BridgeWebSocketClient {
 
 	/**
 	 * Proves the connecting player holds a live Minecraft session (the v2 Mojang
-	 * handshake). Given the server's {@code serverId} nonce it performs a Mojang
-	 * {@code joinServer} for the current account and returns the IGN to report; the
-	 * bridge then confirms that server-side via {@code hasJoined}. The access token
-	 * goes only to Mojang, never to the bridge.
+	 * handshake). Given a {@code serverId} it performs a Mojang {@code joinServer} for
+	 * the current account and returns the IGN to report; the bridge then confirms that
+	 * server-side via {@code hasJoined}. The access token goes only to Mojang, never to
+	 * the bridge. The id is derived from the bridge's nonce ({@link #joinId}), never the
+	 * nonce itself, so the bridge cannot choose what Mojang records.
 	 */
 	public interface SessionAuthenticator {
 		/** Complete {@code joinServer} for {@code serverId}; return the IGN to report. */
@@ -386,6 +392,9 @@ public final class BridgeWebSocketClient {
 		}
 		if (snapshot.territoryCount() != null) {
 			obj.addProperty("territoryCount", snapshot.territoryCount());
+		}
+		if (snapshot.srPerHour() != null) {
+			obj.addProperty("srPerHour", snapshot.srPerHour());
 		}
 		enqueueSend(current, obj.toString());
 	}
@@ -1458,8 +1467,8 @@ public final class BridgeWebSocketClient {
 	 * {@code joinServer} does network I/O; failures just leave the connection
 	 * unverified (the server times it out and closes).
 	 */
-	private void handleAuthChallenge(String serverId) {
-		if (serverId == null || serverId.isEmpty() || !SERVER_ID_PATTERN.matcher(serverId).matches()) {
+	private void handleAuthChallenge(String serverNonce) {
+		if (!isServerNonce(serverNonce)) {
 			return;
 		}
 		if (!authChallengeSeen.compareAndSet(false, true)) {
@@ -1472,7 +1481,7 @@ public final class BridgeWebSocketClient {
 				return;
 			}
 			try {
-				String username = authenticator.joinServer(serverId);
+				String username = authenticator.joinServer(joinId(serverNonce));
 				if (username == null || username.isEmpty()) {
 					LOGGER.warn("Session authenticator returned no username; cannot verify");
 					return;
@@ -1481,6 +1490,7 @@ public final class BridgeWebSocketClient {
 				JsonObject obj = new JsonObject();
 				obj.addProperty("type", "authResponse");
 				obj.addProperty("username", username);
+				obj.addProperty("authVersion", AUTH_VERSION);
 				// Capability self-declaration — a flat, static list of whatever this
 				// jar was compiled with, regardless of what the server does with it —
 				// rides on this, the very first message the mod ever sends, so the
@@ -1500,6 +1510,30 @@ public final class BridgeWebSocketClient {
 		}, "eden-session-auth");
 		thread.setDaemon(true);
 		thread.start();
+	}
+
+	/** Whether {@code value} has the shape of a bridge nonce. */
+	static boolean isServerNonce(String value) {
+		return value != null && SERVER_NONCE_PATTERN.matcher(value).matches();
+	}
+
+	/**
+	 * The {@code serverId} to join Mojang with for the bridge's {@code serverNonce}.
+	 *
+	 * <p>Mojang records a join under any string and cannot tell ours from a Minecraft
+	 * server's login hash, so joining with a value the bridge chose would let a hostile
+	 * bridge hand us another server's hash and have us approve a login to it as this
+	 * player. A hash under our own prefix is something no other server will ever use, and
+	 * no nonce can produce a chosen one. Cut to 40 hex characters, a vanilla hash's length.
+	 * Must match {@code session_auth.join_id} on the bridge.
+	 */
+	static String joinId(String serverNonce) {
+		try {
+			byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest((JOIN_ID_PREFIX + serverNonce).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			return java.util.HexFormat.of().formatHex(digest).substring(0, JOIN_ID_CHARS);
+		} catch (java.security.NoSuchAlgorithmException e) {
+			throw new IllegalStateException("SHA-256 unavailable", e);
+		}
 	}
 
 	/** Whether a server {@code error} code is retryable rather than a hard rejection. */

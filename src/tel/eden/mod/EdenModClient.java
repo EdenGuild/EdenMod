@@ -1345,7 +1345,8 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/**
 	 * Answer a v2 session challenge: run Mojang's {@code joinServer} for the current
-	 * account against the server's {@code serverId} nonce and return the IGN to
+	 * account against the {@code serverId} it is given (derived from the server's nonce,
+	 * see {@code BridgeWebSocketClient.joinId}) and return the IGN to
 	 * report. The access token is sent only to Mojang. The bridge then verifies the
 	 * join via {@code hasJoined} — so a patched mod cannot fake this, and a copied
 	 * token is useless to anyone not logged into this Minecraft account.

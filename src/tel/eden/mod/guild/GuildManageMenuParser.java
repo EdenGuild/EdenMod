@@ -25,6 +25,8 @@ public final class GuildManageMenuParser {
 	// every lore line is collapsed into one string.
 	private static final Pattern SEASON_ENDS_IN = Pattern.compile("Season will end in (.+)", Pattern.CASE_INSENSITIVE);
 	private static final Pattern SEASON_RATING = Pattern.compile("Season Rating \\(SR\\):\\s*([\\d,]+)", Pattern.CASE_INSENSITIVE);
+	// Optional: the status item only lists it while the guild holds territories.
+	private static final Pattern SR_PER_HOUR = Pattern.compile("\\+\\s*([\\d,]+)\\s*SR per Hour", Pattern.CASE_INSENSITIVE);
 	private static final Pattern SEASON_POSITION = Pattern.compile("Position:\\s*(\\d+)", Pattern.CASE_INSENSITIVE);
 	private static final Pattern WEEKLY_GOAL = Pattern.compile("Current Guild Goal:\\s*(\\d+)\\s*/\\s*(\\d+)", Pattern.CASE_INSENSITIVE);
 	private static final Pattern TERRITORIES = Pattern.compile("Territories\\s*\\[(\\d+)]", Pattern.CASE_INSENSITIVE);
@@ -67,6 +69,7 @@ public final class GuildManageMenuParser {
 		String seasonEndsIn = firstLineMatch(seasonLines, SEASON_ENDS_IN);
 		Long rating = number(SEASON_RATING, season);
 		Integer position = integer(SEASON_POSITION, season);
+		Long srPerHour = number(SR_PER_HOUR, season);
 		Matcher goal = WEEKLY_GOAL.matcher(weekly);
 		Integer completed = null;
 		Integer required = null;
@@ -80,7 +83,8 @@ public final class GuildManageMenuParser {
 		if (!complete) {
 			return Optional.empty();
 		}
-		return Optional.of(new GuildManageSnapshot(seasonNumber, seasonEndsIn, rating, position, completed, required, territoryCount, alliances));
+		Integer rate = srPerHour != null && srPerHour <= Integer.MAX_VALUE ? Integer.valueOf(srPerHour.intValue()) : null;
+		return Optional.of(new GuildManageSnapshot(seasonNumber, seasonEndsIn, rating, position, completed, required, territoryCount, rate, alliances));
 	}
 
 	/**
