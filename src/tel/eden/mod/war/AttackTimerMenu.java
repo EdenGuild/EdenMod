@@ -28,6 +28,7 @@ import net.minecraft.world.scores.Scoreboard;
 import org.lwjgl.glfw.GLFW;
 import tel.eden.mod.EdenLogger;
 import tel.eden.mod.EdenModClient;
+import tel.eden.mod.chat.ChatText;
 import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.hud.HudLayout;
 import tel.eden.mod.hud.HudPanel;
@@ -59,6 +60,15 @@ public final class AttackTimerMenu {
 	private static final Pattern TIMER = Pattern.compile("^[-\\s]*(\\d{1,2}:\\d{2})\\s+(.+?)\\s*$");
 	// A guild-chat defense report, e.g. "Detlas defense is High" (Wynntils' format).
 	private static final Pattern DEFENSE_REPORT = Pattern.compile("^(.+?) defense is (Very Low|Low|Medium|High|Very High)\\b", Pattern.CASE_INSENSITIVE);
+	// Wynncraft's announcement of a queued attack, exact to the second, repeated 30s out:
+	// "The war for Detlas will start in 9 minutes." The sidebar cuts attack lines off once
+	// too many are queued, so these fill in the ones it drops.
+	private static final Pattern WAR_ANNOUNCE = Pattern.compile("^The war for (.+?) will start in (?:(\\d+) minutes?)?(?: and )?(?:(\\d+) seconds?)?\\.$");
+	// "[PLHR] captured the territory Detlas." Another guild took it first, which cancels and
+	// refunds any attack queued on it (the refund line itself names no territory).
+	private static final Pattern CAPTURED = Pattern.compile("^\\[[^\\]]+\\] (?:has )?captured the territory (.+?)\\.$");
+	// A cut-off sidebar name whose countdown is within this of a chat timer is that timer.
+	private static final int SAME_TIMER_SECONDS = 5;
 
 	private static final int HEAD_SIZE = 8;
 	private static final int HEAD_GAP = 1;
@@ -143,6 +153,10 @@ public final class AttackTimerMenu {
 	// the territory wall (attackedTerritories()) query it every frame. Memoize the scan per
 	// game tick so the two callers, and multiple frames within a tick, share one parse.
 	private static long cachedAttacksTick = Long.MIN_VALUE;
+	/** When each attack announced in chat is due (epoch ms), by territory. */
+	private static final Map<String, Long> chatTimers = new HashMap<>();
+	/** Territories another guild captured since the last tick: attacks on them were cancelled. */
+	private static final List<String> cancelledAttacks = new ArrayList<>();
 	private static List<Upcoming> cachedAttacks = List.of();
 
 	private record Upcoming(String time, String territory) {
@@ -327,24 +341,94 @@ public final class AttackTimerMenu {
 		long now = System.currentTimeMillis();
 		TimerChanges changes = advanceTimers(current, now);
 		for (String territory : changes.ended()) {
-			chatDefenses.remove(territory);
-			queuers.remove(territory);
-			localQueuers.remove(territory);
-			localQueuerNoTimerSince.remove(territory);
-			lastReportedInsideByTerritory.remove(territory);
-			pendingInsideByTerritory.remove(territory);
-			pendingSinceByTerritory.remove(territory);
-			pendingQueueSend.remove(territory);
+			forgetTerritory(territory);
 			if (socket != null) {
-				socket.sendWarTimerEnded(territory);
+				socket.sendWarTimerEnded(territory, false);
 			}
 		}
+		// A cancelled attack ends now, not held like a hidden timer until it was due.
+		for (String territory : cancelledAttacks) {
+			forgetTerritory(territory);
+			previousActive.remove(territory);
+			missingSince.remove(territory);
+			lastSeenSeconds.remove(territory);
+			lastSeenAt.remove(territory);
+			if (socket != null) {
+				socket.sendWarTimerEnded(territory, true);
+			}
+		}
+		cancelledAttacks.clear();
 		for (String territory : matchQueues(changes.appeared(), now)) {
 			confirmQueued(territory);
 		}
 		flushQueueSends(current, now, socket);
 		dropStaleLocalQueuers(previousActive, now);
 		reportInside(socket);
+	}
+
+	/** Clear this client's state for a territory whose attack is over. */
+	private static void forgetTerritory(String territory) {
+		chatDefenses.remove(territory);
+		queuers.remove(territory);
+		localQueuers.remove(territory);
+		localQueuerNoTimerSince.remove(territory);
+		lastReportedInsideByTerritory.remove(territory);
+		pendingInsideByTerritory.remove(territory);
+		pendingSinceByTerritory.remove(territory);
+		pendingQueueSend.remove(territory);
+	}
+
+	/** Read a Wynncraft system-chat line for attack announcements and captures (client thread). */
+	public static void onChat(String rawLine) {
+		onWarChat(ChatText.normalize(WarDPS.clean(rawLine)), System.currentTimeMillis());
+	}
+
+	static void onWarChat(String line, long now) {
+		Matcher announce = WAR_ANNOUNCE.matcher(line);
+		if (announce.matches()) {
+			if (announce.group(2) == null && announce.group(3) == null) {
+				return;
+			}
+			long minutes = announce.group(2) != null ? Long.parseLong(announce.group(2)) : 0L;
+			long seconds = announce.group(3) != null ? Long.parseLong(announce.group(3)) : 0L;
+			chatTimers.put(announce.group(1), now + (minutes * 60L + seconds) * 1000L);
+			return;
+		}
+		Matcher captured = CAPTURED.matcher(line);
+		if (captured.matches()) {
+			String territory = captured.group(1);
+			chatTimers.remove(territory);
+			cancelledAttacks.add(territory);
+		}
+	}
+
+	/**
+	 * Chat-announced attacks the sidebar is not showing, with seconds left, given the
+	 * sidebar's own {@code territory -> seconds} rows. Drops timers that are now due.
+	 */
+	static Map<String, Integer> chatOnlyTimers(Map<String, Integer> sidebar, long now) {
+		chatTimers.values().removeIf(due -> due <= now);
+		Map<String, Integer> out = new HashMap<>();
+		for (Map.Entry<String, Long> timer : chatTimers.entrySet()) {
+			int left = (int) ((timer.getValue() - now + 999L) / 1000L);
+			if (!onSidebar(sidebar, timer.getKey(), left)) {
+				out.put(timer.getKey(), left);
+			}
+		}
+		return out;
+	}
+
+	/** Whether the sidebar shows this attack, by its name or a cut-off name with the same countdown. */
+	private static boolean onSidebar(Map<String, Integer> sidebar, String territory, int left) {
+		if (sidebar.containsKey(territory)) {
+			return true;
+		}
+		for (Map.Entry<String, Integer> row : sidebar.entrySet()) {
+			if (territory.startsWith(row.getKey()) && Math.abs((long) row.getValue() - left) <= SAME_TIMER_SECONDS) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** What one sidebar reading changed: timers that have ended, and ones that just appeared. */
@@ -578,6 +662,8 @@ public final class AttackTimerMenu {
 		lastSeenAt.clear();
 		attackClickAt.clear();
 		pendingQueueSend.clear();
+		chatTimers.clear();
+		cancelledAttacks.clear();
 		clickBoxes.clear();
 		headBoxes.clear();
 		soonestTerritory = null;
@@ -957,6 +1043,11 @@ public final class AttackTimerMenu {
 				}
 			}
 		}
+		Map<String, Integer> sidebarTimers = new HashMap<>();
+		for (Upcoming attack : attacks) {
+			sidebarTimers.put(attack.territory(), seconds(attack.time()));
+		}
+		chatOnlyTimers(sidebarTimers, System.currentTimeMillis()).forEach((territory, left) -> attacks.add(new Upcoming(String.format("%d:%02d", left / 60, left % 60), territory)));
 		// Sort by actual remaining time, not lexicographically: "9:05" is sooner than "10:02"
 		// even though '1' < '9' as text.
 		attacks.sort((a, b) -> Integer.compare(seconds(a.time()), seconds(b.time())));
@@ -1035,6 +1126,10 @@ public final class AttackTimerMenu {
 
 	private static String stripCodes(String text) {
 		return text.replaceAll("§.", "");
+	}
+
+	static List<String> cancelledAttacksForTesting() {
+		return cancelledAttacks;
 	}
 
 	static void putLocalQueuerForTesting(String territory, WarQueuer queuer) {

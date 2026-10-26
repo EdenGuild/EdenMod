@@ -112,6 +112,53 @@ class AttackTimerMenuTest {
 	}
 
 	@Test
+	void chatAnnouncedAttackShowsWhenTheSidebarDropsIt() {
+		AttackTimerMenu.onWarChat("The war for Dodegar's Forge will start in 8 minutes.", 0L);
+		AttackTimerMenu.onWarChat("The war for Detlas will start in 1 minute and 30 seconds.", 0L);
+		AttackTimerMenu.onWarChat("The war for Ragni will start in 30 seconds.", 0L);
+
+		assertEquals(Map.of("Dodegar's Forge", 480, "Detlas", 90, "Ragni", 30), AttackTimerMenu.chatOnlyTimers(Map.of(), 0L));
+		// Counts down, and a timer that is due is gone.
+		assertEquals(Map.of("Dodegar's Forge", 450, "Detlas", 60), AttackTimerMenu.chatOnlyTimers(Map.of(), 30_000L));
+	}
+
+	@Test
+	void chatTimerTheSidebarAlreadyShowsIsNotDoubled() {
+		AttackTimerMenu.onWarChat("The war for Guardian of the Forest will start in 9 minutes.", 0L);
+		AttackTimerMenu.onWarChat("The war for Detlas Suburbs will start in 3 minutes.", 0L);
+
+		assertEquals(Map.of(), AttackTimerMenu.chatOnlyTimers(Map.of("Guardian of the Forest", 538, "Detlas Suburbs", 180), 1_000L));
+		// A cut-off sidebar name is the same attack only when its countdown matches.
+		assertEquals(Map.of(), AttackTimerMenu.chatOnlyTimers(Map.of("Guardian of the", 539, "Detlas Suburbs", 180), 1_000L));
+		assertEquals(Map.of("Detlas Suburbs", 179), AttackTimerMenu.chatOnlyTimers(Map.of("Guardian of the Forest", 539, "Detlas", 60), 1_000L));
+	}
+
+	@Test
+	void captureCancelsTheAttack() {
+		AttackTimerMenu.onWarChat("The war for Mycelial Expanse will start in 7 minutes.", 0L);
+		AttackTimerMenu.onWarChat("Your active attack was canceled and refunded to your headquarter.", 1_000L);
+		AttackTimerMenu.onWarChat("[PLHR] captured the territory Mycelial Expanse.", 1_000L);
+
+		assertEquals(Map.of(), AttackTimerMenu.chatOnlyTimers(Map.of(), 2_000L));
+		assertEquals(List.of("Mycelial Expanse"), AttackTimerMenu.cancelledAttacksForTesting());
+
+		AttackTimerMenu.onWarChat("[PLHR] has captured the territory Dodegar's Forge.", 3_000L);
+		assertEquals(List.of("Mycelial Expanse", "Dodegar's Forge"), AttackTimerMenu.cancelledAttacksForTesting());
+	}
+
+	@Test
+	void linesThatOnlyLookLikeWarNewsAreIgnored() {
+		AttackTimerMenu.onWarChat("If they capture it first your attack will be canceled and refunded.", 0L);
+		AttackTimerMenu.onWarChat("Be careful, this territory is also being attacked by Polish Hussars!", 0L);
+		AttackTimerMenu.onWarChat("Alice: The war for Detlas will start in 5 minutes.", 0L);
+		AttackTimerMenu.onWarChat("The war battle will start in 25 seconds.", 0L);
+		AttackTimerMenu.onWarChat("The war for Detlas will start in .", 0L);
+
+		assertEquals(Map.of(), AttackTimerMenu.chatOnlyTimers(Map.of(), 0L));
+		assertEquals(List.of(), AttackTimerMenu.cancelledAttacksForTesting());
+	}
+
+	@Test
 	void worldJoinKeepsTheBoardButResetClearsIt() {
 		WarGoer goer = new WarGoer("Carol", "00000000-0000-0000-0000-00000000000c", false);
 		AttackTimerMenu.updateBoard(List.of(new WarBoardEntry("Detlas", "High", false, ALICE, List.of(goer))));

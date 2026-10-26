@@ -934,9 +934,10 @@ public final class BridgeWebSocketClient {
 	/**
 	 * Tell the backend a territory's attack timer has ended (no longer on the scoreboard),
 	 * so it clears that territory's cached defence/conflict/who's-going and the next war on
-	 * it starts fresh.
+	 * it starts fresh. {@code captured} marks an attack cancelled because another guild
+	 * took the territory first, which the backend believes even before the war was due.
 	 */
-	public void sendWarTimerEnded(String territory) {
+	public void sendWarTimerEnded(String territory, boolean captured) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
@@ -944,6 +945,9 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "warTimerEnded");
 		obj.addProperty("territory", territory);
+		if (captured) {
+			obj.addProperty("captured", true);
+		}
 		enqueueSend(current, obj.toString());
 	}
 
