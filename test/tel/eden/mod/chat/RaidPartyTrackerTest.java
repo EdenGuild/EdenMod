@@ -38,6 +38,16 @@ class RaidPartyTrackerTest {
 	}
 
 	@Test
+	void parsesWynncraftsPrefixedPartyListLine() {
+		RaidPartyTracker.setExpectingPartyListForTesting(true);
+		// Wynncraft's real line: yellow party-channel glyphs before the text (Wynntils' PARTY_PREFIX_REGEX).
+		Component msg = Component.literal("§e Party members: Lumeniia, Robbedoesgek, sweetserenity, and penguinloverx3");
+
+		assertTrue(RaidPartyTracker.handlePartyListChat(msg));
+		assertEquals(List.of("Lumeniia", "Robbedoesgek", "sweetserenity", "penguinloverx3"), List.copyOf(RaidPartyTracker.partyMembersForTesting()));
+	}
+
+	@Test
 	void parsesPartyListWithLeaderStarAndNicknames() {
 		RaidPartyTracker.setExpectingPartyListForTesting(true);
 
@@ -81,6 +91,23 @@ class RaidPartyTrackerTest {
 
 		assertFalse(handled);
 		assertTrue(RaidPartyTracker.isExpectingPartyList());
+	}
+
+	@Test
+	void asksForThePartyListOncePerRaidEvenWithAWynntilsRoster() {
+		RaidPartyTracker.addPartyMemberForTesting("Robbedoesgek"); // Wynntils' party, missing a member
+		assertTrue(RaidPartyTracker.claimPartyListRequest(1_000_000L));
+
+		// The roster has someone, so no retry spam later in the raid.
+		assertFalse(RaidPartyTracker.claimPartyListRequest(1_020_000L));
+	}
+
+	@Test
+	void retriesThePartyListWhileTheRosterIsEmpty() {
+		assertTrue(RaidPartyTracker.claimPartyListRequest(1_000_000L));
+		assertFalse(RaidPartyTracker.claimPartyListRequest(1_005_000L)); // too soon
+		assertTrue(RaidPartyTracker.claimPartyListRequest(1_020_000L));
+		assertFalse(RaidPartyTracker.claimPartyListRequest(1_040_000L)); // out of attempts
 	}
 
 	@Test

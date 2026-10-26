@@ -196,32 +196,36 @@ public final class RaidPartyTracker {
 	}
 
 	private static void checkOrRequestParty(List<String> wynntilsParty) {
-		if (WynntilsPartyBridge.isAvailable()) {
-			if (!wynntilsParty.isEmpty()) {
-				synchronized (LOCK) {
-					partyMembers.addAll(wynntilsParty);
-				}
-			}
-		} else {
-			boolean needRequest;
-			long now = System.currentTimeMillis();
+		if (!wynntilsParty.isEmpty()) {
 			synchronized (LOCK) {
-				needRequest = partyMembers.isEmpty() && partyListAttempts < MAX_PARTY_LIST_ATTEMPTS && (!expectingPartyList || now - partyListRequestedAt > 5000L) && (now - partyListRequestedAt > 10_000L);
-				if (needRequest) {
-					partyListAttempts++;
-					expectingPartyList = true;
-					partyListRequestedAt = now;
-				}
+				partyMembers.addAll(wynntilsParty);
 			}
+		}
+		if (claimPartyListRequest(System.currentTimeMillis())) {
+			try {
+				Minecraft mc = Minecraft.getInstance();
+				if (mc.getConnection() != null) {
+					mc.getConnection().sendCommand("party list");
+				}
+			} catch (Throwable ignored) {
+			}
+		}
+	}
+
+	/**
+	 * Whether to send the hidden {@code /party list} now, marking it sent. Asked once per raid
+	 * even when Wynntils has a party, because Wynntils' party drops members mid-raid (an ally
+	 * then misses their credit); asked again only while the roster is still empty.
+	 */
+	static boolean claimPartyListRequest(long now) {
+		synchronized (LOCK) {
+			boolean needRequest = (partyListAttempts == 0 || partyMembers.isEmpty()) && partyListAttempts < MAX_PARTY_LIST_ATTEMPTS && (!expectingPartyList || now - partyListRequestedAt > 5000L) && (now - partyListRequestedAt > 10_000L);
 			if (needRequest) {
-				try {
-					Minecraft mc = Minecraft.getInstance();
-					if (mc.getConnection() != null) {
-						mc.getConnection().sendCommand("party list");
-					}
-				} catch (Throwable ignored) {
-				}
+				partyListAttempts++;
+				expectingPartyList = true;
+				partyListRequestedAt = now;
 			}
+			return needRequest;
 		}
 	}
 
