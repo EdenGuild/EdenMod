@@ -145,8 +145,8 @@ public final class BridgeConfig {
 	/** HUD chip showing your rolling 7-day war count (from the backend). */
 	public boolean warWeeklyCountHud = false;
 
-	/** Territory war battle start bell timing (0 = Off, 1-25s before battle starts). Off by default. */
-	public int warBattleStartBellSeconds = 0;
+	/** Bell when the in-war battle countdown starts (the 25s line). Off by default. */
+	public boolean warBattleStartBell = false;
 
 	/**
 	 * Attack timer bell: ring when a timer for the territory you're standing in is at this
@@ -496,7 +496,6 @@ public final class BridgeConfig {
 					config.emotePickerColumns = Math.max(1, Math.min(10, config.emotePickerColumns));
 					config.emotePickerRows = Math.max(1, Math.min(10, config.emotePickerRows));
 					config.warAttackTimerMaxRows = Math.max(1, Math.min(50, config.warAttackTimerMaxRows));
-					config.warBattleStartBellSeconds = Math.max(0, Math.min(25, config.warBattleStartBellSeconds));
 					config.warAttackTimerBellSeconds = Math.max(0, Math.min(120, config.warAttackTimerBellSeconds));
 					config.imagePreviewSize = Math.max(1, Math.min(100, config.imagePreviewSize));
 					// The label scale divides the draw position, so a hand-edited 0 would put

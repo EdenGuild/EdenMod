@@ -3,8 +3,6 @@ package tel.eden.mod.war;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
@@ -21,52 +19,49 @@ public final class WarStartPingTracker {
 	private WarStartPingTracker() {
 	}
 
-	private static final Pattern COUNTDOWN_25S = Pattern.compile("\\bThe war battle will start in 25 seconds?[\\.!]*", Pattern.CASE_INSENSITIVE);
+	// "The war battle will start in 25 seconds." opens the in-war countdown; Wynncraft
+	// ends it with "5 seconds..." to "1 second...", the same lines the Radiance tracker reads.
+	private static final Pattern BATTLE_COUNTDOWN = Pattern.compile("\\bThe war battle will start in \\d+ seconds?", Pattern.CASE_INSENSITIVE);
+	private static final Pattern FINAL_COUNTDOWN = Pattern.compile("\\b[1-5]\\s+seconds?\\.\\.\\.", Pattern.CASE_INSENSITIVE);
 
-	private static volatile long generation = 0L;
+	// Whether this war's start bell already rang; cleared when the battle begins, is
+	// cancelled, or on a reset (world change, disconnect).
+	private static volatile boolean battleBellRang;
 	// Territories whose attack timer bell already rang for the current attack, so each
 	// attack rings once. Cleared when the attack ends (not when its timer briefly drops
 	// off the sidebar, which would ring it again). Client thread only.
 	private static final Set<String> timerBellRung = new HashSet<>();
 
-	public record BellAction(int delaySeconds, boolean triggered) {
-		public static final BellAction NONE = new BellAction(-1, false);
-	}
-
-	public static int calculateDelay(int messageSeconds, int alertSeconds) {
-		if (alertSeconds <= 0) {
-			return -1;
-		}
-		int clamped = Math.max(1, Math.min(messageSeconds, alertSeconds));
-		return Math.max(0, messageSeconds - clamped);
-	}
-
-	public static BellAction processChat(String rawLine, BridgeConfig config) {
+	/**
+	 * Whether this war chat line should ring the war start bell: the first countdown line
+	 * of a war, normally the 25s one. If lag drops that line, the next countdown line
+	 * (down to the final "5 seconds..." ones) rings instead, still only once per war.
+	 */
+	public static boolean processChat(String rawLine, BridgeConfig config) {
 		if (rawLine == null || rawLine.isBlank() || config == null) {
-			return BellAction.NONE;
+			return false;
 		}
 		String clean = WarDPS.clean(rawLine);
 		if (isNonWarChat(clean)) {
-			return BellAction.NONE;
+			return false;
 		}
-
 		if (clean.contains("The battle has begun!") || clean.contains("canceled and refunded")) {
 			reset();
-			return BellAction.NONE;
+			return false;
 		}
-
-		if (config.warBattleStartBellSeconds > 0 && COUNTDOWN_25S.matcher(clean).find()) {
-			int delay = calculateDelay(25, config.warBattleStartBellSeconds);
-			return new BellAction(delay, true);
+		if (!config.warBattleStartBell || battleBellRang) {
+			return false;
 		}
-
-		return BellAction.NONE;
+		if (BATTLE_COUNTDOWN.matcher(clean).find() || FINAL_COUNTDOWN.matcher(clean).find()) {
+			battleBellRang = true;
+			return true;
+		}
+		return false;
 	}
 
 	public static void onChat(String rawLine, BridgeConfig config) {
-		BellAction action = processChat(rawLine, config);
-		if (action.triggered()) {
-			scheduleBell(action.delaySeconds());
+		if (processChat(rawLine, config)) {
+			playBell(Minecraft.getInstance());
 		}
 	}
 
@@ -109,27 +104,6 @@ public final class WarStartPingTracker {
 		return ring;
 	}
 
-	public static void scheduleBell(int delaySeconds) {
-		if (delaySeconds < 0) {
-			return;
-		}
-		if (delaySeconds == 0) {
-			playBell(Minecraft.getInstance());
-			return;
-		}
-		long currentGen = ++generation;
-		CompletableFuture.delayedExecutor(delaySeconds, TimeUnit.SECONDS).execute(() -> {
-			Minecraft client = Minecraft.getInstance();
-			if (client != null) {
-				client.execute(() -> {
-					if (currentGen == generation && client.level != null && client.player != null) {
-						playBell(client);
-					}
-				});
-			}
-		});
-	}
-
 	public static void playBell(Minecraft client) {
 		if (client == null) {
 			return;
@@ -151,7 +125,7 @@ public final class WarStartPingTracker {
 	}
 
 	public static void reset() {
-		generation++;
+		battleBellRang = false;
 	}
 
 	/** The attack on {@code territory} is over, so its next one can ring (client thread). */
@@ -162,10 +136,6 @@ public final class WarStartPingTracker {
 	/** Forget every rung attack timer bell (client thread; full reset). */
 	static void clearTimerBells() {
 		timerBellRung.clear();
-	}
-
-	public static long getGeneration() {
-		return generation;
 	}
 
 	private static boolean isNonWarChat(String clean) {

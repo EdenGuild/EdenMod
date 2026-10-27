@@ -22,51 +22,54 @@ class WarStartPingTrackerTest {
 
 	@Test
 	void defaultsAreOff() {
-		assertEquals(0, config.warBattleStartBellSeconds);
+		assertFalse(config.warBattleStartBell);
 		assertEquals(0, config.warAttackTimerBellSeconds);
 
-		assertEquals(-1, WarStartPingTracker.calculateDelay(25, config.warBattleStartBellSeconds));
-		assertFalse(WarStartPingTracker.processChat("The war battle will start in 25 seconds.", config).triggered());
+		assertFalse(WarStartPingTracker.processChat("The war battle will start in 25 seconds.", config));
 		assertFalse(WarStartPingTracker.shouldRingTimerBell(Map.of("Detlas", 5), () -> "Detlas", config.warAttackTimerBellSeconds));
 	}
 
 	@Test
-	void warBattleStartBellTimingCalculation() {
-		// Selecting 10s means alert triggers 10s before war starts, i.e. 15s delay after the 25s message
-		config.warBattleStartBellSeconds = 10;
-		assertEquals(15, WarStartPingTracker.calculateDelay(25, 10));
+	void warStartBellRingsOnceAtTheCountdown() {
+		config.warBattleStartBell = true;
+		assertTrue(WarStartPingTracker.processChat("The war battle will start in 25 seconds.", config));
+		// The rest of the countdown doesn't ring again
+		assertFalse(WarStartPingTracker.processChat("5 seconds...", config));
+		assertFalse(WarStartPingTracker.processChat("1 second...", config));
 
-		var action = WarStartPingTracker.processChat("The war battle will start in 25 seconds.", config);
-		assertTrue(action.triggered());
-		assertEquals(15, action.delaySeconds());
+		// The next war rings again
+		WarStartPingTracker.processChat("... The battle has begun!", config);
+		assertTrue(WarStartPingTracker.processChat("§6The war battle will start in §e25 seconds§6.", config));
+	}
 
-		// Selecting 25s plays immediately (0s delay)
-		config.warBattleStartBellSeconds = 25;
-		var immediateAction = WarStartPingTracker.processChat("The war battle will start in 25 seconds!", config);
-		assertTrue(immediateAction.triggered());
-		assertEquals(0, immediateAction.delaySeconds());
+	@Test
+	void warStartBellFallsBackToTheFinalCountdownWhenTheFirstLineIsMissed() {
+		config.warBattleStartBell = true;
+		// Lag dropped the 25s line: "5 seconds..." rings instead, once
+		assertTrue(WarStartPingTracker.processChat("5 seconds...", config));
+		assertFalse(WarStartPingTracker.processChat("4 seconds...", config));
 
-		// Selecting 1s delays by 24s
-		config.warBattleStartBellSeconds = 1;
-		assertEquals(24, WarStartPingTracker.calculateDelay(25, 1));
+		// A cancelled war clears it too
+		WarStartPingTracker.processChat("Your active attack was canceled and refunded to your headquarter.", config);
+		assertTrue(WarStartPingTracker.processChat("3 seconds...", config));
+	}
 
-		// Punctuation and color code handling
-		var formattedAction = WarStartPingTracker.processChat("§6The war battle will start in §e25 seconds§6.", config);
-		assertTrue(formattedAction.triggered());
-		assertEquals(24, formattedAction.delaySeconds());
-
-		// Wynncraft font tags
+	@Test
+	void warStartBellIgnoresChatAndOtherLines() {
+		config.warBattleStartBell = true;
+		// Wynncraft font tags still match
 		String wynncraftMsg = "§c§{fr:cp}󏿼󏿿󏿾§{fr:d} The war battle will start in 25 seconds.";
-		assertTrue(WarStartPingTracker.processChat(wynncraftMsg, config).triggered());
+		assertTrue(WarStartPingTracker.processChat(wynncraftMsg, config));
+		WarStartPingTracker.reset();
 
-		// Suppressed on player and channel chat
-		assertFalse(WarStartPingTracker.processChat("[Guild] Player: The war battle will start in 25 seconds.", config).triggered());
-		assertFalse(WarStartPingTracker.processChat("[Party] Player: The war battle will start in 25 seconds.", config).triggered());
-		assertFalse(WarStartPingTracker.processChat("[Allies] Player: The war battle will start in 25 seconds.", config).triggered());
-		assertFalse(WarStartPingTracker.processChat("Player: The war battle will start in 25 seconds.", config).triggered());
-
-		// The 30s territory message is the attack timer's job now, not a chat bell
-		assertFalse(WarStartPingTracker.processChat("The war for Big Mushroom Cave will start in 30 seconds.", config).triggered());
+		// Player and channel chat
+		assertFalse(WarStartPingTracker.processChat("[Guild] Player: The war battle will start in 25 seconds.", config));
+		assertFalse(WarStartPingTracker.processChat("[Party] Player: The war battle will start in 25 seconds.", config));
+		assertFalse(WarStartPingTracker.processChat("[Allies] Player: The war battle will start in 25 seconds.", config));
+		assertFalse(WarStartPingTracker.processChat("Player: 5 seconds...", config));
+		// Not the battle countdown: the 30s territory line (the attack timer's job) and other numbers
+		assertFalse(WarStartPingTracker.processChat("The war for Big Mushroom Cave will start in 30 seconds.", config));
+		assertFalse(WarStartPingTracker.processChat("15 seconds...", config));
 	}
 
 	@Test
@@ -101,16 +104,5 @@ class WarStartPingTrackerTest {
 			return "Detlas";
 		}, 30));
 		assertEquals(0, lookups.get());
-	}
-
-	@Test
-	void warBeginAndCancelReset() {
-		long genBefore = WarStartPingTracker.getGeneration();
-		WarStartPingTracker.processChat("The battle has begun!", config);
-		assertTrue(WarStartPingTracker.getGeneration() > genBefore);
-
-		long genAfterBegun = WarStartPingTracker.getGeneration();
-		WarStartPingTracker.processChat("The war has been canceled and refunded.", config);
-		assertTrue(WarStartPingTracker.getGeneration() > genAfterBegun);
 	}
 }
