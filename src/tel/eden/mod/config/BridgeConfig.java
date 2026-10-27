@@ -145,6 +145,15 @@ public final class BridgeConfig {
 	/** HUD chip showing your rolling 7-day war count (from the backend). */
 	public boolean warWeeklyCountHud = false;
 
+	/** Bell when the in-war battle countdown starts (the 25s line). Off by default. */
+	public boolean warBattleStartBell = false;
+
+	/**
+	 * Attack timer bell: ring when a timer for the territory you're standing in is at this
+	 * many seconds or less (0 = Off, up to 120s). Off by default.
+	 */
+	public int warAttackTimerBellSeconds = 0;
+
 	/** Client-to-client Radiance Tracker for Paladins/Knights in guild wars. Off by default. */
 	public boolean radianceTracker = false;
 
@@ -487,6 +496,7 @@ public final class BridgeConfig {
 					config.emotePickerColumns = Math.max(1, Math.min(10, config.emotePickerColumns));
 					config.emotePickerRows = Math.max(1, Math.min(10, config.emotePickerRows));
 					config.warAttackTimerMaxRows = Math.max(1, Math.min(50, config.warAttackTimerMaxRows));
+					config.warAttackTimerBellSeconds = Math.max(0, Math.min(120, config.warAttackTimerBellSeconds));
 					config.imagePreviewSize = Math.max(1, Math.min(100, config.imagePreviewSize));
 					// The label scale divides the draw position, so a hand-edited 0 would put
 					// the text at an infinite coordinate; the offsets are bounded to keep a

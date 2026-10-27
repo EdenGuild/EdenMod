@@ -163,6 +163,9 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow(Category.WAR, "Green beacon at soonest war", () -> config.warGreenBeacon, v -> config.warGreenBeacon = v, "On", "Off", true);
 		addToggleRow(Category.WAR, "War info overlay (DPS/EHP)", () -> config.warDpsHud, v -> config.warDpsHud = v, "On", "Off", true);
 		addToggleRow(Category.WAR, "Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
+		addToggleRow(Category.WAR, "War start bell (25s)", () -> config.warBattleStartBell, v -> config.warBattleStartBell = v, "On", "Off", false);
+		IntConfigSlider timerBellSlider = new IntConfigSlider(CONTROL_W, 20, 0, 120, 5, () -> config.warAttackTimerBellSeconds, v -> config.warAttackTimerBellSeconds = v, v -> Component.literal(v == 0 ? "Off" : v + "s"));
+		addSliderRow(Category.WAR, "Attack timer bell (in territory)", timerBellSlider, timerBellSlider::syncFromConfig, () -> config.warAttackTimerBellSeconds = 0);
 		addToggleRow(Category.WAR, "Hide economy messages", () -> config.hideEconomyMessages, v -> config.hideEconomyMessages = v, "On", "Off", false);
 		addToggleRow(Category.WAR, "Territory loss sound", () -> config.territoryLossSound, v -> config.territoryLossSound = v, "On", "Off", false);
 		addToggleRow(Category.WAR, "Territory loss blacklist", () -> config.territoryLossBlacklistEnabled, v -> config.territoryLossBlacklistEnabled = v, "On", "Off", true);

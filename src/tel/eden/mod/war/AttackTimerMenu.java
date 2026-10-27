@@ -364,10 +364,12 @@ public final class AttackTimerMenu {
 		flushQueueSends(current, now, socket);
 		dropStaleLocalQueuers(previousActive, now);
 		reportInside(socket);
+		WarStartPingTracker.onTimers(current, AttackTimerMenu::currentTerritory);
 	}
 
 	/** Clear this client's state for a territory whose attack is over. */
 	private static void forgetTerritory(String territory) {
+		WarStartPingTracker.forgetTimerBell(territory);
 		chatDefenses.remove(territory);
 		queuers.remove(territory);
 		localQueuers.remove(territory);
@@ -664,6 +666,7 @@ public final class AttackTimerMenu {
 		pendingQueueSend.clear();
 		chatTimers.clear();
 		cancelledAttacks.clear();
+		WarStartPingTracker.clearTimerBells();
 		clickBoxes.clear();
 		headBoxes.clear();
 		soonestTerritory = null;
