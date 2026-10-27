@@ -165,6 +165,7 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 				break;
 			}
 		}
+		filledSlots = Math.min(filledSlots, maxAllowedFilledSlots());
 	}
 
 	private void toggleSendToAlly() {
@@ -229,8 +230,12 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 		}
 	}
 
+	private int maxAllowedFilledSlots() {
+		return Math.max(0, maxPartySize - 2 - addedMembers.size());
+	}
+
 	private void adjustFilledSlots(int amount) {
-		int maxAllowed = Math.max(0, maxPartySize - 1 - addedMembers.size());
+		int maxAllowed = maxAllowedFilledSlots();
 		filledSlots = Math.max(0, Math.min(maxAllowed, filledSlots + amount));
 		updateWidgetStates();
 	}
@@ -243,6 +248,7 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 			if (occupancy() < maxPartySize) {
 				addedMembers.add(ign);
 				addPlayerField.setValue("");
+				trimToMax();
 				updateWidgetStates();
 			}
 		}
@@ -263,7 +269,7 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 		if (selectedTargets.contains("Festival Minigames") && (mod != null && !mod.isFestivalEnabled())) {
 			return "Festival Minigames party finder is currently disabled by Senate.";
 		}
-		int limit = Math.max(0, maxPartySize - 2 - addedMembers.size());
+		int limit = maxAllowedFilledSlots();
 		if (filledSlots > limit) {
 			return "Filled slots must be between 0 and " + limit + ".";
 		}
@@ -286,7 +292,7 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 		btnMaxPlus.active = canEditMax && maxPartySize < 10;
 
 		btnFilledMinus.active = filledSlots > 0;
-		btnFilledPlus.active = occupancy() < maxPartySize;
+		btnFilledPlus.active = filledSlots < maxAllowedFilledSlots();
 
 		if (btnAddPlayer != null) {
 			btnAddPlayer.active = occupancy() < maxPartySize;

@@ -20,6 +20,7 @@ public final class PartyListScreen extends EdenReferenceScreen {
 	private final EdenModClient mod;
 
 	private final List<PartyInfo> lastKnownParties = new ArrayList<>();
+	private List<PartyInfo> rawKnownParties = List.of();
 
 	private EdenPanelLayout layout;
 	private int scrollOffset;
@@ -51,8 +52,9 @@ public final class PartyListScreen extends EdenReferenceScreen {
 	}
 
 	private void refreshPartySnapshot() {
+		rawKnownParties = mod != null ? mod.knownParties() : List.of();
 		lastKnownParties.clear();
-		lastKnownParties.addAll(mod.knownParties());
+		lastKnownParties.addAll(rawKnownParties);
 		lastKnownParties.sort(java.util.Comparator.comparing(PartyListScreen::isFull));
 		scrollOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, lastKnownParties.size() - VISIBLE_ROWS)));
 	}
@@ -64,7 +66,7 @@ public final class PartyListScreen extends EdenReferenceScreen {
 	@Override
 	public void tick() {
 		super.tick();
-		if (!lastKnownParties.equals(mod.knownParties())) {
+		if (mod != null && !rawKnownParties.equals(mod.knownParties())) {
 			refreshPartySnapshot();
 		}
 	}

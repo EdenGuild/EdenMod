@@ -42,6 +42,8 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 	private Identifier iconTarget;
 	private static final Map<String, Identifier> HEAD_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
 	private static final Set<String> HEAD_FETCHING = java.util.concurrent.ConcurrentHashMap.newKeySet();
+	private static final Map<String, Long> HEAD_FAILURES = new java.util.concurrent.ConcurrentHashMap<>();
+	private static final long HEAD_RETRY_DELAY_MS = 60_000L;
 	private EdenPanelLayout layout;
 
 	public PartyManageScreen(Screen parent, EdenModClient mod, PartyInfo party) {
@@ -322,8 +324,9 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 			Identifier headId = HEAD_CACHE.get(member);
 			if (headId == null) {
 				g.fill(layout.x(10), yPos - 1, layout.x(10) + headSize, yPos - 1 + headSize, 0xFF444444);
-				if (!HEAD_FETCHING.contains(member)) {
-					HEAD_FETCHING.add(member);
+				Long lastFail = HEAD_FAILURES.get(member);
+				boolean canRetry = lastFail == null || (System.currentTimeMillis() - lastFail > HEAD_RETRY_DELAY_MS);
+				if (canRetry && HEAD_FETCHING.add(member)) {
 					java.util.concurrent.CompletableFuture.runAsync(() -> fetchHead(member));
 				}
 			} else {
@@ -438,21 +441,34 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 	private void fetchHead(String member) {
 		if (!member.matches("[A-Za-z0-9_]{1,16}"))
 			return;
+		NativeImage img = null;
 		try {
-			java.net.URLConnection conn = TlsPolicy.open(new java.net.URL("https://minotar.net/helm/" + member + "/12.png"));
+			java.net.URLConnection conn = TlsPolicy.open(java.net.URI.create("https://minotar.net/helm/" + member + "/12.png").toURL());
 			conn.setConnectTimeout(5_000);
 			conn.setReadTimeout(5_000);
 			try (java.io.InputStream stream = conn.getInputStream()) {
-				var img = NativeImage.read(stream);
-				Minecraft.getInstance().execute(() -> {
+				img = NativeImage.read(stream);
+			}
+			final NativeImage finalImg = img;
+			Minecraft.getInstance().execute(() -> {
+				try {
 					Identifier loc = Identifier.parse("edenmod:head/" + member.toLowerCase());
-					var texture = new DynamicTexture(() -> member, img);
+					var texture = new DynamicTexture(() -> member, finalImg);
 					Minecraft.getInstance().getTextureManager().register(loc, texture);
 					HEAD_CACHE.put(member, loc);
-				});
-			}
+					HEAD_FAILURES.remove(member);
+				} catch (Exception e) {
+					finalImg.close();
+				} finally {
+					HEAD_FETCHING.remove(member);
+				}
+			});
 		} catch (Exception e) {
-			// Silently fail if head cannot be fetched
+			if (img != null) {
+				img.close();
+			}
+			HEAD_FAILURES.put(member, System.currentTimeMillis());
+			HEAD_FETCHING.remove(member);
 		}
 	}
 }
