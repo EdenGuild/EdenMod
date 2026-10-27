@@ -121,6 +121,10 @@ public final class BridgeWebSocketClient {
 		/** A short result line for a party action the player just took in-game. */
 		void onPartyFeedback(String message, String color);
 
+		/** Party configuration update (e.g. Festival Minigames toggle, Annihilation active). */
+		default void onPartyConfig(boolean festivalEnabled, boolean annihilationActive) {
+		}
+
 		/** Feedback on game commands (e.g. cooldown). */
 		void onGameFeedback(String message, String color);
 
@@ -558,8 +562,8 @@ public final class BridgeWebSocketClient {
 		return true;
 	}
 
-	/** Open a new party in-game for the given label (raid name or Annihilation). */
-	public void sendPartyOpen(String raid, int maxSize, String note, int filled) {
+	/** Open a new party in-game for the given label (raid name, Annihilation, or Festival). */
+	public void sendPartyOpen(String raid, int maxSize, String note, int filled, boolean ally, String world, java.util.List<String> members) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
@@ -574,7 +578,28 @@ public final class BridgeWebSocketClient {
 		if (filled > 0) {
 			obj.addProperty("filled", filled);
 		}
+		if (ally) {
+			obj.addProperty("ally", true);
+		}
+		if (world != null && !world.isBlank()) {
+			obj.addProperty("world", world);
+		}
+		if (members != null && !members.isEmpty()) {
+			com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+			for (String m : members) {
+				arr.add(m);
+			}
+			obj.add("members", arr);
+		}
 		enqueueSend(current, obj.toString());
+	}
+
+	public void sendPartyOpen(String raid, int maxSize, String note, int filled, boolean ally, String world) {
+		sendPartyOpen(raid, maxSize, note, filled, ally, world, java.util.List.of());
+	}
+
+	public void sendPartyOpen(String raid, int maxSize, String note, int filled) {
+		sendPartyOpen(raid, maxSize, note, filled, false, "");
 	}
 
 	/** Join the open raid party with the given id. */
@@ -587,6 +612,10 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "partyJoin");
 		obj.addProperty("id", id);
 		enqueueSend(current, obj.toString());
+	}
+
+	public void sendPartyAllyToggle(boolean ally) {
+		sendPartyManage("ally", ally ? "true" : "false", ally ? 1 : 0, "");
 	}
 
 	/** Leave a raid party ({@code null} id = whichever party you are in). */
@@ -1404,7 +1433,17 @@ public final class BridgeWebSocketClient {
 				case "rewardOptOutReply" -> sink.onRewardOptOutReply(get(obj, "rewardKind"), getBool(obj, "blocked"), get(obj, "error"), get(obj, "color"));
 				case "giftLockReply" -> sink.onGiftLockReply(getBool(obj, "granted"), get(obj, "error"), get(obj, "holder"), getInt(obj, "retryAfterSeconds", 0));
 				case "partyUpdate" -> sink.onPartyUpdate(get(obj, "event"), get(obj, "actor"), parseParty(obj), get(obj, "color"));
-				case "partyListReply" -> sink.onPartyList(parsePartyList(obj), get(obj, "color"));
+				case "partyListReply" -> {
+					if (sink != null && obj.has("festivalEnabled")) {
+						sink.onPartyConfig(getBool(obj, "festivalEnabled"), getBool(obj, "annihilationActive"));
+					}
+					sink.onPartyList(parsePartyList(obj), get(obj, "color"));
+				}
+				case "partyConfig" -> {
+					if (sink != null) {
+						sink.onPartyConfig(getBool(obj, "festivalEnabled"), getBool(obj, "annihilationActive"));
+					}
+				}
 				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"), get(obj, "color"));
 				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
 				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"));
@@ -1590,7 +1629,7 @@ public final class BridgeWebSocketClient {
 	}
 
 	private static PartyInfo parseParty(JsonObject obj) {
-		return new PartyInfo(getInt(obj, "id", 0), get(obj, "raid"), get(obj, "host"), getStringArray(obj, "members"), getInt(obj, "max", 4), get(obj, "note"));
+		return new PartyInfo(getInt(obj, "id", 0), get(obj, "raid"), get(obj, "host"), getStringArray(obj, "members"), getInt(obj, "max", 4), get(obj, "note"), getStringArray(obj, "tags"), getBool(obj, "ally"), get(obj, "world"));
 	}
 
 	private static java.util.List<PartyInfo> parsePartyList(JsonObject obj) {
