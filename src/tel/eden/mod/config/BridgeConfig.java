@@ -148,11 +148,11 @@ public final class BridgeConfig {
 	/** Territory war battle start bell timing (0 = Off, 1-25s before battle starts). Off by default. */
 	public int warBattleStartBellSeconds = 0;
 
-	/** Territory warp warning bell timing (0 = Off, 1-30s before war starts). Off by default. */
-	public int warTerritoryWarpBellSeconds = 0;
-
-	/** Only alert for territories the player queued for the territory warp bell. Off by default. */
-	public boolean warTerritoryWarpBellQueuedOnly = false;
+	/**
+	 * Attack timer bell: ring when a timer for the territory you're standing in is at this
+	 * many seconds or less (0 = Off, up to 120s). Off by default.
+	 */
+	public int warAttackTimerBellSeconds = 0;
 
 	/** Client-to-client Radiance Tracker for Paladins/Knights in guild wars. Off by default. */
 	public boolean radianceTracker = false;
@@ -497,7 +497,7 @@ public final class BridgeConfig {
 					config.emotePickerRows = Math.max(1, Math.min(10, config.emotePickerRows));
 					config.warAttackTimerMaxRows = Math.max(1, Math.min(50, config.warAttackTimerMaxRows));
 					config.warBattleStartBellSeconds = Math.max(0, Math.min(25, config.warBattleStartBellSeconds));
-					config.warTerritoryWarpBellSeconds = Math.max(0, Math.min(30, config.warTerritoryWarpBellSeconds));
+					config.warAttackTimerBellSeconds = Math.max(0, Math.min(120, config.warAttackTimerBellSeconds));
 					config.imagePreviewSize = Math.max(1, Math.min(100, config.imagePreviewSize));
 					// The label scale divides the draw position, so a hand-edited 0 would put
 					// the text at an infinite coordinate; the offsets are bounded to keep a

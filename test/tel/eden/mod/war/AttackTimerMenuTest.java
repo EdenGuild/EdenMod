@@ -1,10 +1,8 @@
 package tel.eden.mod.war;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
@@ -31,16 +29,6 @@ class AttackTimerMenuTest {
 
 		AttackTimerMenu.updateBoard(List.of());
 		assertNull(AttackTimerMenu.queuerForTesting("Detlas"));
-	}
-
-	@Test
-	void isQueuedByMatchesUuidAndName() {
-		AttackTimerMenu.updateBoard(List.of(new WarBoardEntry("Big Mushroom Cave", "", false, ALICE, List.of())));
-		assertTrue(AttackTimerMenu.isQueuedBy("Big Mushroom Cave", ALICE.uuid(), "Alice"));
-		assertTrue(AttackTimerMenu.isQueuedBy("big mushroom cave", "different-uuid", "Alice"));
-		assertTrue(AttackTimerMenu.isQueuedBy("Big Mushroom Cave", ALICE.uuid(), "DifferentName"));
-		assertFalse(AttackTimerMenu.isQueuedBy("Big Mushroom Cave", BOB.uuid(), "Bob"));
-		assertFalse(AttackTimerMenu.isQueuedBy("Detlas", ALICE.uuid(), "Alice"));
 	}
 
 	@Test

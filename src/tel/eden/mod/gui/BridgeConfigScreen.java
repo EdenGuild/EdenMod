@@ -165,9 +165,8 @@ public final class BridgeConfigScreen extends Screen {
 		addToggleRow(Category.WAR, "Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
 		IntConfigSlider warStartBellSlider = new IntConfigSlider(CONTROL_W, 20, 0, 25, 1, () -> config.warBattleStartBellSeconds, v -> config.warBattleStartBellSeconds = v, v -> Component.literal(v == 0 ? "Off" : v + "s"));
 		addSliderRow(Category.WAR, "Territory war start bell", warStartBellSlider, warStartBellSlider::syncFromConfig, () -> config.warBattleStartBellSeconds = 0);
-		IntConfigSlider warpBellSlider = new IntConfigSlider(CONTROL_W, 20, 0, 30, 1, () -> config.warTerritoryWarpBellSeconds, v -> config.warTerritoryWarpBellSeconds = v, v -> Component.literal(v == 0 ? "Off" : v + "s"));
-		addSliderRow(Category.WAR, "Territory warp bell", warpBellSlider, warpBellSlider::syncFromConfig, () -> config.warTerritoryWarpBellSeconds = 0);
-		addToggleRow(Category.WAR, "Only alert for territories I queued", () -> config.warTerritoryWarpBellQueuedOnly, v -> config.warTerritoryWarpBellQueuedOnly = v, "On", "Off", false);
+		IntConfigSlider timerBellSlider = new IntConfigSlider(CONTROL_W, 20, 0, 120, 5, () -> config.warAttackTimerBellSeconds, v -> config.warAttackTimerBellSeconds = v, v -> Component.literal(v == 0 ? "Off" : v + "s"));
+		addSliderRow(Category.WAR, "Attack timer bell (in territory)", timerBellSlider, timerBellSlider::syncFromConfig, () -> config.warAttackTimerBellSeconds = 0);
 		addToggleRow(Category.WAR, "Hide economy messages", () -> config.hideEconomyMessages, v -> config.hideEconomyMessages = v, "On", "Off", false);
 		addToggleRow(Category.WAR, "Territory loss sound", () -> config.territoryLossSound, v -> config.territoryLossSound = v, "On", "Off", false);
 		addToggleRow(Category.WAR, "Territory loss blacklist", () -> config.territoryLossBlacklistEnabled, v -> config.territoryLossBlacklistEnabled = v, "On", "Off", true);

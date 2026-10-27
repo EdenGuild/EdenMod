@@ -229,34 +229,6 @@ public final class AttackTimerMenu {
 		attackClickAt.remove(territory);
 	}
 
-	/** Whether this client queued the attack on {@code territory}. */
-	public static boolean isQueuedByPlayer(String territory) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc == null || mc.player == null) {
-			return false;
-		}
-		return isQueuedBy(territory, mc.player.getUUID().toString(), mc.player.getGameProfile().name());
-	}
-
-	static boolean isQueuedBy(String territory, String uuid, String name) {
-		if (territory == null) {
-			return false;
-		}
-		WarQueuer q = queuers.get(territory);
-		if (q == null) {
-			for (Map.Entry<String, WarQueuer> entry : queuers.entrySet()) {
-				if (entry.getKey().equalsIgnoreCase(territory)) {
-					q = entry.getValue();
-					break;
-				}
-			}
-		}
-		if (q == null) {
-			return false;
-		}
-		return (uuid != null && uuid.equals(q.uuid())) || (name != null && name.equalsIgnoreCase(q.name()));
-	}
-
 	/**
 	 * Parse a guild-chat line for a "&lt;territory&gt; defense is &lt;rating&gt;" report
 	 * (as Wynntils announces) and fold it into the HUD's fresher-intel overlay.
@@ -392,10 +364,12 @@ public final class AttackTimerMenu {
 		flushQueueSends(current, now, socket);
 		dropStaleLocalQueuers(previousActive, now);
 		reportInside(socket);
+		WarStartPingTracker.onTimers(current, AttackTimerMenu::currentTerritory);
 	}
 
 	/** Clear this client's state for a territory whose attack is over. */
 	private static void forgetTerritory(String territory) {
+		WarStartPingTracker.forgetTimerBell(territory);
 		chatDefenses.remove(territory);
 		queuers.remove(territory);
 		localQueuers.remove(territory);
@@ -692,6 +666,7 @@ public final class AttackTimerMenu {
 		pendingQueueSend.clear();
 		chatTimers.clear();
 		cancelledAttacks.clear();
+		WarStartPingTracker.clearTimerBells();
 		clickBoxes.clear();
 		headBoxes.clear();
 		soonestTerritory = null;
