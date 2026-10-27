@@ -25,6 +25,7 @@ class RaidCompletionParserTest {
 		assertEquals(2048, completion.emeralds());
 		assertEquals(0, completion.aspects());
 		assertEquals("974", completion.guildExp());
+		assertEquals(80, completion.seasonalRating());
 	}
 
 	@Test
@@ -37,6 +38,32 @@ class RaidCompletionParserTest {
 		assertEquals("Nest of the Grootslangs", completion.raidName());
 		assertEquals(2, completion.aspects());
 		assertEquals(2048, completion.emeralds());
+		assertEquals(440, completion.seasonalRating());
+	}
+
+	@Test
+	void parsesSeasonalRatingFromRealThreeOneAndTwoPlayerAnnouncements() {
+		RaidCompletion three = RaidCompletionParser.parse(Component.literal("snowy3869, night03, and SteppingOnALego finished The Nameless Anomaly and claimed 2048x Emeralds, 2x Aspects,  +6761m Guild Experience, and +330 Seasonal Rating")).orElseThrow();
+		RaidCompletion one = RaidCompletionParser.parse(Component.literal("Pearlicles finished The Canyon Colossus and claimed  2048x Emeralds, 2x Aspects, +2253m Guild Experience, and  +110 Seasonal Rating")).orElseThrow();
+		RaidCompletion two = RaidCompletionParser.parse(Component.literal("YoureMomGood, and Tawnyy finished Orphion's Nexus of Light and claimed 2x Aspects, 2048x Emeralds, +4507m Guild Experience, and +220 Seasonal Rating")).orElseThrow();
+
+		assertEquals(330, three.seasonalRating());
+		assertEquals(110, one.seasonalRating());
+		assertEquals(220, two.seasonalRating());
+	}
+
+	@Test
+	void readsAThousandsSeparatedSeasonalRating() {
+		Component message = Component.literal("Player1 finished The Wartorn Palace and claimed 2048x Emeralds, +974m Guild Experience, and +1,320 Seasonal Rating");
+
+		assertEquals(1320, RaidCompletionParser.parse(message).orElseThrow().seasonalRating());
+	}
+
+	@Test
+	void leavesSeasonalRatingNullWhenTheLineHasNone() {
+		Component message = Component.literal("Koaci finished The Wartorn Palace and claimed 2048x Emeralds, +974m Guild Experience");
+
+		assertEquals(null, RaidCompletionParser.parse(message).orElseThrow().seasonalRating());
 	}
 
 	@Test

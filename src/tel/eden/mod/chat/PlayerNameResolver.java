@@ -1,5 +1,7 @@
 package tel.eden.mod.chat;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -7,14 +9,17 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
+import tel.eden.mod.EdenLogger;
 
 /** Canonical player identity: real Minecraft usernames, with nicknames remembered as aliases. */
 public final class PlayerNameResolver {
+	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final ConcurrentMap<String, String> USERNAME_BY_DISPLAY = new ConcurrentHashMap<>();
 	private static final Pattern NICKNAME_USERNAME_PAREN = Pattern.compile("(?:\\[[^\\]]+\\]\\s*)?([a-zA-Z0-9_][a-zA-Z0-9_ ]*?)\\s*\\(([a-zA-Z0-9_]{3,16})\\)");
 	private static final Pattern PARTY_JOINED_MSG = Pattern.compile("^(.+?)\\s+has joined (?:your|the)\\s+party", Pattern.CASE_INSENSITIVE);
@@ -22,7 +27,77 @@ public final class PlayerNameResolver {
 	private static final Pattern SLASH_ALIAS_PATTERN = Pattern.compile("(?<![a-zA-Z0-9_./])([a-zA-Z0-9_]{3,16})/([a-zA-Z0-9_]{3,16})(?![a-zA-Z0-9_./])");
 	private static final Set<String> URL_TOKENS = Set.of("http", "https", "com", "org", "net", "io", "gg");
 
+	// The guild's current member usernames, from the guild API. A name that is exactly one of
+	// them is a real username however rarely that member has spoken in chat or shared a world.
+	private static volatile Supplier<? extends Collection<String>> memberNames = List::of;
+
 	private PlayerNameResolver() {
+	}
+
+	/** Supply the guild's current member usernames; {@link #resolveKnown} accepts an exact match. */
+	public static void setMemberNames(Supplier<? extends Collection<String>> usernames) {
+		memberNames = usernames == null ? List::of : usernames;
+	}
+
+	/**
+	 * Forget every nickname learned for {@code username}. A nickname belongs to a character, so
+	 * switching class can give the same account a new one (and hand the old one to someone else);
+	 * dropping the stale ones keeps a reward or raid row from being pinned on the wrong account.
+	 * The account's own username stays resolvable.
+	 */
+	public static void forgetAliasesFor(String username) {
+		if (username == null || username.isBlank()) {
+			return;
+		}
+		String own = key(username);
+		USERNAME_BY_DISPLAY.entrySet().removeIf(entry -> entry.getValue().equalsIgnoreCase(username) && !entry.getKey().equals(own));
+	}
+
+	// "Party Finder: Hey <nickname>, over here! Join the X queue and match up with N other players!"
+	// is sent to the local player alone, and the nickname in it is italic.
+	private static final Pattern PARTY_FINDER_GREETING = Pattern.compile("Party Finder:\\s*Hey\\s+.+?,\\s+over here!");
+
+	/**
+	 * Learn the local player's own nickname from a Party Finder greeting. The greeting names its
+	 * recipient, and Wynncraft sends it only to them, so the italic nickname is ours. Called for
+	 * every incoming chat line, so it also catches the new nickname after a class change.
+	 */
+	public static void learnFromPartyFinder(Component message, String localUsername) {
+		if (message == null || localUsername == null || !ChatText.IGN.matcher(localUsername).matches()) {
+			return;
+		}
+		if (!PARTY_FINDER_GREETING.matcher(ChatText.normalize(message.getString())).find()) {
+			return;
+		}
+		StringBuilder nickname = new StringBuilder();
+		message.visit((style, text) -> {
+			if (style.isItalic()) {
+				nickname.append(text);
+			}
+			return Optional.empty();
+		}, Style.EMPTY);
+		String learned = nickname.toString().trim();
+		if (!learned.isEmpty() && learned.length() <= 40) {
+			recordAlias(learned, localUsername);
+			LOGGER.info("Party Finder greeting: nickname '{}' belongs to {}", learned, localUsername);
+		}
+	}
+
+	private static String localUsername() {
+		Minecraft mc = Minecraft.getInstance();
+		return mc != null && mc.player != null ? mc.player.getGameProfile().name() : null;
+	}
+
+	private static String memberMatch(String name) {
+		if (!ChatText.IGN.matcher(name).matches()) {
+			return null;
+		}
+		for (String member : memberNames.get()) {
+			if (member.equalsIgnoreCase(name)) {
+				return member;
+			}
+		}
+		return null;
 	}
 
 	public static void reset() {
@@ -120,6 +195,10 @@ public final class PlayerNameResolver {
 			recordAlias(trimmed, fromTabList);
 			return Optional.of(fromTabList);
 		}
+		String fromMemberList = memberMatch(trimmed);
+		if (fromMemberList != null) {
+			return Optional.of(fromMemberList);
+		}
 		return Optional.empty();
 	}
 
@@ -177,6 +256,7 @@ public final class PlayerNameResolver {
 		if (message == null) {
 			return;
 		}
+		learnFromPartyFinder(message, localUsername());
 
 		message.visit((style, text) -> {
 			if (text == null || text.isBlank()) {

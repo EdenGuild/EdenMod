@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.ChatFormatting;
+import tel.eden.mod.chat.RaidCompletionParser;
 
 /** Parses the high-volume, reconciliation-relevant Guild Log rows into typed metadata. */
 public final class GuildLogEventParser {
@@ -83,13 +84,23 @@ public final class GuildLogEventParser {
 			if (participants.isEmpty())
 				return Optional.empty();
 			String rewards = raid.group(3);
-			return Optional.of(new GuildLogEvent.Raid(entry.occurredAt(), participants, raid.group(2).trim(), number(ASPECTS, rewards), number(EMERALDS, rewards), longNumber(GUILD_EXPERIENCE, rewards), number(SEASONAL_RATING, rewards)));
+			return Optional.of(new GuildLogEvent.Raid(entry.occurredAt(), participants, RaidCompletionParser.raidNameIn(raid.group(2)).orElse(raid.group(2).trim()), number(ASPECTS, rewards), number(EMERALDS, rewards), longNumber(GUILD_EXPERIENCE, rewards), number(SEASONAL_RATING, rewards)));
 		}
 		return Optional.empty();
 	}
 
-	private static List<String> participants(String names) {
-		return java.util.Arrays.stream(names.replace(", and ", ",").split("(?:,\\s*|\\s+and\\s+)")).map(String::trim).filter(name -> USERNAME.matcher(name).matches()).toList();
+	private static final int MAX_NAME_LENGTH = 40;
+
+	/**
+	 * The names in "A, B, and C" or "A and B". Players are listed by their nickname, which
+	 * can contain spaces (even " and ": "lightning and the"), so nothing is filtered by
+	 * username shape. With commas the list splits on them alone; only a comma-less
+	 * two-name list splits on " and ".
+	 */
+	static List<String> participants(String names) {
+		String text = names.trim();
+		List<String> parts = text.contains(",") ? java.util.Arrays.asList(text.split("\\s*,\\s*")) : java.util.Arrays.asList(text.split("\\s+and\\s+"));
+		return parts.stream().map(part -> part.replaceFirst("^and\\s+", "").trim()).filter(part -> !part.isEmpty() && part.length() <= MAX_NAME_LENGTH).toList();
 	}
 
 	private static Integer number(Pattern pattern, String text) {
@@ -100,6 +111,11 @@ public final class GuildLogEventParser {
 	private static Long longNumber(Pattern pattern, String text) {
 		Matcher matcher = pattern.matcher(text);
 		return matcher.find() ? Long.valueOf(matcher.group(1).replace(",", "")) : null;
+	}
+
+	/** A row's text as the parser sees it: colour codes and icon glyphs gone, lines joined. For logs. */
+	public static String plainText(String text) {
+		return normalized(text);
 	}
 
 	private static String normalized(String text) {

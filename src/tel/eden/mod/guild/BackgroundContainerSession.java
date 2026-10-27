@@ -88,7 +88,7 @@ public final class BackgroundContainerSession {
 		}
 		if (mc.player.containerMenu != mc.player.inventoryMenu) {
 			LOGGER.info("Background container: closing orphan containerMenu {} ('{}')", mc.player.containerMenu.containerId, observedServerTitle);
-			mc.player.closeContainer();
+			closeContainerKeepingScreen(mc);
 		}
 		if (observedServerContainerId > 0) {
 			LOGGER.info("Background container: closing lingering container {} ('{}')", observedServerContainerId, observedServerTitle);
@@ -101,6 +101,52 @@ public final class BackgroundContainerSession {
 		this.menuSlotCount = menuSlotCount;
 		this.aborted = false;
 		this.serverClosed = false;
+		return true;
+	}
+
+	/**
+	 * Close whatever container the player has open. Vanilla's {@code closeContainer()} also sets the
+	 * screen to null, which would take down a progress screen that is deliberately holding the player
+	 * while a background run finishes; with one showing, only the container is closed.
+	 */
+	public static void closeContainerKeepingScreen(Minecraft mc) {
+		if (mc.player == null) {
+			return;
+		}
+		if (mc.screen instanceof tel.eden.mod.gui.BackgroundProgressScreen) {
+			if (mc.player.containerMenu != mc.player.inventoryMenu && mc.getConnection() != null) {
+				mc.getConnection().send(new ServerboundContainerClosePacket(mc.player.containerMenu.containerId));
+				mc.player.containerMenu = mc.player.inventoryMenu;
+			}
+			return;
+		}
+		mc.player.closeContainer();
+	}
+
+	// The player's own inventory menu (container 0) numbers the hotbar from here.
+	private static final int INVENTORY_HOTBAR_START = 36;
+
+	/**
+	 * Claim the next matching server menu and open it by left-clicking a hotbar item in the
+	 * player's own inventory menu, the way Wynncraft's compass and content book open theirs
+	 * (and how Wynntils queries them). Returns false, with nothing claimed, if that slot holds
+	 * no item or another menu is in the way.
+	 */
+	public boolean openByHotbarClick(String owner, Predicate<String> expectedTitle, int menuSlotCount, int hotbarSlot) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null || mc.getConnection() == null || hotbarSlot < 0 || hotbarSlot > 8) {
+			return false;
+		}
+		int slot = INVENTORY_HOTBAR_START + hotbarSlot;
+		ItemStack clicked = mc.player.inventoryMenu.getSlot(slot).getItem();
+		if (clicked.isEmpty() || !begin(owner, expectedTitle, menuSlotCount)) {
+			return false;
+		}
+		var hashGenerator = mc.getConnection().decoratedHashOpsGenenerator();
+		var changedSlots = new Int2ObjectOpenHashMap<HashedStack>();
+		changedSlots.put(slot, HashedStack.create(new ItemStack(Items.AIR), hashGenerator));
+		HashedStack carried = HashedStack.create(clicked, hashGenerator);
+		mc.getConnection().send(new ServerboundContainerClickPacket(mc.player.inventoryMenu.containerId, 0, (short) slot, (byte) 0, ClickType.PICKUP, changedSlots, carried));
 		return true;
 	}
 
@@ -219,6 +265,11 @@ public final class BackgroundContainerSession {
 		String screen = mc.screen == null ? "none" : mc.screen.getClass().getName();
 		long untilCommands = Math.max(0L, WORLD_COMMAND_GRACE_MS - (System.currentTimeMillis() - joinedAt));
 		return "screen=" + screen + ", containerId=" + mc.player.containerMenu.containerId + ", inventoryMenu=" + (mc.player.containerMenu == mc.player.inventoryMenu) + ", observedServerContainerId=" + observedServerContainerId + ", observedServerTitle='" + observedServerTitle + "', commandGraceMs=" + untilCommands;
+	}
+
+	/** The title of the most recent menu the server opened (colour codes stripped), or empty. */
+	public String observedTitle() {
+		return observedServerTitle;
 	}
 
 	/** Packet hook: true hides a menu owned by the active background session. */

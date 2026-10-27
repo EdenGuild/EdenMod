@@ -31,7 +31,12 @@ public final class BridgeWebSocketClient {
 	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final int MAX_BACKOFF_SECONDS = 60;
 	private static final int MAX_SESSION_VERIFY_RETRIES = 3;
-	private static final Pattern SERVER_ID_PATTERN = Pattern.compile("[0-9a-fA-F\\-]{1,128}");
+	// The bridge's nonce: 16 random bytes, hex-encoded. Nothing else is worth answering.
+	private static final Pattern SERVER_NONCE_PATTERN = Pattern.compile("[0-9a-fA-F]{32}");
+	private static final String JOIN_ID_PREFIX = "eden-bridge-auth-v2:";
+	private static final int JOIN_ID_CHARS = 40;
+	/** Sent in {@code authResponse}: from 2 on, the Mojang join uses {@link #joinId}, not the raw nonce. */
+	private static final int AUTH_VERSION = 2;
 	/**
 	 * Capability names this build understands. Declared to the server; never
 	 * offered back. Kept as reusable feature-flag infrastructure even when
@@ -39,7 +44,7 @@ public final class BridgeWebSocketClient {
 	 * it (the last one, "guildLogSync", was retired once the server-side code
 	 * that checked for it was removed).
 	 */
-	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of();
+	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of("mail");
 
 	/** Callbacks for inbound bridge events (delivered off the game thread). */
 	public interface MessageSink {
@@ -82,6 +87,14 @@ public final class BridgeWebSocketClient {
 		 */
 		void onAspectGiveaway(java.util.List<GiveawayCandidate> candidates, int storageAspects, String error, String color);
 
+		/** Response to an in-game reward status query. */
+		default void onRewardStatus(boolean aspectsBlocked, boolean emeraldsBlocked, int pendingAspects, long pendingEmeralds, String error, String color) {
+		}
+
+		/** Response to an in-game reward opt-out/in request. */
+		default void onRewardOptOutReply(String rewardKind, boolean blocked, String error, String color) {
+		}
+
 		/**
 		 * Response to a {@code rewardDeductRequest}: on success {@code error} is empty
 		 * and target/kind/amount/remaining carry the display-unit values the backend
@@ -108,6 +121,10 @@ public final class BridgeWebSocketClient {
 		/** A short result line for a party action the player just took in-game. */
 		void onPartyFeedback(String message, String color);
 
+		/** Party configuration update (e.g. Festival Minigames toggle, Annihilation active). */
+		default void onPartyConfig(boolean festivalEnabled, boolean annihilationActive) {
+		}
+
 		/** Feedback on game commands (e.g. cooldown). */
 		void onGameFeedback(String message, String color);
 
@@ -127,6 +144,14 @@ public final class BridgeWebSocketClient {
 		 * than color alone (e.g. the storage-nearly-full warning).
 		 */
 		void onPillMessage(String label, String content, String colorHex, boolean bold);
+
+		/**
+		 * Offline mail the bot held for this player ({@code mailDelivery}), sent when the
+		 * player enters a world or when mail arrives while they're in one. Ids already
+		 * shown this session can repeat; ack every id with {@link #sendMailAck} so the
+		 * bot marks them delivered.
+		 */
+		void onMailDelivery(java.util.List<MailEntry> mails);
 
 		/**
 		 * Response to a {@code warCountsRequest}: per-member war counts over the last
@@ -187,10 +212,11 @@ public final class BridgeWebSocketClient {
 
 	/**
 	 * Proves the connecting player holds a live Minecraft session (the v2 Mojang
-	 * handshake). Given the server's {@code serverId} nonce it performs a Mojang
-	 * {@code joinServer} for the current account and returns the IGN to report; the
-	 * bridge then confirms that server-side via {@code hasJoined}. The access token
-	 * goes only to Mojang, never to the bridge.
+	 * handshake). Given a {@code serverId} it performs a Mojang {@code joinServer} for
+	 * the current account and returns the IGN to report; the bridge then confirms that
+	 * server-side via {@code hasJoined}. The access token goes only to Mojang, never to
+	 * the bridge. The id is derived from the bridge's nonce ({@link #joinId}), never the
+	 * nonce itself, so the bridge cannot choose what Mojang records.
 	 */
 	public interface SessionAuthenticator {
 		/** Complete {@code joinServer} for {@code serverId}; return the IGN to report. */
@@ -371,6 +397,9 @@ public final class BridgeWebSocketClient {
 		if (snapshot.territoryCount() != null) {
 			obj.addProperty("territoryCount", snapshot.territoryCount());
 		}
+		if (snapshot.srPerHour() != null) {
+			obj.addProperty("srPerHour", snapshot.srPerHour());
+		}
 		enqueueSend(current, obj.toString());
 	}
 
@@ -382,7 +411,7 @@ public final class BridgeWebSocketClient {
 	 * consensus (nobody else can corroborate what they never saw), verifies each against
 	 * the alliance list, and uses the survivors only to complete the party for display.
 	 */
-	public void sendRaidCompletion(java.util.List<String> party, String raidName, int aspects, int emeralds, String guildExp, java.util.List<String> extraPlayers) {
+	public void sendRaidCompletion(java.util.List<String> party, String raidName, int aspects, int emeralds, String guildExp, Integer seasonalRating, java.util.List<String> extraPlayers) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
@@ -405,6 +434,9 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("aspects", aspects);
 		obj.addProperty("emeralds", emeralds);
 		obj.addProperty("guildExp", guildExp);
+		if (seasonalRating != null) {
+			obj.addProperty("seasonalRating", seasonalRating);
+		}
 		enqueueSend(current, obj.toString());
 	}
 
@@ -441,6 +473,31 @@ public final class BridgeWebSocketClient {
 	/** Ask the backend for each member's pending emeralds (Chiefs only). */
 	public void sendEmeraldsPendingRequest() {
 		sendType("emeraldsPendingRequest");
+	}
+
+	/** Ask the backend for caller's own pending rewards and opt-out status. */
+	public void sendRewardStatusRequest() {
+		sendType("rewardStatusRequest");
+	}
+
+	/** Ask the backend to toggle caller's opt-out status for aspects or emeralds. */
+	public static JsonObject rewardOptOutPayload(String rewardKind, boolean blocked) {
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "rewardOptOutRequest");
+		obj.addProperty("rewardKind", rewardKind);
+		obj.addProperty("blocked", blocked);
+		return obj;
+	}
+
+	/** Ask the backend to toggle caller's opt-out status for aspects or emeralds. */
+	public boolean sendRewardOptOutRequest(String rewardKind, boolean blocked) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = rewardOptOutPayload(rewardKind, blocked);
+		enqueueSend(current, obj.toString());
+		return true;
 	}
 
 	/** Ask the backend for the member list + aspect stock for the giveaway screen (Chiefs only). */
@@ -505,8 +562,8 @@ public final class BridgeWebSocketClient {
 		return true;
 	}
 
-	/** Open a new party in-game for the given label (raid name or Annihilation). */
-	public void sendPartyOpen(String raid, int maxSize, String note, int filled) {
+	/** Open a new party in-game for the given label (raid name, Annihilation, or Festival). */
+	public void sendPartyOpen(String raid, int maxSize, String note, int filled, boolean ally, String world, java.util.List<String> members) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
@@ -521,7 +578,28 @@ public final class BridgeWebSocketClient {
 		if (filled > 0) {
 			obj.addProperty("filled", filled);
 		}
+		if (ally) {
+			obj.addProperty("ally", true);
+		}
+		if (world != null && !world.isBlank()) {
+			obj.addProperty("world", world);
+		}
+		if (members != null && !members.isEmpty()) {
+			com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+			for (String m : members) {
+				arr.add(m);
+			}
+			obj.add("members", arr);
+		}
 		enqueueSend(current, obj.toString());
+	}
+
+	public void sendPartyOpen(String raid, int maxSize, String note, int filled, boolean ally, String world) {
+		sendPartyOpen(raid, maxSize, note, filled, ally, world, java.util.List.of());
+	}
+
+	public void sendPartyOpen(String raid, int maxSize, String note, int filled) {
+		sendPartyOpen(raid, maxSize, note, filled, false, "");
 	}
 
 	/** Join the open raid party with the given id. */
@@ -534,6 +612,10 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "partyJoin");
 		obj.addProperty("id", id);
 		enqueueSend(current, obj.toString());
+	}
+
+	public void sendPartyAllyToggle(boolean ally) {
+		sendPartyManage("ally", ally ? "true" : "false", ally ? 1 : 0, "");
 	}
 
 	/** Leave a raid party ({@code null} id = whichever party you are in). */
@@ -778,6 +860,42 @@ public final class BridgeWebSocketClient {
 		return true;
 	}
 
+	/**
+	 * Leave {@code to} an offline mail; the bot answers with a {@code mail} pill line.
+	 *
+	 * @return whether the message was queued on a connected socket
+	 */
+	public boolean sendMail(String to, String content) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "mailSend");
+		obj.addProperty("to", to);
+		obj.addProperty("content", content);
+		enqueueSend(current, obj.toString());
+		return true;
+	}
+
+	/** Tell the bot these mails were shown, so it stops re-sending them. */
+	public void sendMailAck(java.util.List<Long> ids) {
+		WebSocket current = socket;
+		if (current == null || ids.isEmpty()) {
+			return;
+		}
+		enqueueSend(current, mailAckPayload(ids).toString());
+	}
+
+	static JsonObject mailAckPayload(java.util.List<Long> ids) {
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "mailAck");
+		com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+		ids.forEach(arr::add);
+		obj.add("ids", arr);
+		return obj;
+	}
+
 	static JsonObject witnessKillPayload(java.util.List<String> partyMembers) {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "witnessKill");
@@ -854,9 +972,10 @@ public final class BridgeWebSocketClient {
 	/**
 	 * Tell the backend a territory's attack timer has ended (no longer on the scoreboard),
 	 * so it clears that territory's cached defence/conflict/who's-going and the next war on
-	 * it starts fresh.
+	 * it starts fresh. {@code captured} marks an attack cancelled because another guild
+	 * took the territory first, which the backend believes even before the war was due.
 	 */
-	public void sendWarTimerEnded(String territory) {
+	public void sendWarTimerEnded(String territory, boolean captured) {
 		WebSocket current = socket;
 		if (current == null) {
 			return;
@@ -864,6 +983,9 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "warTimerEnded");
 		obj.addProperty("territory", territory);
+		if (captured) {
+			obj.addProperty("captured", true);
+		}
 		enqueueSend(current, obj.toString());
 	}
 
@@ -1016,14 +1138,42 @@ public final class BridgeWebSocketClient {
 	 * this stays a faithful, general-purpose snapshot of what the mod actually saw.
 	 */
 	public void sendGuildLogSnapshot(String category, java.util.List<GuildLogEvent> events) {
-		WebSocket current = socket;
 		String source = switch (category) {
 			case "General" -> "general";
 			case "Public Bank" -> "publicBank";
 			case "High Ranked Bank" -> "highRankedBank";
 			default -> null;
 		};
-		if (current == null || source == null) {
+		if (source != null) {
+			sendGuildLogSnapshot(source, false, events);
+		}
+	}
+
+	/**
+	 * Send one page of a whole-log walk (every filter, every page). Flagged {@code fullScan}
+	 * so the backend takes only the raid rows' Seasonal Rating from it: such a page is not
+	 * the newest rows of its filter, which is what the bank fallback's diffing assumes.
+	 */
+	public void sendGuildLogFullScanPage(String category, java.util.List<GuildLogEvent> events) {
+		sendGuildLogSnapshot(sourceKey(category), true, events);
+	}
+
+	/** {@code "High Ranked Bank"} to {@code "highRankedBank"}: a filter's label as a wire key. */
+	static String sourceKey(String category) {
+		StringBuilder key = new StringBuilder();
+		for (String word : category.trim().split("[^A-Za-z0-9]+")) {
+			if (word.isEmpty()) {
+				continue;
+			}
+			String lower = word.toLowerCase(java.util.Locale.ROOT);
+			key.append(key.length() == 0 ? lower : Character.toUpperCase(lower.charAt(0)) + lower.substring(1));
+		}
+		return key.length() == 0 ? "unknown" : key.substring(0, Math.min(key.length(), 64));
+	}
+
+	private void sendGuildLogSnapshot(String source, boolean fullScan, java.util.List<GuildLogEvent> events) {
+		WebSocket current = socket;
+		if (current == null) {
 			return;
 		}
 		JsonArray encoded = new JsonArray();
@@ -1062,6 +1212,10 @@ public final class BridgeWebSocketClient {
 					entry.addProperty("charges", bank.charges());
 				}
 				entry.addProperty("accessTier", bank.accessTier());
+			} else if (event instanceof GuildLogEvent.Text text) {
+				entry.addProperty("kind", "text");
+				entry.addProperty("occurredAt", text.occurredAt());
+				entry.addProperty("text", text.text());
 			} else if (event instanceof GuildLogEvent.Raid raid) {
 				entry.addProperty("kind", "raid");
 				entry.addProperty("occurredAt", raid.occurredAt());
@@ -1095,6 +1249,9 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "guildLogSnapshot");
 		obj.addProperty("version", 1);
 		obj.addProperty("source", source);
+		if (fullScan) {
+			obj.addProperty("fullScan", true);
+		}
 		obj.add("events", encoded);
 		enqueueSend(current, obj.toString());
 	}
@@ -1272,12 +1429,25 @@ public final class BridgeWebSocketClient {
 				case "emeraldsPendingReply" -> sink.onEmeraldsPending(parsePendingEntries(obj, "emeralds"), get(obj, "error"), get(obj, "color"));
 				case "aspectGiveawayReply" -> sink.onAspectGiveaway(parseGiveawayCandidates(obj), getInt(obj, "storageAspects", 0), get(obj, "error"), get(obj, "color"));
 				case "rewardDeductReply" -> sink.onRewardDeductReply(get(obj, "target"), get(obj, "rewardKind"), getInt(obj, "amount", 0), getInt(obj, "remaining", 0), get(obj, "error"), get(obj, "color"));
+				case "rewardStatusReply" -> sink.onRewardStatus(getBool(obj, "aspectsBlocked"), getBool(obj, "emeraldsBlocked"), getInt(obj, "pendingAspects", 0), getLong(obj, "pendingEmeralds", 0L), get(obj, "error"), get(obj, "color"));
+				case "rewardOptOutReply" -> sink.onRewardOptOutReply(get(obj, "rewardKind"), getBool(obj, "blocked"), get(obj, "error"), get(obj, "color"));
 				case "giftLockReply" -> sink.onGiftLockReply(getBool(obj, "granted"), get(obj, "error"), get(obj, "holder"), getInt(obj, "retryAfterSeconds", 0));
 				case "partyUpdate" -> sink.onPartyUpdate(get(obj, "event"), get(obj, "actor"), parseParty(obj), get(obj, "color"));
-				case "partyListReply" -> sink.onPartyList(parsePartyList(obj), get(obj, "color"));
+				case "partyListReply" -> {
+					if (sink != null && obj.has("festivalEnabled")) {
+						sink.onPartyConfig(getBool(obj, "festivalEnabled"), getBool(obj, "annihilationActive"));
+					}
+					sink.onPartyList(parsePartyList(obj), get(obj, "color"));
+				}
+				case "partyConfig" -> {
+					if (sink != null) {
+						sink.onPartyConfig(getBool(obj, "festivalEnabled"), getBool(obj, "annihilationActive"));
+					}
+				}
 				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"), get(obj, "color"));
 				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
 				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"));
+				case "mailDelivery" -> sink.onMailDelivery(parseMail(obj));
 				case "warCountsReply" -> sink.onWarCounts(getInt(obj, "days", 7), parseWarCounts(obj), get(obj, "requester"), get(obj, "color"));
 				case "allyActivityReply" -> sink.onAllyActivity(parseAllyActivity(obj));
 				case "warBoard" -> sink.onWarBoard(parseWarBoard(obj));
@@ -1336,8 +1506,8 @@ public final class BridgeWebSocketClient {
 	 * {@code joinServer} does network I/O; failures just leave the connection
 	 * unverified (the server times it out and closes).
 	 */
-	private void handleAuthChallenge(String serverId) {
-		if (serverId == null || serverId.isEmpty() || !SERVER_ID_PATTERN.matcher(serverId).matches()) {
+	private void handleAuthChallenge(String serverNonce) {
+		if (!isServerNonce(serverNonce)) {
 			return;
 		}
 		if (!authChallengeSeen.compareAndSet(false, true)) {
@@ -1350,7 +1520,7 @@ public final class BridgeWebSocketClient {
 				return;
 			}
 			try {
-				String username = authenticator.joinServer(serverId);
+				String username = authenticator.joinServer(joinId(serverNonce));
 				if (username == null || username.isEmpty()) {
 					LOGGER.warn("Session authenticator returned no username; cannot verify");
 					return;
@@ -1359,6 +1529,7 @@ public final class BridgeWebSocketClient {
 				JsonObject obj = new JsonObject();
 				obj.addProperty("type", "authResponse");
 				obj.addProperty("username", username);
+				obj.addProperty("authVersion", AUTH_VERSION);
 				// Capability self-declaration — a flat, static list of whatever this
 				// jar was compiled with, regardless of what the server does with it —
 				// rides on this, the very first message the mod ever sends, so the
@@ -1378,6 +1549,30 @@ public final class BridgeWebSocketClient {
 		}, "eden-session-auth");
 		thread.setDaemon(true);
 		thread.start();
+	}
+
+	/** Whether {@code value} has the shape of a bridge nonce. */
+	static boolean isServerNonce(String value) {
+		return value != null && SERVER_NONCE_PATTERN.matcher(value).matches();
+	}
+
+	/**
+	 * The {@code serverId} to join Mojang with for the bridge's {@code serverNonce}.
+	 *
+	 * <p>Mojang records a join under any string and cannot tell ours from a Minecraft
+	 * server's login hash, so joining with a value the bridge chose would let a hostile
+	 * bridge hand us another server's hash and have us approve a login to it as this
+	 * player. A hash under our own prefix is something no other server will ever use, and
+	 * no nonce can produce a chosen one. Cut to 40 hex characters, a vanilla hash's length.
+	 * Must match {@code session_auth.join_id} on the bridge.
+	 */
+	static String joinId(String serverNonce) {
+		try {
+			byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest((JOIN_ID_PREFIX + serverNonce).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			return java.util.HexFormat.of().formatHex(digest).substring(0, JOIN_ID_CHARS);
+		} catch (java.security.NoSuchAlgorithmException e) {
+			throw new IllegalStateException("SHA-256 unavailable", e);
+		}
 	}
 
 	/** Whether a server {@code error} code is retryable rather than a hard rejection. */
@@ -1434,7 +1629,7 @@ public final class BridgeWebSocketClient {
 	}
 
 	private static PartyInfo parseParty(JsonObject obj) {
-		return new PartyInfo(getInt(obj, "id", 0), get(obj, "raid"), get(obj, "host"), getStringArray(obj, "members"), getInt(obj, "max", 4), get(obj, "note"));
+		return new PartyInfo(getInt(obj, "id", 0), get(obj, "raid"), get(obj, "host"), getStringArray(obj, "members"), getInt(obj, "max", 4), get(obj, "note"), getStringArray(obj, "tags"), getBool(obj, "ally"), get(obj, "world"));
 	}
 
 	private static java.util.List<PartyInfo> parsePartyList(JsonObject obj) {
@@ -1514,6 +1709,22 @@ public final class BridgeWebSocketClient {
 				if (element.isJsonObject()) {
 					JsonObject member = element.getAsJsonObject();
 					out.add(new PendingEntry(get(member, "name"), getInt(member, amountKey, 0)));
+				}
+			}
+		}
+		return out;
+	}
+
+	static java.util.List<MailEntry> parseMail(JsonObject obj) {
+		java.util.List<MailEntry> out = new java.util.ArrayList<>();
+		if (obj.has("mails") && obj.get("mails").isJsonArray()) {
+			for (var element : obj.get("mails").getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject mail = element.getAsJsonObject();
+					long id = getLong(mail, "id", 0L);
+					if (id > 0) {
+						out.add(new MailEntry(id, get(mail, "from"), get(mail, "content"), getLong(mail, "sentAt", 0L)));
+					}
 				}
 			}
 		}

@@ -286,6 +286,8 @@ public abstract class AbstractContainerScreenMixin {
 				ci.cancel();
 				RaidGambitSafety.notifyBlocked(Minecraft.getInstance(), config.raidGambitMinimum);
 				RaidGambitSafety.showPopupWarning(reasons);
+			} else if (RaidGambitSafety.isReadyClickSlot(slot)) {
+				RaidGambitSafety.clearPopupWarning();
 			}
 		} catch (Throwable ignored) {
 		}
@@ -296,7 +298,7 @@ public abstract class AbstractContainerScreenMixin {
 		try {
 			Minecraft mc = Minecraft.getInstance();
 			if (mc != null && mc.font != null && mc.getWindow() != null) {
-				RaidGambitSafety.renderPopupWarning(graphics, mc.font, mc.getWindow().getGuiScaledWidth());
+				RaidGambitSafety.renderPopupWarning(graphics, mc.font, mc.getWindow().getGuiScaledWidth(), ((net.minecraft.client.gui.screens.Screen) (Object) this).getTitle().getString(), getMenu(), EdenModClient.instance().config());
 			}
 
 			edenmod$skipBtnVisible = false;

@@ -13,7 +13,7 @@ import net.minecraft.world.item.component.ItemLore;
 public final class GuildLogEntryParser {
 	// The timestamp is the Paper item's coloured hover name, not its lore. Matches the
 	// format Wynncraft uses for every guild-log row, e.g. "2 hours ago (09/22/26 09:30 AM EDT)".
-	private static final Pattern TIMESTAMP = Pattern.compile("\\d+ (?:month|week|day|hour|minute|second)s? ago \\(\\d{1,2}/\\d{1,2}/\\d{2} \\d{1,2}:\\d{2} (?:AM|PM) (?:EST|EDT)\\)");
+	private static final Pattern TIMESTAMP = Pattern.compile("\\d+ (?:month|week|day|hour|minute|second)s? ago \\(\\d{1,2}/\\d{1,2}/\\d{2} \\d{1,2}:\\d{2} (?:AM|PM) [A-Z]{2,5}\\)");
 	private GuildLogEntryParser() {
 	}
 

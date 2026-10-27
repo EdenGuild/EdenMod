@@ -39,6 +39,7 @@ import tel.eden.mod.guild.GuildLogSync;
 import tel.eden.mod.guild.GuildMenuScraper;
 import tel.eden.mod.guild.GuildRewardStorageSnapshot;
 import tel.eden.mod.guild.BackgroundContainerSession;
+import tel.eden.mod.gui.AspectGiveawayScreen;
 import tel.eden.mod.gui.BridgeConfigScreen;
 import tel.eden.mod.gui.CommandAliasScreen;
 import tel.eden.mod.gui.CommandKeybindScreen;
@@ -52,6 +53,7 @@ import tel.eden.mod.net.AllyActivityEntry;
 import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.net.PartyInfo;
 import tel.eden.mod.net.GiveawayCandidate;
+import tel.eden.mod.net.MailEntry;
 import tel.eden.mod.net.PendingEntry;
 import tel.eden.mod.net.WarBoardEntry;
 import tel.eden.mod.net.WarCountEntry;
@@ -106,12 +108,15 @@ import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.User;
+import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
@@ -185,6 +190,8 @@ public final class EdenModClient implements ClientModInitializer {
 	private KeyMapping createPartyKey;
 	private KeyMapping openEmotePickerKey;
 	private BridgeWebSocketClient socket;
+	// Mail ids already shown this session; the bot can re-send before our ack lands.
+	private final Set<Long> shownMailIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	// The in-flight giftLockAcquire's result slot: onGiftLockReply completes it (from
 	// the bridge's read thread), GuildRewards.GiftLockGateway.acquire() blocks on it
 	// (from the reward worker thread). At most one acquire is ever outstanding —
@@ -281,6 +288,14 @@ public final class EdenModClient implements ClientModInitializer {
 	// Set when boot-time attestation fails — jar hash has no GitHub attestation, which
 	// means the jar is either unofficial or has been tampered with.
 	private volatile boolean pendingBootAttestationFailed;
+	private volatile boolean pendingRewardStatus;
+	private volatile long rewardStatusRequestSeq;
+	private volatile long userRewardStatusRequestSeq;
+	private volatile boolean pendingRewardOptOut;
+	private volatile boolean pendingRewardOptOutBlocked;
+	private volatile long rewardOptOutRequestSeq;
+	private volatile Boolean aspectsBlockedState;
+	private volatile Boolean emeraldsBlockedState;
 	// Guards the one-shot attestation-failure report to the bridge (sent on first connect
 	// after a failed boot check; skipped if attestation passed or was never run).
 	private volatile boolean attestationFailureReported;
@@ -397,6 +412,35 @@ public final class EdenModClient implements ClientModInitializer {
 				mc.setScreen(new ChatScreen("", false));
 			}
 		});
+	}
+
+	private volatile String currentWynnWorld = "";
+	private volatile boolean festivalEnabled = false;
+	private volatile boolean annihilationActive = false;
+
+	public String currentWynnWorld() {
+		return currentWynnWorld;
+	}
+
+	public boolean isFestivalEnabled() {
+		return festivalEnabled;
+	}
+
+	public boolean isAnnihilationActive() {
+		return annihilationActive;
+	}
+
+	public PartyInfo activeParty() {
+		String ign = playerName();
+		if (ign == null || ign.isBlank()) {
+			return null;
+		}
+		for (PartyInfo party : knownParties) {
+			if (party.host().equalsIgnoreCase(ign) || party.members().stream().anyMatch(m -> m.equalsIgnoreCase(ign))) {
+				return party;
+			}
+		}
+		return null;
 	}
 
 	/** An immutable snapshot of the currently known parties, safe to read off-thread. */
@@ -587,7 +631,39 @@ public final class EdenModClient implements ClientModInitializer {
 			}
 			current.sendGuildLogSnapshot(category, entries.stream().map(tel.eden.mod.guild.GuildLogEventParser::parse).flatMap(Optional::stream).toList());
 		});
+		guildLogSync.setFullScanReporter((category, page, entries) -> {
+			BridgeWebSocketClient current = socket;
+			if (current == null) {
+				return;
+			}
+			java.util.List<tel.eden.mod.guild.GuildLogEvent> events = GuildLogSync.isTextCategory(category) ? entries.stream().map(GuildLogSync::textEvent).toList() : entries.stream().map(tel.eden.mod.guild.GuildLogEventParser::parse).flatMap(Optional::stream).toList();
+			current.sendGuildLogFullScanPage(category, events);
+		});
+		tel.eden.mod.chat.PlayerNameResolver.setMemberNames(guildRewards::memberNames);
 		guildRewards.setPostGiftReconciler(guildLogSync::requestSoon);
+		guildRewards.setPreRunNicknameReader(() -> {
+			try {
+				guildLogSync.readCharacterInfo().get(10, TimeUnit.SECONDS);
+			} catch (Exception e) {
+				LOGGER.warn("Character info read before the gift run failed", e);
+			}
+		});
+		guildRewards.setPostRunLogScanDue(() -> {
+			boolean recent = guildLogSync.scannedWithin(GuildLogSync.AUTO_SCAN_COOLDOWN_MS);
+			if (recent) {
+				LOGGER.info("Guild log full scan: skipped after the gift run, one finished within the last 5 minutes");
+			}
+			return !recent;
+		});
+		guildRewards.setPostRunLogScan(progress -> {
+			long started = System.currentTimeMillis();
+			try {
+				return guildLogSync.scanWholeLog(progress).get(2, TimeUnit.MINUTES);
+			} catch (Exception e) {
+				LOGGER.warn("Guild log full scan after gift run failed after {}ms", System.currentTimeMillis() - started, e);
+				return -1;
+			}
+		});
 		guildRewards.setPreGiftEvidenceSupplier(() -> {
 			try {
 				return guildLogSync.reconcileNow().get(20, TimeUnit.SECONDS);
@@ -679,7 +755,11 @@ public final class EdenModClient implements ClientModInitializer {
 			// tracking. The war board itself survives a world swap (the bridge socket stays
 			// open and keeps it current); disconnect() clears it fully.
 			ScoreboardCapture.reset();
-			RaidPartyTracker.reset();
+			// Not RaidPartyTracker: leaving a raid instance is a server swap that lands up to
+			// ~70s before the guild completion line, and wiping the tally here sent that
+			// completion with no allies. It is consumed on completion and cleared on disconnect.
+			aspectsBlockedState = null;
+			emeraldsBlockedState = null;
 			AllianceMenuScraper.reset();
 			GuildMenuScraper.reset();
 			AttackTimerMenu.onWorldJoin();
@@ -707,10 +787,10 @@ public final class EdenModClient implements ClientModInitializer {
 			})).then(ClientCommandManager.literal("online").executes(ctx -> {
 				requestOnline(ctx.getSource());
 				return 1;
-			})).then(ClientCommandManager.literal("aspects").then(ClientCommandManager.literal("pending").executes(ctx -> {
+			})).then(ClientCommandManager.literal("mail").then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).then(ClientCommandManager.argument("message", StringArgumentType.greedyString()).executes(ctx -> sendMail(ctx.getSource(), StringArgumentType.getString(ctx, "player"), StringArgumentType.getString(ctx, "message")))))).then(ClientCommandManager.literal("aspects").then(ClientCommandManager.literal("pending").executes(ctx -> {
 				requestAspectsPending(ctx.getSource());
 				return 1;
-			}))).then(ClientCommandManager.literal("cf").executes(ctx -> {
+			})).then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("aspects", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("aspects", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("aspects", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("emeralds").then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("emeralds", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("emeralds", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("emeralds", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("rewards").executes(ctx -> queryRewardStatus()).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("cf").executes(ctx -> {
 				requestCoinflip(ctx.getSource());
 				return 1;
 			})).then(ClientCommandManager.literal("diceroll").executes(ctx -> {
@@ -725,7 +805,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
+			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(ClientCommandManager.literal("logscan").executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
 				requestWarCounts(ctx.getSource(), 7);
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
@@ -790,6 +870,7 @@ public final class EdenModClient implements ClientModInitializer {
 			AttackMenuScraper.onTick(client);
 			AllianceMenuScraper.onTick(client);
 			GuildMenuScraper.onTick(client);
+			tel.eden.mod.chat.CharacterInfoNickname.onTick(client);
 			AttackTimerMenu.onTick(socket);
 			tel.eden.mod.emote.EmoteWheel.onTick(client);
 			tel.eden.mod.emote.UnlockedEmoteDetector.onTick(client);
@@ -985,6 +1066,47 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
+				public void onRewardStatus(boolean aspectsBlocked, boolean emeraldsBlocked, int pendingAspects, long pendingEmeralds, String error, String color) {
+					pendingRewardStatus = false;
+					boolean wasUserRequest = (userRewardStatusRequestSeq == rewardStatusRequestSeq);
+					if (error != null && !error.isEmpty()) {
+						if (wasUserRequest) {
+							displayDirect(() -> Component.literal("[Eden] Failed to fetch reward status").withStyle(ChatFormatting.RED));
+						}
+						return;
+					}
+					aspectsBlockedState = aspectsBlocked;
+					emeraldsBlockedState = emeraldsBlocked;
+					if (!wasUserRequest) {
+						return;
+					}
+					long le = pendingEmeralds / 4096;
+					displayDirect(() -> Component.literal("[Eden] Rewards Status:\n").withStyle(ChatFormatting.GOLD).append(Component.literal(" • Aspects: ").withStyle(ChatFormatting.GRAY)).append(Component.literal(aspectsBlocked ? "Opted Out" : "Opted In").withStyle(aspectsBlocked ? ChatFormatting.RED : ChatFormatting.GREEN)).append(Component.literal(" (" + pendingAspects + " pending)\n").withStyle(ChatFormatting.YELLOW)).append(Component.literal(" • Emeralds: ").withStyle(ChatFormatting.GRAY)).append(Component.literal(emeraldsBlocked ? "Opted Out" : "Opted In").withStyle(emeraldsBlocked ? ChatFormatting.RED : ChatFormatting.GREEN)).append(Component.literal(" (" + le + " LE pending)").withStyle(ChatFormatting.YELLOW)));
+				}
+
+				@Override
+				public void onRewardOptOutReply(String rewardKind, boolean blocked, String error, String color) {
+					pendingRewardOptOut = false;
+					if (error != null && !error.isEmpty()) {
+						if (error.contains("already")) {
+							displayColoredDirect(color != null && !color.isEmpty() ? color : "FFFF55", () -> Component.literal("[Eden] " + error).withStyle(ChatFormatting.YELLOW));
+							return;
+						}
+						boolean wasOptOut = blocked || pendingRewardOptOutBlocked;
+						String warning = wasOptOut ? "Failed to opt out of rewards" : "Failed to opt in to rewards";
+						displayDirect(() -> Component.literal("[Eden] " + warning).withStyle(ChatFormatting.RED));
+						return;
+					}
+					if ("aspects".equalsIgnoreCase(rewardKind)) {
+						aspectsBlockedState = blocked;
+					} else if ("emeralds".equalsIgnoreCase(rewardKind)) {
+						emeraldsBlockedState = blocked;
+					}
+					String verb = blocked ? "opted out of" : "opted in to";
+					displayDirect(() -> Component.literal("[Eden] You are now " + verb + " " + rewardKind + " from guild raids.").withStyle(blocked ? ChatFormatting.RED : ChatFormatting.GREEN));
+				}
+
+				@Override
 				public void onRewardDeductReply(String target, String rewardKind, int amount, int remaining, String error, String color) {
 					if (error != null && !error.isEmpty()) {
 						displayColoredDirect(color, () -> DiscordChatFormatter.systemLine("Couldn't deduct pending rewards: " + error, ChatFormatting.RED));
@@ -1041,6 +1163,12 @@ public final class EdenModClient implements ClientModInitializer {
 						default -> {
 							/* closed/other: nothing to announce */ }
 					}
+				}
+
+				@Override
+				public void onPartyConfig(boolean festivalEnabled, boolean annihilationActive) {
+					EdenModClient.this.festivalEnabled = festivalEnabled;
+					EdenModClient.this.annihilationActive = annihilationActive;
 				}
 
 				@Override
@@ -1196,6 +1324,39 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
+				public void onMailDelivery(java.util.List<MailEntry> mails) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						// No player (mid world swap): leave it unacked so the bot re-sends on the next world entry.
+						if (mc.player == null) {
+							return;
+						}
+						List<MailEntry> fresh = mails.stream().filter(m -> shownMailIds.add(m.id())).toList();
+						for (MailEntry mail : fresh) {
+							Component line = DiscordChatFormatter.pill("mail", mail.from() + " (" + AspectGiveawayScreen.formatAge(mail.sentAt()) + "): " + mail.content());
+							if (!WynntilsChatBridge.sendToTab(line)) {
+								mc.player.displayClientMessage(line, false);
+							}
+						}
+						if (!fresh.isEmpty()) {
+							Component title = Component.literal(fresh.size() == 1 ? "New Eden mail" : fresh.size() + " new Eden mails");
+							Component body = Component.literal("From " + String.join(", ", fresh.stream().map(MailEntry::from).distinct().toList()) + " — see chat");
+							SystemToast.addOrUpdate(mc.getToastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION, title, body);
+							if (config.mailSound) {
+								// Envelope rustle, then a two-note "ding-ding": vanilla sounds no Wynncraft cue uses.
+								mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.BOOK_PAGE_TURN, 1.0f));
+								mc.getSoundManager().playDelayed(SimpleSoundInstance.forUI(SoundEvents.NOTE_BLOCK_CHIME, 1.0f), 4);
+								mc.getSoundManager().playDelayed(SimpleSoundInstance.forUI(SoundEvents.NOTE_BLOCK_CHIME, 1.5f), 8);
+							}
+						}
+						BridgeWebSocketClient current = socket;
+						if (current != null) {
+							current.sendMailAck(mails.stream().map(MailEntry::id).toList());
+						}
+					});
+				}
+
+				@Override
 				public void onGameFeedback(String message, String color) {
 					displayColored(color, () -> DiscordChatFormatter.systemLine(message, net.minecraft.ChatFormatting.GOLD));
 				}
@@ -1221,7 +1382,8 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/**
 	 * Answer a v2 session challenge: run Mojang's {@code joinServer} for the current
-	 * account against the server's {@code serverId} nonce and return the IGN to
+	 * account against the {@code serverId} it is given (derived from the server's nonce,
+	 * see {@code BridgeWebSocketClient.joinId}) and return the IGN to
 	 * report. The access token is sent only to Mojang. The bridge then verifies the
 	 * join via {@code hasJoined} — so a patched mod cannot fake this, and a copied
 	 * token is useless to anyone not logged into this Minecraft account.
@@ -1319,6 +1481,14 @@ public final class EdenModClient implements ClientModInitializer {
 		thread.start();
 	}
 
+	private int sendMail(FabricClientCommandSource source, String player, String message) {
+		BridgeWebSocketClient current = socket;
+		if (current == null || !current.sendMail(player, message)) {
+			source.sendFeedback(notConnected());
+		}
+		return 1;
+	}
+
 	private void requestOnline(FabricClientCommandSource source) {
 		BridgeWebSocketClient current = socket;
 		if (current == null) {
@@ -1366,6 +1536,77 @@ public final class EdenModClient implements ClientModInitializer {
 			return;
 		}
 		current.sendDiceroll();
+	}
+
+	private int queryRewardStatus() {
+		return queryRewardStatus(false);
+	}
+
+	private int queryRewardStatus(boolean silent) {
+		BridgeWebSocketClient current = socket;
+		if (current == null || !current.isConnected()) {
+			if (!silent) {
+				displayDirect(() -> Component.literal("[Eden] Failed to fetch reward status").withStyle(ChatFormatting.RED));
+			}
+			return 0;
+		}
+		long seq = ++rewardStatusRequestSeq;
+		pendingRewardStatus = true;
+		if (!silent) {
+			userRewardStatusRequestSeq = seq;
+		}
+		current.sendRewardStatusRequest();
+		if (!silent) {
+			java.util.concurrent.CompletableFuture.delayedExecutor(4, java.util.concurrent.TimeUnit.SECONDS).execute(() -> {
+				Minecraft client = Minecraft.getInstance();
+				if (client != null) {
+					client.execute(() -> {
+						if (rewardStatusRequestSeq == seq && pendingRewardStatus) {
+							pendingRewardStatus = false;
+							displayDirect(() -> Component.literal("[Eden] Failed to fetch reward status").withStyle(ChatFormatting.RED));
+						}
+					});
+				}
+			});
+		}
+		return 1;
+	}
+
+	private int toggleRewardOptOut(String kind, boolean blocked) {
+		BridgeWebSocketClient current = socket;
+		if (current == null || !current.isConnected()) {
+			String warning = blocked ? "Failed to opt out of rewards" : "Failed to opt in to rewards";
+			displayDirect(() -> Component.literal("[Eden] " + warning).withStyle(ChatFormatting.RED));
+			return 0;
+		}
+		Boolean known = "aspects".equalsIgnoreCase(kind) ? aspectsBlockedState : ("emeralds".equalsIgnoreCase(kind) ? emeraldsBlockedState : null);
+		if (known != null && known == blocked) {
+			String verb = blocked ? "opted out of" : "opted in to";
+			displayDirect(() -> Component.literal("[Eden] You are already " + verb + " " + kind + " from guild raids.").withStyle(ChatFormatting.YELLOW));
+			return 0;
+		}
+		long seq = ++rewardOptOutRequestSeq;
+		pendingRewardOptOut = true;
+		pendingRewardOptOutBlocked = blocked;
+		if (!current.sendRewardOptOutRequest(kind, blocked)) {
+			pendingRewardOptOut = false;
+			String warning = blocked ? "Failed to opt out of rewards" : "Failed to opt in to rewards";
+			displayDirect(() -> Component.literal("[Eden] " + warning).withStyle(ChatFormatting.RED));
+			return 0;
+		}
+		java.util.concurrent.CompletableFuture.delayedExecutor(4, java.util.concurrent.TimeUnit.SECONDS).execute(() -> {
+			Minecraft client = Minecraft.getInstance();
+			if (client != null) {
+				client.execute(() -> {
+					if (rewardOptOutRequestSeq == seq && pendingRewardOptOut) {
+						pendingRewardOptOut = false;
+						String warning = blocked ? "Failed to opt out of rewards" : "Failed to opt in to rewards";
+						displayDirect(() -> Component.literal("[Eden] " + warning).withStyle(ChatFormatting.RED));
+					}
+				});
+			}
+		});
+		return 1;
 	}
 
 	private void requestAspectsPending(FabricClientCommandSource source) {
@@ -1483,11 +1724,56 @@ public final class EdenModClient implements ClientModInitializer {
 		return 1;
 	}
 
+	/**
+	 * {@code /eden logscan}: a Chief or Owner reads the whole Guild Log (every filter, five
+	 * pages each) and uploads it, behind the same blocking progress screen a gift run uses.
+	 * The walk stops by itself after 90 seconds; there is no Cancel button.
+	 */
+	private int scanLog(FabricClientCommandSource source) {
+		if (!ensureRewardsReady(source)) {
+			return 0;
+		}
+		if (!guildRewards.isChief()) {
+			source.sendFeedback(Component.literal("Only Chiefs and Owners can scan the Guild Log.").withStyle(net.minecraft.ChatFormatting.RED));
+			return 0;
+		}
+		if (socket == null) {
+			source.sendFeedback(Component.literal("Not connected to the bridge, so there is nowhere to upload the log to.").withStyle(net.minecraft.ChatFormatting.RED));
+			return 0;
+		}
+		if (guildRewards.isGiftInProgress() || guildLogSync.isBusy()) {
+			source.sendFeedback(Component.literal("The Guild Log is already being read — try again in a moment.").withStyle(net.minecraft.ChatFormatting.YELLOW));
+			return 0;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		tel.eden.mod.gui.GiftProgressScreen progress = new tel.eden.mod.gui.GiftProgressScreen("Guild Log Scan");
+		showProgressScreen(progress);
+		long started = System.currentTimeMillis();
+		guildLogSync.scanWholeLog(progress::onProgress).whenComplete((rows, error) -> {
+			progress.onDone();
+			mc.execute(() -> {
+				if (error != null) {
+					LOGGER.warn("Guild log scan failed after {}ms", System.currentTimeMillis() - started, error);
+					source.sendFeedback(Component.literal("Guild Log scan failed: " + error.getMessage()).withStyle(net.minecraft.ChatFormatting.RED));
+				} else if (rows > 0) {
+					source.sendFeedback(Component.literal("Guild Log scan finished: " + rows + " rows uploaded in " + Math.round((System.currentTimeMillis() - started) / 1000.0) + "s.").withStyle(net.minecraft.ChatFormatting.GREEN));
+				} else {
+					source.sendFeedback(Component.literal("Guild Log scan did not run: the log could not be opened.").withStyle(net.minecraft.ChatFormatting.RED));
+				}
+			});
+		});
+		return 1;
+	}
+
 	/** Show the blocking gift-progress screen and attach it as the run's listener, before submitting the run. */
 	private void showGiftProgress(String title) {
-		Minecraft mc = Minecraft.getInstance();
 		tel.eden.mod.gui.GiftProgressScreen progress = new tel.eden.mod.gui.GiftProgressScreen(title, guildRewards);
 		guildRewards.setProgressListener(progress);
+		showProgressScreen(progress);
+	}
+
+	private void showProgressScreen(tel.eden.mod.gui.GiftProgressScreen progress) {
+		Minecraft mc = Minecraft.getInstance();
 		// Deferred, not immediate: this runs from inside chat command dispatch, which
 		// itself is inside ChatScreen's own send-and-close handling — a same-tick
 		// setScreen() here loses the race against that close and gets silently
@@ -1883,6 +2169,8 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private void onCharacterSelection() {
+		// A class change can change our nickname; forget the old one so it is learned afresh.
+		tel.eden.mod.chat.PlayerNameResolver.forgetAliasesFor(playerName());
 		enteredWynnGameWorld = false;
 		guildLogSync.onWorldTransition();
 		setInGameWorld(false);
@@ -2272,7 +2560,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -2338,14 +2626,27 @@ public final class EdenModClient implements ClientModInitializer {
 	/** Returns true when the Wynncraft tab list is visible (game world or /class screen). */
 	private boolean checkWynncraftTabActive(Minecraft mc) {
 		net.minecraft.client.multiplayer.ClientPacketListener conn = mc.getConnection();
-		if (conn == null)
+		if (conn == null) {
+			currentWynnWorld = "";
 			return false;
+		}
 		for (net.minecraft.client.multiplayer.PlayerInfo info : conn.getOnlinePlayers()) {
 			net.minecraft.network.chat.Component name = info.getTabListDisplayName();
-			if (name != null && (name.getString().contains("Global [") || name.getString().contains("Island Info"))) {
-				return true;
+			if (name != null) {
+				String str = name.getString();
+				if (str.contains("Global [") || str.contains("Island Info")) {
+					if (str.contains("Global [")) {
+						int start = str.indexOf("Global [") + 8;
+						int end = str.indexOf(']', start);
+						if (end > start) {
+							currentWynnWorld = str.substring(start, end).trim();
+						}
+					}
+					return true;
+				}
 			}
 		}
+		currentWynnWorld = "";
 		return false;
 	}
 
@@ -2416,6 +2717,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}
 		}
 		syncRadianceGroup(config);
+		queryRewardStatus(true);
 	}
 
 	public static void syncRadianceGroup(BridgeConfig config) {
@@ -2439,6 +2741,7 @@ public final class EdenModClient implements ClientModInitializer {
 		partyCommandGeneration.incrementAndGet();
 		onWynncraft = false;
 		loginPending = false;
+		currentWynnWorld = "";
 		bridgeStatus = BridgeStatus.UNKNOWN;
 		liveGuildRank = "";
 		liveDiscordRank = "";
@@ -2450,6 +2753,8 @@ public final class EdenModClient implements ClientModInitializer {
 		// Drop the captured scoreboard + war-board state so nothing carries into the next
 		// connection (stale timers/defence/heads).
 		ScoreboardCapture.reset();
+		aspectsBlockedState = null;
+		emeraldsBlockedState = null;
 		AttackTimerMenu.reset();
 		// Likewise the raid tally: it holds players from the session that just ended, and
 		// after an account switch could attribute them to another guild's raid.
@@ -2527,6 +2832,7 @@ public final class EdenModClient implements ClientModInitializer {
 				tel.eden.mod.war.radiance.RadianceTracker.onChat(warLine);
 				tel.eden.mod.war.TerritoryLossTracker.onChat(warLine);
 				tel.eden.mod.war.WarStartPingTracker.onChat(warLine, config);
+				AttackTimerMenu.onChat(warLine);
 			});
 			// Auto /stream sits above the socket guard on purpose: it is a local
 			// convenience and has nothing to do with the bridge, so it keeps working
@@ -2603,6 +2909,7 @@ public final class EdenModClient implements ClientModInitializer {
 		// Annihilation world-event warning (the only advance timing signal we get).
 		java.util.OptionalInt anni = AnnihilationParser.parse(message);
 		if (anni.isPresent()) {
+			annihilationActive = true;
 			int seconds = anni.getAsInt();
 			if (annihilationRelay.shouldSend(new CapturedMessage("annihilation", null, String.valueOf(seconds)))) {
 				current.sendAnnihilation(seconds);
@@ -2704,9 +3011,9 @@ public final class EdenModClient implements ClientModInitializer {
 		// another group's completion would name whoever we happened to be standing near.
 		boolean ownRaid = isOwnRaid(line.party());
 		java.util.List<String> extras = ownRaid ? RaidPartyTracker.extraPlayers(line.party()) : java.util.List.of();
-		LOGGER.info("Raid {}: {} party={} extras={} aspects={} emeralds={} -> {}", how, line.raidName(), line.party(), extras, line.aspects(), line.emeralds(), sent ? "sent" : "deduped");
+		LOGGER.info("Raid {}: {} party={} extras={} aspects={} emeralds={} sr={} -> {}", how, line.raidName(), line.party(), extras, line.aspects(), line.emeralds(), line.seasonalRating(), sent ? "sent" : "deduped");
 		if (sent) {
-			current.sendRaidCompletion(line.party(), line.raidName(), line.aspects(), line.emeralds(), line.guildExp(), extras);
+			current.sendRaidCompletion(line.party(), line.raidName(), line.aspects(), line.emeralds(), line.guildExp(), line.seasonalRating(), extras);
 		}
 		// One raid, one tally — dropped even when the send was deduped, or a completion
 		// arriving within the retention window would inherit this raid's players.

@@ -27,6 +27,9 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.ToIntFunction;
 import java.util.function.Supplier;
 import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
@@ -49,6 +52,7 @@ import tel.eden.mod.chat.GuildReward;
 import tel.eden.mod.chat.PlayerNameResolver;
 import tel.eden.mod.guild.BackgroundContainerSession;
 import tel.eden.mod.guild.GuildLogEvent;
+import tel.eden.mod.guild.GuildLogSync;
 import tel.eden.mod.net.TlsPolicy;
 
 /**
@@ -262,6 +266,10 @@ public final class GuildRewards {
 		void onProgress(String status, int completed, int total);
 
 		void onDone();
+
+		/** The run has moved past the point where it can be stopped; hide the Cancel button. */
+		default void onCancelUnavailable() {
+		}
 	}
 
 	/**
@@ -342,6 +350,14 @@ public final class GuildRewards {
 	// reconciliation source for the ticker confirmations, not part of the timing-
 	// sensitive gifting loop itself.
 	private volatile Runnable postGiftReconciler;
+	// Runs (blocking, on the gift thread, reporting its pages to the progress screen) once the
+	// pass above has been scheduled, while the progress screen is still up: a whole-Guild-Log walk. Unlike the reconciler it is not
+	// part of settling the payout, only extra data for the backend.
+	private volatile ToIntFunction<GuildLogSync.ScanProgress> postRunLogScan;
+	private volatile BooleanSupplier postRunLogScanDue = () -> true;
+	// Blocking, best-effort: reads our own nickname off the Character Info menu. Run first in every
+	// gift or payout, so the Guild Log's reward rows can be matched to us from the start.
+	private volatile Runnable preRunNicknameReader;
 	private volatile Supplier<List<GuildLogEvent>> preGiftEvidenceSupplier;
 	private volatile Supplier<List<GuildLogEvent>> postGiftEvidenceSupplier;
 	private volatile RewardDeductSender rewardDeductSender;
@@ -390,6 +406,34 @@ public final class GuildRewards {
 	/** Schedule a non-blocking reconciliation after every gifting pass. */
 	public void setPostGiftReconciler(Runnable postGiftReconciler) {
 		this.postGiftReconciler = postGiftReconciler;
+	}
+
+	/** Run a blocking whole-Guild-Log read at the end of every uncancelled gifting pass. */
+	/** The scan to run after a gift run: given a progress sink, returns the rows uploaded, or -1 / 0 if it did not run. */
+	public void setPostRunLogScan(ToIntFunction<GuildLogSync.ScanProgress> postRunLogScan) {
+		this.postRunLogScan = postRunLogScan;
+	}
+
+	/** Read the Chief's own nickname before a run's first Guild Log read. */
+	public void setPreRunNicknameReader(Runnable reader) {
+		this.preRunNicknameReader = reader;
+	}
+
+	private void readOwnNickname() {
+		Runnable reader = preRunNicknameReader;
+		if (reader != null) {
+			progress("Reading your character info...", 0, 0);
+			try {
+				reader.run();
+			} catch (RuntimeException e) {
+				LOGGER.warn("Reading character info failed", e);
+			}
+		}
+	}
+
+	/** Whether a whole-log scan is due (e.g. none ran lately); consulted after every gift or payout run. */
+	public void setPostRunLogScanDue(BooleanSupplier due) {
+		this.postRunLogScanDue = due == null ? () -> true : due;
 	}
 
 	/** Supply a fresh Guild Log read before a gift, establishing the server-side baseline. */
@@ -709,6 +753,7 @@ public final class GuildRewards {
 				return;
 			}
 			try {
+				readOwnNickname();
 				if (!establishGiftLogBaseline()) {
 					return;
 				}
@@ -791,6 +836,10 @@ public final class GuildRewards {
 		}
 	}
 
+	/** What {@link #giveUnits} did: units the ticker confirmed, and clicks that count as attempted (see {@link RewardRetryPolicy#attempted}). */
+	private record GiveOutcome(int confirmed, int attempted) {
+	}
+
 	/** {@code amount} is how many clicks were actually attempted (after availability-capping); {@code given} is how many the ticker confirmed of those. */
 	private record SingleGiftResult(int amount, int given) {
 	}
@@ -831,10 +880,20 @@ public final class GuildRewards {
 			// Guild ran short — neither the deduction below nor /manage reset settles this right.
 			chat("Only " + total + " of " + requested + " " + type.label + " were available for " + name + " — their pending total needs settling by hand.", ChatFormatting.YELLOW);
 		}
-		int given = giveUnits(name, slot, type, amount);
+		GiveOutcome gift = giveUnits(name, slot, type, amount);
+		int given = gift.confirmed();
+		// After a cancel only the clicks actually sent count as attempted: judging the run
+		// against the whole planned amount would flag every click that was never made as
+		// unconfirmed and send the final reconciliation chasing rewards that were never gifted.
+		int attempted = gift.attempted();
+		if (cancelRequested) {
+			chat("Cancelled after " + attempted + " of " + amount + " clicks to " + name + ".", ChatFormatting.YELLOW);
+		}
 		if (given <= 0) {
-			chat("Couldn't gift " + name + " — never got a confirmed handout back.", ChatFormatting.RED);
-			return new SingleGiftResult(amount, 0);
+			if (attempted > 0) {
+				chat("Couldn't gift " + name + " — never got a confirmed handout back.", ChatFormatting.RED);
+			}
+			return new SingleGiftResult(attempted, 0);
 		}
 		// Do not emit an automation-owned total. The individual guild ticker rows,
 		// corroborated by the Guild Log, are the authoritative record across clients.
@@ -848,7 +907,7 @@ public final class GuildRewards {
 		if (given == requested || (dump && given == amount)) {
 			chat("Done — gifted " + name + " " + total + " " + type.label + ".", ChatFormatting.GREEN);
 		}
-		return new SingleGiftResult(amount, given);
+		return new SingleGiftResult(attempted, given);
 	}
 
 	/** Convert a menu handout to the backend's displayed pending-balance unit. */
@@ -889,15 +948,15 @@ public final class GuildRewards {
 	 * over from an earlier, unrelated gift to this player, so it can't be claimed here
 	 * instead of the click that actually earned it.
 	 */
-	private int giveUnits(String name, int slot, RewardType type, int amount) {
+	private GiveOutcome giveUnits(String name, int slot, RewardType type, int amount) {
 		long since = System.currentTimeMillis();
 		if (!Boolean.TRUE.equals(onClient(this::containerOpen))) {
 			if (!recoverSession()) {
-				return 0;
+				return new GiveOutcome(0, 0);
 			}
 			slot = findMemberSlot(name);
 			if (slot < 0) {
-				return 0;
+				return new GiveOutcome(0, 0);
 			}
 		}
 		// Optimistic (sent, not yet confirmed) during the burst — good enough for a
@@ -906,12 +965,13 @@ public final class GuildRewards {
 		// decides the real confirmed count.
 		int sent = burstSend(slot, type, amount, s -> progress("Gifting " + name + "...", s, amount));
 		RewardOutcomes outcomes = drainRewardOutcomes(name, type, sent, since);
-		RewardRetryPolicy.Correction correction = RewardRetryPolicy.correction(amount, sent, outcomes.confirmed(), outcomes.unavailable());
+		int planned = RewardRetryPolicy.attempted(cancelRequested, amount, sent);
+		RewardRetryPolicy.Correction correction = RewardRetryPolicy.correction(planned, sent, outcomes.confirmed(), outcomes.unavailable());
 		int confirmed = outcomes.confirmed();
 		progress("Gifting " + name + "...", confirmed, amount);
 		if (outcomes.outOfStock()) {
 			LOGGER.warn("Gift: guild ran out of {} after {}/{} confirmed units for {}; not retrying", type.label, confirmed, amount, name);
-			return confirmed;
+			return new GiveOutcome(confirmed, planned);
 		}
 		int unavailableShortfall = correction.unavailableUnits();
 		if (unavailableShortfall > 0) {
@@ -925,9 +985,9 @@ public final class GuildRewards {
 			// A missing local ticker is ambiguous: this exact run showed that such
 			// clicks can already have granted their reward. Leave it for the final
 			// ticker/log reconciliation; never resend it blindly.
-			LOGGER.warn("Gift: {}/{} {} click(s) for {} had no observed outcome; not resending without reconciliation", correction.silentUnits(), amount, type.label, name);
+			LOGGER.warn("Gift: {}/{} {} click(s) for {} had no observed outcome; not resending without reconciliation", correction.silentUnits(), planned, type.label, name);
 		}
-		return confirmed;
+		return new GiveOutcome(confirmed, planned);
 	}
 
 	/**
@@ -1216,6 +1276,7 @@ public final class GuildRewards {
 				return;
 			}
 			try {
+				readOwnNickname();
 				if (!establishGiftLogBaseline()) {
 					return;
 				}
@@ -1619,6 +1680,26 @@ public final class GuildRewards {
 		if (reconciler != null) {
 			reconciler.run();
 		}
+		ToIntFunction<GuildLogSync.ScanProgress> scan = postRunLogScan;
+		// Every kind of gift or payout, however it ended (finished, cancelled, failed): followed by a
+		// whole-log scan, unless one ran in the last few minutes. Only a Chief's scan is of any use.
+		if (scan != null && isChief() && postRunLogScanDue.getAsBoolean()) {
+			GiftProgressListener listener = progressListener;
+			if (listener != null) {
+				listener.onCancelUnavailable();
+			}
+			progress("Syncing Guild Log", 0, GuildLogSync.FULL_SCAN_TOTAL_PAGES);
+			long started = System.currentTimeMillis();
+			try {
+				int rows = scan.applyAsInt(this::progress);
+				// Only a scan that actually read the log is reported: a skipped, disabled or failed one is not.
+				if (rows > 0) {
+					chat("Guild Log scan finished: " + rows + " rows uploaded in " + Math.round((System.currentTimeMillis() - started) / 1000.0) + "s.", ChatFormatting.GREEN);
+				}
+			} catch (RuntimeException e) {
+				LOGGER.warn("Post-run Guild Log scan failed", e);
+			}
+		}
 	}
 
 	/**
@@ -1849,10 +1930,7 @@ public final class GuildRewards {
 			backgroundSession.close();
 			return;
 		}
-		LocalPlayer player = Minecraft.getInstance().player;
-		if (player != null) {
-			player.closeContainer();
-		}
+		BackgroundContainerSession.closeContainerKeepingScreen(Minecraft.getInstance());
 	}
 
 	private static AbstractContainerMenu menu() {

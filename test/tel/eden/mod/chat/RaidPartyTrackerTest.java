@@ -38,6 +38,16 @@ class RaidPartyTrackerTest {
 	}
 
 	@Test
+	void parsesWynncraftsPrefixedPartyListLine() {
+		RaidPartyTracker.setExpectingPartyListForTesting(true);
+		// Wynncraft's real line: yellow party-channel glyphs before the text (Wynntils' PARTY_PREFIX_REGEX).
+		Component msg = Component.literal("§e Party members: Lumeniia, Robbedoesgek, sweetserenity, and penguinloverx3");
+
+		assertTrue(RaidPartyTracker.handlePartyListChat(msg));
+		assertEquals(List.of("Lumeniia", "Robbedoesgek", "sweetserenity", "penguinloverx3"), List.copyOf(RaidPartyTracker.partyMembersForTesting()));
+	}
+
+	@Test
 	void parsesPartyListWithLeaderStarAndNicknames() {
 		RaidPartyTracker.setExpectingPartyListForTesting(true);
 
@@ -81,6 +91,23 @@ class RaidPartyTrackerTest {
 
 		assertFalse(handled);
 		assertTrue(RaidPartyTracker.isExpectingPartyList());
+	}
+
+	@Test
+	void asksForThePartyListOncePerRaidEvenWithAWynntilsRoster() {
+		RaidPartyTracker.addPartyMemberForTesting("Robbedoesgek"); // Wynntils' party, missing a member
+		assertTrue(RaidPartyTracker.claimPartyListRequest(1_000_000L));
+
+		// The roster has someone, so no retry spam later in the raid.
+		assertFalse(RaidPartyTracker.claimPartyListRequest(1_020_000L));
+	}
+
+	@Test
+	void retriesThePartyListWhileTheRosterIsEmpty() {
+		assertTrue(RaidPartyTracker.claimPartyListRequest(1_000_000L));
+		assertFalse(RaidPartyTracker.claimPartyListRequest(1_005_000L)); // too soon
+		assertTrue(RaidPartyTracker.claimPartyListRequest(1_020_000L));
+		assertFalse(RaidPartyTracker.claimPartyListRequest(1_040_000L)); // out of attempts
 	}
 
 	@Test
@@ -146,11 +173,41 @@ class RaidPartyTrackerTest {
 		RaidPartyTracker.setExpectingPartyListForTesting(true);
 		RaidPartyTracker.addPartyMemberForTesting("Alice");
 		RaidPartyTracker.recordSightingForTesting("Bob", 20);
+		RaidPartyTracker.setLivePartyForTesting(List.of("Alice", "Carol"));
 
 		RaidPartyTracker.reset();
 
 		assertFalse(RaidPartyTracker.isExpectingPartyList());
 		assertTrue(RaidPartyTracker.partyMembersForTesting().isEmpty());
 		assertTrue(RaidPartyTracker.extraPlayers(List.of("Alice")).isEmpty());
+	}
+
+	@Test
+	void tallyOutlivesTheRaidSidebarUntilTheCompletion() {
+		// The sidebar vanishes in the reward room, a minute or more before the completion line.
+		RaidPartyTracker.setRaidingForTesting(true);
+		RaidPartyTracker.addPartyMemberForTesting("Alice");
+		RaidPartyTracker.addPartyMemberForTesting("Ally");
+		RaidPartyTracker.endRaidForTesting();
+
+		assertEquals(List.of("Ally"), RaidPartyTracker.extraPlayers(List.of("Alice", "Bob", "Carol")));
+	}
+
+	@Test
+	void fallsBackToLiveWynntilsPartyWhenTallyIsEmpty() {
+		// No raid seen (e.g. relogged mid-raid), but Wynntils still knows the party.
+		RaidPartyTracker.setLivePartyForTesting(List.of("Alice", "Bob", "Carol", "Ally"));
+
+		assertEquals(List.of("Ally"), RaidPartyTracker.extraPlayers(List.of("alice", "Bob", "Carol")));
+	}
+
+	@Test
+	void livePartyFillsAPartialTallyAheadOfSightings() {
+		// The tally only caught one of the two allies; Wynntils knows the whole party.
+		RaidPartyTracker.recordSightingForTesting("HerrPopcorn", 30);
+		RaidPartyTracker.recordSightingForTesting("StandingNpc", 40);
+		RaidPartyTracker.setLivePartyForTesting(List.of("night03", "Fisik", "HerrPopcorn", "OtherAlly"));
+
+		assertEquals(List.of("HerrPopcorn", "OtherAlly"), RaidPartyTracker.extraPlayers(List.of("night03", "Fisik")));
 	}
 }

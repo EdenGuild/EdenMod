@@ -21,6 +21,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemLore;
 import org.lwjgl.glfw.GLFW;
+import tel.eden.mod.EdenLogger;
 import tel.eden.mod.config.BridgeConfig;
 
 /**
@@ -37,10 +38,13 @@ public final class RaidGambitSafety {
 	public static final int CONTAINER_SLOTS = 36;
 	public static final int TOTAL_SLOTS = 72;
 
+	private static final EdenLogger LOGGER = EdenLogger.get();
 	private static final Identifier LOGO_TEXTURE = Identifier.parse("edenmod:icon.png");
 	private static final int LOGO_SRC_SIZE = 256;
 	private static List<String> activePopupMessages = null;
 	private static long popupExpiresAtMs = 0L;
+	// The raid ready-up screen's title: one private-use glyph that draws its background.
+	private static final String RAID_READY_TITLE = Character.toString(0xCFFE1);
 
 	private RaidGambitSafety() {
 	}
@@ -129,7 +133,18 @@ public final class RaidGambitSafety {
 				count++;
 			}
 		}
+		// Clicking a gambit picks it up onto the cursor until the server puts it back, so a
+		// ready click in that window would miss it. Count it by the toggle it is mid-way
+		// through: one offering "Click to Enable" is being turned on.
+		ItemStack carried = menu.getCarried();
+		if (isGambitItem(carried) && !isGambitEnabled(carried) && isGambitToggleOnLore(getLoreLines(carried))) {
+			count++;
+		}
 		return count;
+	}
+
+	private static boolean isGambitToggleOnLore(List<String> loreLines) {
+		return loreLines.stream().anyMatch(line -> ChatFormatting.stripFormatting(line).trim().equalsIgnoreCase("Click to Enable"));
 	}
 
 	/** Checks if the clicked slot is one of the ready-up buttons (slots 33, 34, 35). */
@@ -265,7 +280,32 @@ public final class RaidGambitSafety {
 		}
 		int enabled = countEnabledGambits(menu);
 		boolean isGuildRaid = isGuildRaidAvailable(menu);
-		return getActiveBlockReasons(slot.index, true, false, enabled, isGuildRaid, clickType, isShiftKeyDown(), config);
+		List<String> reasons = getActiveBlockReasons(slot.index, true, false, enabled, isGuildRaid, clickType, isShiftKeyDown(), config);
+		if (!reasons.isEmpty()) {
+			logBlock(menu, slot, enabled, config.raidGambitMinimum, reasons);
+		}
+		return reasons;
+	}
+
+	/**
+	 * Record what the blocker saw, since reports of it blocking with gambits enabled could not
+	 * be reproduced from a container dump. Each gambit's lore is escaped so hidden characters show.
+	 */
+	private static void logBlock(AbstractContainerMenu menu, Slot slot, int enabled, int minimum, List<String> reasons) {
+		StringBuilder gambits = new StringBuilder();
+		for (int i = 0; i < Math.min(CONTAINER_SLOTS, menu.slots.size()); i++) {
+			ItemStack stack = menu.getSlot(i).getItem();
+			if (isGambitItem(stack)) {
+				gambits.append("\n  slot ").append(i).append(isGambitEnabled(stack) ? " counted " : " not counted ").append(escape(getLoreLines(stack).toString()));
+			}
+		}
+		LOGGER.info("[GambitSafety] blocked ready-up at slot {} (menu {} slots, {} enabled, minimum {}): {}{}", slot.index, menu.slots.size(), enabled, minimum, reasons, gambits);
+	}
+
+	private static String escape(String text) {
+		StringBuilder out = new StringBuilder(text.length());
+		text.codePoints().forEach(cp -> out.append(cp >= 0x20 && cp <= 0x7E || cp == '§' ? Character.toString(cp) : String.format("\\u%04X", cp)));
+		return out.toString();
 	}
 
 	/** Evaluates whether a ready click should be blocked based on active gambits and settings. */
@@ -326,9 +366,36 @@ public final class RaidGambitSafety {
 		popupExpiresAtMs = 0L;
 	}
 
-	/** Renders top-of-screen popup box warning with the Eden logo and gold/wood frame. */
-	public static void renderPopupWarning(GuiGraphics graphics, Font font, int screenWidth) {
+	/**
+	 * The standing "not enough gambits" warning for the raid ready-up screen, or null. Shown
+	 * for as long as the count is short, so it goes away the moment enough are enabled. This
+	 * runs every frame on every container screen, so the screen's title glyph (its background
+	 * art) is checked first; only the ready-up screen reads any lore. The click blocker does
+	 * not use the title, so if Wynncraft changes the glyph only this warning stops.
+	 */
+	private static List<String> liveWarning(String title, AbstractContainerMenu menu, BridgeConfig config) {
+		if (config == null || !config.raidGambitSafety || config.raidGambitMinimum <= 0 || title == null || !title.contains(RAID_READY_TITLE)) {
+			return null;
+		}
+		boolean isShort = isRaidReadyMenu(menu) && !isPlayerAlreadyReadied(menu) && countEnabledGambits(menu) < config.raidGambitMinimum;
+		return isShort ? List.of(getWarningMessage(config.raidGambitMinimum)) : null;
+	}
+
+	/**
+	 * Renders the top-of-screen warning with the Eden logo and gold/wood frame: a blocked
+	 * click's reasons while they last, otherwise the live gambit warning. A blocked click's
+	 * gambit reason is dropped once enough gambits are enabled.
+	 */
+	public static void renderPopupWarning(GuiGraphics graphics, Font font, int screenWidth, String title, AbstractContainerMenu menu, BridgeConfig config) {
+		List<String> live = liveWarning(title, menu, config);
 		List<String> messages = getActivePopupMessages();
+		if (messages != null && live == null && config != null) {
+			String gambitReason = getWarningMessage(config.raidGambitMinimum);
+			messages = messages.stream().filter(m -> !m.equals(gambitReason)).toList();
+		}
+		if (messages == null || messages.isEmpty()) {
+			messages = live;
+		}
 		if (messages == null || messages.isEmpty() || graphics == null || font == null) {
 			return;
 		}

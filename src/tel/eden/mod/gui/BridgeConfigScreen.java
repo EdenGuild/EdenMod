@@ -116,6 +116,7 @@ public final class BridgeConfigScreen extends Screen {
 		// General
 		addToggleRow(Category.GENERAL, "Bridge", () -> config.enabled, v -> config.enabled = v, "Enabled", "Disabled", true);
 		addToggleRow(Category.GENERAL, "My login/logout messages", () -> config.announceSelfPresence, v -> config.announceSelfPresence = v, "On", "Off", true);
+		addToggleRow(Category.GENERAL, "Mail sound", () -> config.mailSound, v -> config.mailSound = v, "On", "Off", true);
 		addToggleRow(Category.GENERAL, "Party feed", () -> config.partyAnnounce, v -> config.partyAnnounce = v, "On", "Off", true);
 		addToggleRow(Category.GENERAL, "Auto /stream on join", () -> config.autoStream, v -> config.autoStream = v, "On", "Off", false);
 		addToggleRow(Category.GENERAL, "Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);

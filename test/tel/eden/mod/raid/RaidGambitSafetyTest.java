@@ -155,6 +155,37 @@ class RaidGambitSafetyTest {
 	}
 
 	@Test
+	void liveReadyUpScreenCountsEnabledGambitsAndDoesNotBlock() {
+		// Layout and lore from a live container dump: gambits at 1/3/5/7, status 27, ready 33-35.
+		ItemStack[] items = new ItemStack[36];
+		items[1] = createItem("Burdened Pacifist's Gambit", "§8Refreshes in 20 hours", "§bRewards for Enabling", "§eClick to Disable");
+		items[3] = createItem("Anemic's Gambit", "§8Refreshes in 20 hours", "§8You may only enable 3 gambits");
+		items[5] = createItem("Eroded Speedster's Gambit", "§8Refreshes in 20 hours", "§bRewards for Enabling", "§eClick to Disable");
+		items[7] = createItem("Sadist's Gambit", "§8Refreshes in 20 hours", "§bRewards for Enabling", "§eClick to Disable");
+		items[27] = createItem("Not Ready!");
+		items[33] = createItem("Ready Up!");
+		AbstractContainerMenu menu = createMenu(items);
+
+		assertTrue(RaidGambitSafety.isRaidReadyMenu(menu));
+		assertEquals(3, RaidGambitSafety.countEnabledGambits(menu));
+		assertTrue(RaidGambitSafety.getActiveBlockReasons(menu, menu.getSlot(33), ClickType.PICKUP, config).isEmpty());
+	}
+
+	@Test
+	void gambitOnTheCursorCountsByTheToggleItIsMaking() {
+		// Clicking a gambit lifts it onto the cursor until the server puts it back.
+		ItemStack[] items = new ItemStack[36];
+		items[1] = createItem("Sadist's Gambit", "§bRewards for Enabling", "§eClick to Disable");
+		AbstractContainerMenu menu = createMenu(items);
+
+		menu.setCarried(createItem("Anemic's Gambit", "§bRewards for Enabling", "§aClick to Enable"));
+		assertEquals(2, RaidGambitSafety.countEnabledGambits(menu), "being enabled");
+
+		menu.setCarried(createItem("Anemic's Gambit", "§bRewards for Enabling", "§eClick to Disable"));
+		assertEquals(1, RaidGambitSafety.countEnabledGambits(menu), "being disabled");
+	}
+
+	@Test
 	void neverBlocksInUnrelatedMenus() {
 		boolean blocked = RaidGambitSafety.evaluateSafetyBlock(33, false, false, 0, ClickType.PICKUP, false, config);
 		assertFalse(blocked, "Must not block outside raid menus");

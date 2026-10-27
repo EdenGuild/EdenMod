@@ -318,7 +318,7 @@ public final class AspectGiveawayScreen extends EdenReferenceScreen implements B
 		return String.valueOf(xp);
 	}
 
-	private static String formatAge(long epochMs) {
+	public static String formatAge(long epochMs) {
 		if (epochMs <= 0) {
 			return "never";
 		}

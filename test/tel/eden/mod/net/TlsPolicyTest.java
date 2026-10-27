@@ -75,6 +75,149 @@ class TlsPolicyTest {
 		}
 	}
 
+	/** A default trust manager that accepts anything and holds the given roots, as a JVM's store would. */
+	private static class StoreTrustManager extends X509ExtendedTrustManager {
+		private final X509Certificate[] store;
+		int serverChecks;
+
+		StoreTrustManager(X509Certificate... store) {
+			this.store = store;
+		}
+
+		@Override
+		public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+			serverChecks++;
+		}
+
+		@Override
+		public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket) {
+			serverChecks++;
+		}
+
+		@Override
+		public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {
+			serverChecks++;
+		}
+
+		@Override
+		public void checkClientTrusted(X509Certificate[] chain, String authType) {
+		}
+
+		@Override
+		public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket) {
+		}
+
+		@Override
+		public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {
+		}
+
+		@Override
+		public X509Certificate[] getAcceptedIssuers() {
+			return store;
+		}
+	}
+
+	private static Set<String> pinTo(X509Certificate... roots) {
+		Set<String> pins = new HashSet<>();
+		for (X509Certificate root : roots)
+			pins.add(TlsPolicy.spkiSha256(root));
+		return pins;
+	}
+
+	@Test
+	void theBuiltInPinsAreExactlyLetsEncryptsFourRoots() throws Exception {
+		Set<String> roots = pinTo(parse(PinnedCerts.ISRG_ROOT_X1), parse(PinnedCerts.ISRG_ROOT_X2), parse(PinnedCerts.ISRG_ROOT_YE), parse(PinnedCerts.ISRG_ROOT_YR));
+
+		assertEquals(4, roots.size());
+		assertEquals(roots, TlsPolicy.PINNED_ROOT_SPKI_SHA256);
+		assertEquals("eden.tel", TlsPolicy.PINNED_DOMAIN);
+	}
+
+	@Test
+	void onlyOurDomainAndItsSubdomainsAreInScope() {
+		for (String name : new String[]{"eden.tel", "bridge.eden.tel", "BRIDGE.Eden.Tel", "*.eden.tel", "a.b.eden.tel"})
+			assertTrue(TlsPolicy.isDomainOrSubdomain(name, "eden.tel"), name);
+		for (String name : new String[]{"noteden.tel", "eden.tel.evil.example", "eden.telx", "xeden.tel", "example.com", ""})
+			assertFalse(TlsPolicy.isDomainOrSubdomain(name, "eden.tel"), name);
+	}
+
+	@Test
+	void aCertificateIsInScopeByItsDnsNames() throws Exception {
+		assertTrue(TlsPolicy.coversDomain(parse(PinnedCerts.GOOD_LEAF), "eden.tel"));
+		assertTrue(TlsPolicy.coversDomain(parse(PinnedCerts.ROGUE_EDEN_LEAF), "eden.tel"));
+		assertFalse(TlsPolicy.coversDomain(parse(PinnedCerts.ROGUE_OTHER_LEAF), "eden.tel"));
+		assertFalse(TlsPolicy.coversDomain(parse(PinnedCerts.PINNED_CA), "eden.tel"));
+	}
+
+	@Test
+	void ourDomainPassesWhenItsChainLeadsToAPinnedRoot() throws Exception {
+		X509Certificate ca = parse(PinnedCerts.PINNED_CA);
+		StoreTrustManager base = new StoreTrustManager();
+		X509ExtendedTrustManager policy = TlsPolicy.wrap(base, pinTo(ca), "eden.tel");
+		X509Certificate[] chain = {parse(PinnedCerts.GOOD_LEAF), ca};
+
+		policy.checkServerTrusted(chain, "ECDHE_ECDSA");
+		policy.checkServerTrusted(chain, "ECDHE_ECDSA", (Socket) null);
+		policy.checkServerTrusted(chain, "ECDHE_ECDSA", (SSLEngine) null);
+		assertEquals(3, base.serverChecks);
+	}
+
+	@Test
+	void ourDomainPassesWhenTheServerLeavesOutARootThatTheStoreHolds() throws Exception {
+		X509Certificate ca = parse(PinnedCerts.PINNED_CA);
+		X509ExtendedTrustManager policy = TlsPolicy.wrap(new StoreTrustManager(ca), pinTo(ca), "eden.tel");
+
+		policy.checkServerTrusted(new X509Certificate[]{parse(PinnedCerts.GOOD_LEAF)}, "ECDHE_ECDSA");
+	}
+
+	@Test
+	void aForgedCertificateForOurDomainIsRefusedEvenThoughTheDefaultStoreAcceptsIt() throws Exception {
+		X509Certificate pinned = parse(PinnedCerts.PINNED_CA);
+		X509Certificate rogue = parse(PinnedCerts.ROGUE_CA);
+		StoreTrustManager base = new StoreTrustManager(rogue, pinned);
+		X509ExtendedTrustManager policy = TlsPolicy.wrap(base, pinTo(pinned), "eden.tel");
+		X509Certificate[] forged = {parse(PinnedCerts.ROGUE_EDEN_LEAF), rogue};
+
+		assertThrows(CertificateException.class, () -> policy.checkServerTrusted(forged, "ECDHE_ECDSA"));
+		assertThrows(CertificateException.class, () -> policy.checkServerTrusted(forged, "ECDHE_ECDSA", (Socket) null));
+		assertThrows(CertificateException.class, () -> policy.checkServerTrusted(forged, "ECDHE_ECDSA", (SSLEngine) null));
+	}
+
+	@Test
+	void appendingAPinnedCertificateToAForgedChainDoesNotHelp() throws Exception {
+		X509Certificate pinned = parse(PinnedCerts.PINNED_CA);
+		X509Certificate rogue = parse(PinnedCerts.ROGUE_CA);
+		X509ExtendedTrustManager policy = TlsPolicy.wrap(new StoreTrustManager(rogue, pinned), pinTo(pinned), "eden.tel");
+
+		for (X509Certificate[] chain : new X509Certificate[][]{{parse(PinnedCerts.ROGUE_EDEN_LEAF), rogue, pinned}, {parse(PinnedCerts.ROGUE_EDEN_LEAF), pinned, rogue}})
+			assertThrows(CertificateException.class, () -> policy.checkServerTrusted(chain, "ECDHE_ECDSA"));
+	}
+
+	@Test
+	void otherHostsAreNotPinned() throws Exception {
+		X509Certificate rogue = parse(PinnedCerts.ROGUE_CA);
+		StoreTrustManager base = new StoreTrustManager(rogue);
+		X509ExtendedTrustManager policy = TlsPolicy.wrap(base, pinTo(parse(PinnedCerts.PINNED_CA)), "eden.tel");
+
+		policy.checkServerTrusted(new X509Certificate[]{parse(PinnedCerts.ROGUE_OTHER_LEAF), rogue}, "ECDHE_ECDSA");
+		assertEquals(1, base.serverChecks);
+	}
+
+	@Test
+	void theDefaultStoresVerdictStillComesFirst() throws Exception {
+		X509Certificate ca = parse(PinnedCerts.PINNED_CA);
+		X509ExtendedTrustManager failing = new StoreTrustManager(ca) {
+			@Override
+			public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+				throw new CertificateException("hostname mismatch");
+			}
+		};
+		X509ExtendedTrustManager policy = TlsPolicy.wrap(failing, pinTo(ca), "eden.tel");
+
+		CertificateException e = assertThrows(CertificateException.class, () -> policy.checkServerTrusted(new X509Certificate[]{parse(PinnedCerts.GOOD_LEAF), ca}, "ECDHE_ECDSA"));
+		assertEquals("hostname mismatch", e.getMessage());
+	}
+
 	@Test
 	void denyListMatchesTheResearchersDataExactly() throws Exception {
 		assertEquals(8, BlacklistedCerts.INTERMEDIATES.length);

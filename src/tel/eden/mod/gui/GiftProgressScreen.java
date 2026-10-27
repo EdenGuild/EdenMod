@@ -3,6 +3,7 @@ package tel.eden.mod.gui;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import tel.eden.mod.reward.GuildRewards;
 
@@ -23,7 +24,7 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 	private static final int BASE_PANEL_WIDTH = 320;
 	private static final int BASE_PANEL_HEIGHT = 110;
 
-	private final GuildRewards guildRewards;
+	private final Runnable cancelAction;
 
 	private EdenPanelLayout layout;
 	private Button cancelButton;
@@ -38,8 +39,18 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 	private volatile boolean done;
 
 	public GiftProgressScreen(String title, GuildRewards guildRewards) {
+		this(title, guildRewards::requestCancel);
+	}
+
+	/** A progress screen for any bounded background automation; Cancel runs {@code cancelAction}. */
+	public GiftProgressScreen(String title, Runnable cancelAction) {
 		super(Component.literal(title));
-		this.guildRewards = guildRewards;
+		this.cancelAction = cancelAction;
+	}
+
+	/** A progress screen with no Cancel button, for automation that is short and bounded and just runs out. */
+	public GiftProgressScreen(String title) {
+		this(title, (Runnable) null);
 	}
 
 	@Override
@@ -47,16 +58,18 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 		super.init();
 		updateReferenceSpace();
 		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
-		cancelButton = this.addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> requestCancel()).bounds(layout.x(110), layout.y(80), layout.w(100), layout.h(20)).build());
+		if (cancelAction != null) {
+			cancelButton = this.addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> requestCancel()).bounds(layout.x(110), layout.y(80), layout.w(100), layout.h(20)).build());
+		}
 	}
 
 	private void requestCancel() {
-		if (done || cancelling) {
+		if (done || cancelling || cancelAction == null) {
 			return;
 		}
 		cancelling = true;
 		cancelButton.active = false;
-		guildRewards.requestCancel();
+		cancelAction.run();
 	}
 
 	// -- GuildRewards.GiftProgressListener — called from the worker thread ----------
@@ -66,6 +79,18 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 		this.status = status;
 		this.completed = completed;
 		this.total = total;
+	}
+
+	@Override
+	public void onCancelUnavailable() {
+		// Past the point of no return the run's own status is what is worth showing, not "Cancelling...".
+		cancelling = false;
+		Minecraft.getInstance().execute(() -> {
+			if (cancelButton != null) {
+				cancelButton.visible = false;
+				cancelButton.active = false;
+			}
+		});
 	}
 
 	@Override
@@ -135,6 +160,19 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 	}
 
 	// -- input --------------------------------------------------------------------
+
+	// The panel is laid out and drawn in reference space (see render), so the click has to be
+	// brought into the same space before the button hit-tests it; without this the Cancel
+	// button only responds where the UI scale happens to be 1.
+	@Override
+	public boolean mouseClicked(MouseButtonEvent event, boolean bl) {
+		return super.mouseClicked(rescale(event), bl);
+	}
+
+	@Override
+	public boolean mouseReleased(MouseButtonEvent event) {
+		return super.mouseReleased(rescale(event));
+	}
 
 	/** The only way out is Cancel — closing on Esc would leave the run driving the menu unseen. */
 	@Override
