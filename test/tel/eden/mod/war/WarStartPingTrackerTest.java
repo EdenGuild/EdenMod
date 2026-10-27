@@ -70,6 +70,9 @@ class WarStartPingTrackerTest {
 		// Not the battle countdown: the 30s territory line (the attack timer's job) and other numbers
 		assertFalse(WarStartPingTracker.processChat("The war for Big Mushroom Cave will start in 30 seconds.", config));
 		assertFalse(WarStartPingTracker.processChat("15 seconds...", config));
+		assertFalse(WarStartPingTracker.processChat("You will be teleported in 5 seconds...", config));
+		// A font-tagged final countdown line still counts
+		assertTrue(WarStartPingTracker.processChat("§c§{fr:d} 5 seconds...", config));
 	}
 
 	@Test

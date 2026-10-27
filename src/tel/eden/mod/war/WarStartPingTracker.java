@@ -22,7 +22,9 @@ public final class WarStartPingTracker {
 	// "The war battle will start in 25 seconds." opens the in-war countdown; Wynncraft
 	// ends it with "5 seconds..." to "1 second...", the same lines the Radiance tracker reads.
 	private static final Pattern BATTLE_COUNTDOWN = Pattern.compile("\\bThe war battle will start in \\d+ seconds?", Pattern.CASE_INSENSITIVE);
-	private static final Pattern FINAL_COUNTDOWN = Pattern.compile("\\b[1-5]\\s+seconds?\\.\\.\\.", Pattern.CASE_INSENSITIVE);
+	// The whole line, or right after a font tag's "}" left by WarDPS.clean, so other
+	// countdowns ("teleported in 5 seconds...") don't ring it.
+	private static final Pattern FINAL_COUNTDOWN = Pattern.compile("(?:^|\\})\\s*[1-5]\\s+seconds?\\.\\.\\.$", Pattern.CASE_INSENSITIVE);
 
 	// Whether this war's start bell already rang; cleared when the battle begins, is
 	// cancelled, or on a reset (world change, disconnect).
