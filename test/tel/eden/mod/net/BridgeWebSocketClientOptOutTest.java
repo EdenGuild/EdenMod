@@ -16,4 +16,13 @@ class BridgeWebSocketClientOptOutTest {
 		assertEquals("aspects", obj.get("rewardKind").getAsString());
 		assertTrue(obj.get("blocked").getAsBoolean());
 	}
+
+	@Test
+	void warpayOptOutPayloadFormatsCorrectly() {
+		JsonObject obj = BridgeWebSocketClient.rewardOptOutPayload("warpay", true);
+
+		assertEquals("rewardOptOutRequest", obj.get("type").getAsString());
+		assertEquals("warpay", obj.get("rewardKind").getAsString());
+		assertTrue(obj.get("blocked").getAsBoolean());
+	}
 }

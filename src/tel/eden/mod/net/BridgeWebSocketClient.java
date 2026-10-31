@@ -88,7 +88,7 @@ public final class BridgeWebSocketClient {
 		void onAspectGiveaway(java.util.List<GiveawayCandidate> candidates, int storageAspects, String error, String color);
 
 		/** Response to an in-game reward status query. */
-		default void onRewardStatus(boolean aspectsBlocked, boolean emeraldsBlocked, int pendingAspects, long pendingEmeralds, String error, String color) {
+		default void onRewardStatus(boolean aspectsBlocked, boolean emeraldsBlocked, boolean warpayBlocked, int pendingAspects, long pendingEmeralds, long pendingWarpay, String error, String color) {
 		}
 
 		/** Response to an in-game reward opt-out/in request. */
@@ -1429,7 +1429,7 @@ public final class BridgeWebSocketClient {
 				case "emeraldsPendingReply" -> sink.onEmeraldsPending(parsePendingEntries(obj, "emeralds"), get(obj, "error"), get(obj, "color"));
 				case "aspectGiveawayReply" -> sink.onAspectGiveaway(parseGiveawayCandidates(obj), getInt(obj, "storageAspects", 0), get(obj, "error"), get(obj, "color"));
 				case "rewardDeductReply" -> sink.onRewardDeductReply(get(obj, "target"), get(obj, "rewardKind"), getInt(obj, "amount", 0), getInt(obj, "remaining", 0), get(obj, "error"), get(obj, "color"));
-				case "rewardStatusReply" -> sink.onRewardStatus(getBool(obj, "aspectsBlocked"), getBool(obj, "emeraldsBlocked"), getInt(obj, "pendingAspects", 0), getLong(obj, "pendingEmeralds", 0L), get(obj, "error"), get(obj, "color"));
+				case "rewardStatusReply" -> sink.onRewardStatus(getBool(obj, "aspectsBlocked"), getBool(obj, "emeraldsBlocked"), getBool(obj, "warpayBlocked"), getInt(obj, "pendingAspects", 0), getLong(obj, "pendingEmeralds", 0L), getLong(obj, "pendingWarpay", 0L), get(obj, "error"), get(obj, "color"));
 				case "rewardOptOutReply" -> sink.onRewardOptOutReply(get(obj, "rewardKind"), getBool(obj, "blocked"), get(obj, "error"), get(obj, "color"));
 				case "giftLockReply" -> sink.onGiftLockReply(getBool(obj, "granted"), get(obj, "error"), get(obj, "holder"), getInt(obj, "retryAfterSeconds", 0));
 				case "partyUpdate" -> sink.onPartyUpdate(get(obj, "event"), get(obj, "actor"), parseParty(obj), get(obj, "color"));
