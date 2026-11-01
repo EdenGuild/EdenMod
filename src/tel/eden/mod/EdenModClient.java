@@ -296,6 +296,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private volatile long rewardOptOutRequestSeq;
 	private volatile Boolean aspectsBlockedState;
 	private volatile Boolean emeraldsBlockedState;
+	private volatile Boolean warpayBlockedState;
 	// Guards the one-shot attestation-failure report to the bridge (sent on first connect
 	// after a failed boot check; skipped if attestation passed or was never run).
 	private volatile boolean attestationFailureReported;
@@ -760,6 +761,7 @@ public final class EdenModClient implements ClientModInitializer {
 			// completion with no allies. It is consumed on completion and cleared on disconnect.
 			aspectsBlockedState = null;
 			emeraldsBlockedState = null;
+			warpayBlockedState = null;
 			AllianceMenuScraper.reset();
 			GuildMenuScraper.reset();
 			AttackTimerMenu.onWorldJoin();
@@ -790,7 +792,7 @@ public final class EdenModClient implements ClientModInitializer {
 			})).then(ClientCommandManager.literal("mail").then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).then(ClientCommandManager.argument("message", StringArgumentType.greedyString()).executes(ctx -> sendMail(ctx.getSource(), StringArgumentType.getString(ctx, "player"), StringArgumentType.getString(ctx, "message")))))).then(ClientCommandManager.literal("aspects").then(ClientCommandManager.literal("pending").executes(ctx -> {
 				requestAspectsPending(ctx.getSource());
 				return 1;
-			})).then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("aspects", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("aspects", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("aspects", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("emeralds").then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("emeralds", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("emeralds", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("emeralds", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("rewards").executes(ctx -> queryRewardStatus()).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("cf").executes(ctx -> {
+			})).then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("aspects", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("aspects", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("aspects", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("emeralds").then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("emeralds", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("emeralds", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("emeralds", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("warpay").executes(ctx -> queryRewardStatus()).then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("warpay", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("warpay", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("warpay", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("rewards").executes(ctx -> queryRewardStatus()).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("cf").executes(ctx -> {
 				requestCoinflip(ctx.getSource());
 				return 1;
 			})).then(ClientCommandManager.literal("diceroll").executes(ctx -> {
@@ -1066,7 +1068,7 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onRewardStatus(boolean aspectsBlocked, boolean emeraldsBlocked, int pendingAspects, long pendingEmeralds, String error, String color) {
+				public void onRewardStatus(boolean aspectsBlocked, boolean emeraldsBlocked, boolean warpayBlocked, int pendingAspects, long pendingEmeralds, long pendingWarpay, String error, String color) {
 					pendingRewardStatus = false;
 					boolean wasUserRequest = (userRewardStatusRequestSeq == rewardStatusRequestSeq);
 					if (error != null && !error.isEmpty()) {
@@ -1077,11 +1079,13 @@ public final class EdenModClient implements ClientModInitializer {
 					}
 					aspectsBlockedState = aspectsBlocked;
 					emeraldsBlockedState = emeraldsBlocked;
+					warpayBlockedState = warpayBlocked;
 					if (!wasUserRequest) {
 						return;
 					}
 					long le = pendingEmeralds / 4096;
-					displayDirect(() -> Component.literal("[Eden] Rewards Status:\n").withStyle(ChatFormatting.GOLD).append(Component.literal(" • Aspects: ").withStyle(ChatFormatting.GRAY)).append(Component.literal(aspectsBlocked ? "Opted Out" : "Opted In").withStyle(aspectsBlocked ? ChatFormatting.RED : ChatFormatting.GREEN)).append(Component.literal(" (" + pendingAspects + " pending)\n").withStyle(ChatFormatting.YELLOW)).append(Component.literal(" • Emeralds: ").withStyle(ChatFormatting.GRAY)).append(Component.literal(emeraldsBlocked ? "Opted Out" : "Opted In").withStyle(emeraldsBlocked ? ChatFormatting.RED : ChatFormatting.GREEN)).append(Component.literal(" (" + le + " LE pending)").withStyle(ChatFormatting.YELLOW)));
+					long warpayLe = pendingWarpay / 4096;
+					displayDirect(() -> Component.literal("[Eden] Rewards Status:\n").withStyle(ChatFormatting.GOLD).append(Component.literal(" • Aspects: ").withStyle(ChatFormatting.GRAY)).append(Component.literal(aspectsBlocked ? "Opted Out" : "Opted In").withStyle(aspectsBlocked ? ChatFormatting.RED : ChatFormatting.GREEN)).append(Component.literal(" (" + pendingAspects + " pending)\n").withStyle(ChatFormatting.YELLOW)).append(Component.literal(" • Emeralds: ").withStyle(ChatFormatting.GRAY)).append(Component.literal(emeraldsBlocked ? "Opted Out" : "Opted In").withStyle(emeraldsBlocked ? ChatFormatting.RED : ChatFormatting.GREEN)).append(Component.literal(" (" + le + " LE pending)\n").withStyle(ChatFormatting.YELLOW)).append(Component.literal(" • Warpay: ").withStyle(ChatFormatting.GRAY)).append(Component.literal(warpayBlocked ? "Opted Out" : "Opted In").withStyle(warpayBlocked ? ChatFormatting.RED : ChatFormatting.GREEN)).append(Component.literal(" (" + warpayLe + " LE pending)").withStyle(ChatFormatting.YELLOW)));
 				}
 
 				@Override
@@ -1101,9 +1105,12 @@ public final class EdenModClient implements ClientModInitializer {
 						aspectsBlockedState = blocked;
 					} else if ("emeralds".equalsIgnoreCase(rewardKind)) {
 						emeraldsBlockedState = blocked;
+					} else if ("warpay".equalsIgnoreCase(rewardKind)) {
+						warpayBlockedState = blocked;
 					}
 					String verb = blocked ? "opted out of" : "opted in to";
-					displayDirect(() -> Component.literal("[Eden] You are now " + verb + " " + rewardKind + " from guild raids.").withStyle(blocked ? ChatFormatting.RED : ChatFormatting.GREEN));
+					String source = "warpay".equalsIgnoreCase(rewardKind) ? "guild wars." : "guild raids.";
+					displayDirect(() -> Component.literal("[Eden] You are now " + verb + " " + rewardKind + " from " + source).withStyle(blocked ? ChatFormatting.RED : ChatFormatting.GREEN));
 				}
 
 				@Override
@@ -1579,10 +1586,11 @@ public final class EdenModClient implements ClientModInitializer {
 			displayDirect(() -> Component.literal("[Eden] " + warning).withStyle(ChatFormatting.RED));
 			return 0;
 		}
-		Boolean known = "aspects".equalsIgnoreCase(kind) ? aspectsBlockedState : ("emeralds".equalsIgnoreCase(kind) ? emeraldsBlockedState : null);
+		Boolean known = "aspects".equalsIgnoreCase(kind) ? aspectsBlockedState : ("emeralds".equalsIgnoreCase(kind) ? emeraldsBlockedState : ("warpay".equalsIgnoreCase(kind) ? warpayBlockedState : null));
 		if (known != null && known == blocked) {
 			String verb = blocked ? "opted out of" : "opted in to";
-			displayDirect(() -> Component.literal("[Eden] You are already " + verb + " " + kind + " from guild raids.").withStyle(ChatFormatting.YELLOW));
+			String source = "warpay".equalsIgnoreCase(kind) ? "guild wars." : "guild raids.";
+			displayDirect(() -> Component.literal("[Eden] You are already " + verb + " " + kind + " from " + source).withStyle(ChatFormatting.YELLOW));
 			return 0;
 		}
 		long seq = ++rewardOptOutRequestSeq;
@@ -2560,7 +2568,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds/warpay and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden warpay optout [true|false]", "opt out of or into receiving warpay"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -2755,6 +2763,7 @@ public final class EdenModClient implements ClientModInitializer {
 		ScoreboardCapture.reset();
 		aspectsBlockedState = null;
 		emeraldsBlockedState = null;
+		warpayBlockedState = null;
 		AttackTimerMenu.reset();
 		// Likewise the raid tally: it holds players from the session that just ended, and
 		// after an account switch could attribute them to another guild's raid.
