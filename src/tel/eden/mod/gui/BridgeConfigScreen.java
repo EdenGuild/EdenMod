@@ -115,7 +115,7 @@ public final class BridgeConfigScreen extends Screen {
 		// --- One line per setting; the list handles layout + smooth scrolling. ---
 		// General
 		addToggleRow(Category.GENERAL, "Bridge", () -> config.enabled, v -> config.enabled = v, "Enabled", "Disabled", true);
-		addToggleRow(Category.GENERAL, "My login/logout messages", () -> config.announceSelfPresence, v -> config.announceSelfPresence = v, "On", "Off", true);
+		addCycleRow(Category.GENERAL, "Login/logout messages", () -> config.loginLogoutMode.label(), () -> config.loginLogoutMode = nextLoginLogoutMode(config.loginLogoutMode), () -> config.loginLogoutMode = BridgeConfig.LoginLogoutMode.ALL);
 		addToggleRow(Category.GENERAL, "Mail sound", () -> config.mailSound, v -> config.mailSound = v, "On", "Off", true);
 		addToggleRow(Category.GENERAL, "Party feed", () -> config.partyAnnounce, v -> config.partyAnnounce = v, "On", "Off", true);
 		addToggleRow(Category.GENERAL, "Auto /stream on join", () -> config.autoStream, v -> config.autoStream = v, "On", "Off", false);
@@ -281,6 +281,12 @@ public final class BridgeConfigScreen extends Screen {
 		linkButton.setMessage(Component.literal("Opening browser..."));
 		linkButton.active = false;
 		mod.startLinkFlow(() -> this.minecraft.execute(() -> this.minecraft.setScreen(BridgeConfigScreen.create(parent, mod))));
+	}
+
+	private BridgeConfig.LoginLogoutMode nextLoginLogoutMode(BridgeConfig.LoginLogoutMode current) {
+		BridgeConfig.LoginLogoutMode safe = current != null ? current : BridgeConfig.LoginLogoutMode.ALL;
+		BridgeConfig.LoginLogoutMode[] values = BridgeConfig.LoginLogoutMode.values();
+		return values[(safe.ordinal() + 1) % values.length];
 	}
 
 	private BridgeConfig.GameDisplayMode nextGameMode(BridgeConfig.GameDisplayMode current) {

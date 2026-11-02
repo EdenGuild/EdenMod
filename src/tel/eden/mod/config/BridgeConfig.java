@@ -47,13 +47,31 @@ public final class BridgeConfig {
 	/** Whether the bridge should connect while on Wynncraft. */
 	public boolean enabled = true;
 
+	public enum LoginLogoutMode {
+		ALL("All"), HIDE_MINE("Hide Mine"), HIDE_ALL("Hide All");
+
+		private final String label;
+
+		LoginLogoutMode(String label) {
+			this.label = label;
+		}
+
+		public String label() {
+			return label;
+		}
+	}
+
+	/** Legacy toggle kept only to migrate older configs into {@link #loginLogoutMode}. */
+	@Deprecated
+	public Boolean announceSelfPresence = null;
+
 	/**
-	 * Whether your own login/logout is announced to the guild bridge (both in-game
-	 * and in the Discord bridge chat). On by default; turn it off to keep your own
-	 * comings and goings quiet. Other members' presence notices are unaffected, and
-	 * you still appear in {@code /eden online} either way.
+	 * Visibility of login/logout and streak notices:
+	 * ALL: broadcast own login/logout and streaks, and display others'.
+	 * HIDE_MINE: keep own login/logout and streaks quiet, and display others'.
+	 * HIDE_ALL: keep own login/logout and streaks quiet, and hide others'.
 	 */
-	public boolean announceSelfPresence = true;
+	public LoginLogoutMode loginLogoutMode = LoginLogoutMode.ALL;
 
 	/** Play a short chime when Eden mail arrives. On by default. */
 	public boolean mailSound = true;
@@ -421,6 +439,20 @@ public final class BridgeConfig {
 		}
 	}
 
+	static void migrateLegacyFields(BridgeConfig config) {
+		if (config.showGameMessages != null) {
+			config.gameDisplayMode = config.showGameMessages ? GameDisplayMode.ALL : GameDisplayMode.NONE;
+			config.showGameMessages = null;
+		}
+		if (config.announceSelfPresence != null) {
+			config.loginLogoutMode = config.announceSelfPresence ? LoginLogoutMode.ALL : LoginLogoutMode.HIDE_MINE;
+			config.announceSelfPresence = null;
+		}
+		if (config.loginLogoutMode == null) {
+			config.loginLogoutMode = LoginLogoutMode.ALL;
+		}
+	}
+
 	/** Load the config from disk, or return defaults (and write them) if absent. */
 	public static BridgeConfig load() {
 		if (Files.isRegularFile(PATH)) {
@@ -428,10 +460,7 @@ public final class BridgeConfig {
 				String json = Files.readString(PATH, StandardCharsets.UTF_8);
 				BridgeConfig config = GSON.fromJson(json, BridgeConfig.class);
 				if (config != null) {
-					if (config.showGameMessages != null) {
-						config.gameDisplayMode = config.showGameMessages ? GameDisplayMode.ALL : GameDisplayMode.NONE;
-						config.showGameMessages = null;
-					}
+					migrateLegacyFields(config);
 					if (config.commandAliases == null) {
 						config.commandAliases = new ArrayList<>();
 					}
