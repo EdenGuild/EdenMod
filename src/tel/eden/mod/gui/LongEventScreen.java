@@ -82,12 +82,27 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	private final Screen parent;
 	private final EdenModClient mod;
 	private EdenPanelLayout layout;
+	private static final class TimerRequest {
+		final long targetMs;
+		final int generation;
+		int retries;
+		long lastReqMs;
+
+		TimerRequest(long targetMs, int generation, long lastReqMs) {
+			this.targetMs = targetMs;
+			this.generation = generation;
+			this.retries = 0;
+			this.lastReqMs = lastReqMs;
+		}
+	}
+
 	private int seenGeneration = -1;
 	private LongEventState state;
-	private final Map<String, Long> requestedResetAtMs = new HashMap<>();
+	private final Map<String, TimerRequest> timerRequests = new HashMap<>();
 	private long lastStateRequestMs = 0L;
 	private boolean rerollPending = false;
 	private long rerollPendingSinceMs = 0L;
+	private int rerollPendingGeneration = -1;
 
 	private int activeTab = 0; // 0 = Standard Missions, 1 = Special Missions
 	private int selectedSpecialSlot = 1; // 1 to 7
@@ -201,7 +216,9 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		seenGeneration = mod.longEventGeneration();
 		state = mod.knownLongEventState();
 		guessPending = false;
-		rerollPending = false;
+		if (seenGeneration > rerollPendingGeneration) {
+			rerollPending = false;
+		}
 	}
 
 	@Override
@@ -254,9 +271,17 @@ public final class LongEventScreen extends EdenReferenceScreen {
 
 	private boolean checkTimer(long now, String key, long targetMs) {
 		if (targetMs > 0L && now >= targetMs) {
-			Long lastReq = requestedResetAtMs.get(key);
-			if (lastReq == null || now - lastReq >= 3000L) {
-				requestedResetAtMs.put(key, now);
+			TimerRequest req = timerRequests.get(key);
+			if (req == null || req.targetMs != targetMs) {
+				timerRequests.put(key, new TimerRequest(targetMs, seenGeneration, now));
+				return true;
+			}
+			if (seenGeneration != req.generation) {
+				return false;
+			}
+			if (req.retries < 2 && now - req.lastReqMs >= 3000L) {
+				req.retries++;
+				req.lastReqMs = now;
 				return true;
 			}
 		}
@@ -1513,12 +1538,14 @@ public final class LongEventScreen extends EdenReferenceScreen {
 									this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(CLICK_SOUND, 1.0f));
 									rerollPending = true;
 									rerollPendingSinceMs = System.currentTimeMillis();
+									rerollPendingGeneration = mod.longEventGeneration();
 									mod.socket().sendLongEventReroll(slotKey, false);
 									return true;
 								} else if (shift && slot.canBuyReroll()) {
 									this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(CLICK_SOUND, 1.0f));
 									rerollPending = true;
 									rerollPendingSinceMs = System.currentTimeMillis();
+									rerollPendingGeneration = mod.longEventGeneration();
 									mod.socket().sendLongEventReroll(slotKey, true);
 									return true;
 								}
