@@ -43,6 +43,7 @@ import tel.eden.mod.gui.AspectGiveawayScreen;
 import tel.eden.mod.gui.BridgeConfigScreen;
 import tel.eden.mod.gui.CommandAliasScreen;
 import tel.eden.mod.gui.CommandKeybindScreen;
+import tel.eden.mod.gui.LongEventScreen;
 import tel.eden.mod.gui.PartyCreateScreen;
 import tel.eden.mod.gui.PartyListScreen;
 import tel.eden.mod.gui.PartyManageScreen;
@@ -51,6 +52,7 @@ import tel.eden.mod.item.ItemCardRenderer;
 import tel.eden.mod.item.ItemStringDetector;
 import tel.eden.mod.net.AllyActivityEntry;
 import tel.eden.mod.net.BridgeWebSocketClient;
+import tel.eden.mod.net.LongEventState;
 import tel.eden.mod.net.PartyInfo;
 import tel.eden.mod.net.GiveawayCandidate;
 import tel.eden.mod.net.MailEntry;
@@ -168,6 +170,8 @@ public final class EdenModClient implements ClientModInitializer {
 	private final java.util.concurrent.atomic.AtomicInteger partyCommandGeneration = new java.util.concurrent.atomic.AtomicInteger();
 	private final java.util.concurrent.atomic.AtomicLong allyViewRequestId = new java.util.concurrent.atomic.AtomicLong();
 	private final java.util.concurrent.atomic.AtomicLong allyViewPendingId = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong eventRewardsRequestId = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong eventRewardsPendingId = new java.util.concurrent.atomic.AtomicLong();
 	// Deterministic per-occurrence index so rapid identical bank events stay distinct.
 	// Short window: only the current burst counts, so stale earlier deposits can't
 	// make different clients assign divergent seqs (which duplicated Discord posts).
@@ -270,6 +274,11 @@ public final class EdenModClient implements ClientModInitializer {
 	private volatile int giveawayStorageAspects;
 	private volatile String giveawayError;
 	private final java.util.concurrent.atomic.AtomicInteger giveawayGeneration = new java.util.concurrent.atomic.AtomicInteger();
+	private volatile LongEventState knownLongEventState;
+	// Last long-event error (a refused reroll, a failed request), shown briefly on the Event screen.
+	private volatile String longEventError = "";
+	private volatile long longEventErrorAtMs;
+	private final java.util.concurrent.atomic.AtomicInteger longEventGeneration = new java.util.concurrent.atomic.AtomicInteger();
 	// GitHub update check: run once per game session; the prompt offers a one-click
 	// download (applied on game close) and a link to the release page.
 	private final UpdateChecker updateChecker = new UpdateChecker();
@@ -536,6 +545,21 @@ public final class EdenModClient implements ClientModInitializer {
 		return giveawayGeneration.get();
 	}
 
+	/** Latest long-event mission state from the backend, or {@code null} before first reply. */
+	public LongEventState knownLongEventState() {
+		return knownLongEventState;
+	}
+
+	/** The last long-event error if it arrived in the past 5 seconds, else {@code ""}. */
+	public String recentLongEventError() {
+		return System.currentTimeMillis() - longEventErrorAtMs < 5_000L ? longEventError : "";
+	}
+
+	/** Bumped on every long-event state snapshot; 0 means none has arrived yet. */
+	public int longEventGeneration() {
+		return longEventGeneration.get();
+	}
+
 	/** The guild reward helper (rank lookups + gifting). */
 	public GuildRewards guildRewards() {
 		return guildRewards;
@@ -771,6 +795,7 @@ public final class EdenModClient implements ClientModInitializer {
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
 			tel.eden.mod.war.eco.TerritoryGuideController.reset();
 			guildAllyManager.requestCancel();
+			eventRewardsPendingId.set(0);
 			// Connect if applicable; the backend reports link/membership standing via
 			// authOk (handleAuthStatus), which drives any "please link" prompt.
 			evaluateGating(client);
@@ -807,7 +832,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(ClientCommandManager.literal("logscan").executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
+			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(buildEventCommand()).then(ClientCommandManager.literal("logscan").executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
 				requestWarCounts(ctx.getSource(), 7);
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
@@ -1305,7 +1330,7 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onPillMessage(String label, String content, String colorHex, boolean bold) {
+				public void onPillMessage(String label, String content, String colorHex, boolean bold, boolean own) {
 					if (GAMES_PILL_LABEL.equals(label) && config.gameDisplayMode != BridgeConfig.GameDisplayMode.ALL) {
 						// React Only still shows your own coinflip/diceroll result; every
 						// other "eden"-labelled message (streaks, gambit resets, reward
@@ -1327,6 +1352,15 @@ public final class EdenModClient implements ClientModInitializer {
 						}
 					}
 					Integer finalColorRgb = colorRgb;
+					if ("EVENT".equals(label)) {
+						// The bot flags your own completions (own), so this never depends on name matching.
+						if (!own && !config.eventAnnouncements) {
+							return;
+						}
+						String finalContent = own ? formatOwnEventAnnouncement(content) : content;
+						display(() -> DiscordChatFormatter.pill(label, finalContent, finalColorRgb, bold));
+						return;
+					}
 					display(() -> DiscordChatFormatter.pill(label, content, finalColorRgb, bold));
 				}
 
@@ -1373,6 +1407,31 @@ public final class EdenModClient implements ClientModInitializer {
 					allyViewPendingId.set(0);
 					boolean canManage = isChiefOwnerOrStrategist();
 					display(() -> DiscordChatFormatter.allyActivity(entries, canManage));
+				}
+
+				@Override
+				public void onLongEventState(LongEventState state, boolean hasSnapshot) {
+					if (state.error() != null && !state.error().isEmpty()) {
+						longEventError = state.error();
+						longEventErrorAtMs = System.currentTimeMillis();
+						display(() -> DiscordChatFormatter.systemLine(state.error(), ChatFormatting.RED));
+					}
+					if (hasSnapshot || knownLongEventState == null) {
+						knownLongEventState = state;
+						longEventGeneration.incrementAndGet();
+					}
+				}
+
+				@Override
+				public void onLongEventRewards(int pendingLe, String error) {
+					if (eventRewardsPendingId.getAndSet(0) == 0) {
+						return;
+					}
+					if (error != null && !error.isEmpty()) {
+						display(() -> Component.literal("Could not fetch event rewards").withStyle(ChatFormatting.RED));
+						return;
+					}
+					display(() -> DiscordChatFormatter.systemLine("Pending event rewards: " + pendingLe + " LE", ChatFormatting.GOLD));
 				}
 
 				@Override
@@ -1704,6 +1763,39 @@ public final class EdenModClient implements ClientModInitializer {
 		}, 5, TimeUnit.SECONDS);
 	}
 
+	private LiteralArgumentBuilder<FabricClientCommandSource> buildEventCommand() {
+		return ClientCommandManager.literal("event").executes(ctx -> openLongEventGui(ctx.getSource())).then(ClientCommandManager.literal("rewards").executes(ctx -> {
+			requestEventRewards(ctx.getSource());
+			return 1;
+		}));
+	}
+
+	private int openLongEventGui(FabricClientCommandSource source) {
+		BridgeWebSocketClient current = socket;
+		if (current != null) {
+			current.sendLongEventStateRequest();
+		}
+		Minecraft mc = Minecraft.getInstance();
+		mc.execute(() -> mc.setScreen(new LongEventScreen(mc.screen, this)));
+		return 1;
+	}
+
+	private void requestEventRewards(FabricClientCommandSource source) {
+		BridgeWebSocketClient current = socket;
+		if (current == null || !current.isConnected()) {
+			source.sendFeedback(Component.literal("Could not fetch event rewards").withStyle(ChatFormatting.RED));
+			return;
+		}
+		long id = eventRewardsRequestId.incrementAndGet();
+		eventRewardsPendingId.set(id);
+		current.sendLongEventRewardsRequest();
+		partyCommandExecutor.schedule(() -> {
+			if (eventRewardsPendingId.compareAndSet(id, 0)) {
+				display(() -> Component.literal("Could not fetch event rewards").withStyle(ChatFormatting.RED));
+			}
+		}, 5, TimeUnit.SECONDS);
+	}
+
 	private CompletableFuture<Suggestions> suggestMembers(CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
 		String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
 		for (String name : guildRewards.memberNames()) {
@@ -1866,6 +1958,16 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 		String name = playerName();
 		return name != null && content.contains(name);
+	}
+
+	private static final java.util.regex.Pattern OWN_EVENT_LINE = java.util.regex.Pattern.compile("\\A(\\S+\\s+)\\S+\\s+(completed|unlocked)\\b");
+
+	/** Reword your own event line: "⭐ Name completed …" becomes "⭐ You've completed …". */
+	public static String formatOwnEventAnnouncement(String content) {
+		if (content == null) {
+			return null;
+		}
+		return OWN_EVENT_LINE.matcher(content).replaceFirst("$1You've $2");
 	}
 
 	private int openOverviewGui(FabricClientCommandSource source) {
@@ -2568,7 +2670,7 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds/warpay and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden warpay optout [true|false]", "opt out of or into receiving warpay"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden event", "open the event missions screen"), new HelpEntry("/eden event rewards", "check your pending event LE"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds/warpay and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden warpay optout [true|false]", "opt out of or into receiving warpay"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -2779,6 +2881,11 @@ public final class EdenModClient implements ClientModInitializer {
 		tel.eden.mod.war.eco.TerritoryGuideController.reset();
 		guildAllyManager.requestCancel();
 		territoryDefendedTracker.clear();
+		eventRewardsPendingId.set(0);
+		knownLongEventState = null;
+		longEventGeneration.set(0);
+		longEventError = "";
+		longEventErrorAtMs = 0L;
 		// Before the socket goes: an outstanding deduct must not outlive the session that
 		// made it, or it resurfaces at the next connect naming a player from another
 		// server — or, after an account switch, another guild.
@@ -3132,7 +3239,7 @@ public final class EdenModClient implements ClientModInitializer {
 		client.execute(() -> {
 			if (client.player != null) {
 				Component component = builder.get();
-				if (!viaChatTab || !WynntilsChatBridge.sendToTab(component)) {
+				if (component != null && (!viaChatTab || !WynntilsChatBridge.sendToTab(component))) {
 					client.player.displayClientMessage(component, false);
 				}
 			}
