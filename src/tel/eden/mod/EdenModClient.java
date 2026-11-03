@@ -1414,9 +1414,12 @@ public final class EdenModClient implements ClientModInitializer {
 					if (state.error() != null && !state.error().isEmpty()) {
 						longEventError = state.error();
 						longEventErrorAtMs = System.currentTimeMillis();
-						display(() -> DiscordChatFormatter.systemLine(state.error(), ChatFormatting.RED));
+						Minecraft mc = Minecraft.getInstance();
+						if (!(mc.screen instanceof LongEventScreen)) {
+							display(() -> DiscordChatFormatter.systemLine(state.error(), ChatFormatting.RED));
+						}
 					}
-					if (hasSnapshot || knownLongEventState == null) {
+					if (hasSnapshot) {
 						knownLongEventState = state;
 						longEventGeneration.incrementAndGet();
 					}

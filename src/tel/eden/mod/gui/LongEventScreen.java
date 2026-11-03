@@ -1,7 +1,5 @@
 package tel.eden.mod.gui;
 
-import com.mojang.blaze3d.platform.NativeImage;
-import java.io.InputStream;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -20,7 +18,6 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -38,9 +35,12 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	private static final int BASE_PANEL_WIDTH = 480;
 	private static final int BASE_PANEL_HEIGHT = 350;
 
-	private static final String[] STANDARD_SLOTS = {"daily", "special", "repeatable"};
-	private static final int[] STANDARD_CARD_BASE_X = {16, 168, 320};
-	private static final int STANDARD_CARD_BASE_W = 144;
+	private static final String[] STANDARD_SLOTS_3 = {"daily", "special", "repeatable"};
+	private static final String[] STANDARD_SLOTS_4 = {"daily", "special", "repeatable", "repeatable2"};
+	private static final int[] STANDARD_CARD_BASE_X_3 = {16, 168, 320};
+	private static final int STANDARD_CARD_BASE_W_3 = 144;
+	private static final int[] STANDARD_CARD_BASE_X_4 = {12, 128, 244, 360};
+	private static final int STANDARD_CARD_BASE_W_4 = 108;
 	private static final int CARD_BASE_Y = 48;
 	private static final int CARD_BASE_H = 92;
 
@@ -51,11 +51,24 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	private static final String[] SPECIAL_SLOT_DEFAULTS = {"Scavenger Hunt", "Riddle", "Mob Hunt", "Murder Mystery", "Build Battle", "Doodle Battle", "Raid Challenge"};
 
 	private static final SoundEvent CLICK_SOUND = SoundEvent.createVariableRangeEvent(Identifier.parse("minecraft:ui.button.click"));
-	private static final Map<String, LoadedTexture> TEXTURE_CACHE = new HashMap<>();
 
-	private record LoadedTexture(Identifier id, int width, int height) {
-		private static final LoadedTexture EMPTY = new LoadedTexture(null, 0, 0);
-	}
+	private static final Identifier FRAME_DAILY = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/frame_daily.png");
+	private static final Identifier FRAME_WEEKLY = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/frame_weekly.png");
+	private static final Identifier FRAME_REPEATABLE = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/frame_repeatable.png");
+	private static final Identifier FRAME_MASTER = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/frame_master.png");
+
+	private static final Identifier ICON_NOTG = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/notg.png");
+	private static final Identifier ICON_NOL = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/nol.png");
+	private static final Identifier ICON_TCC = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/tcc.png");
+	private static final Identifier ICON_TNA = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/tna.png");
+	private static final Identifier ICON_WTP = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/icons/wtp.png");
+	private static final Identifier ICON_ALL_RAIDS = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/all_raids.png");
+	private static final Identifier ICON_GUILD_WARS = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/guild_wars.png");
+	private static final Identifier ICON_TRIVIA = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/trivia.png");
+	private static final Identifier ICON_DICEROLL = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/diceroll.png");
+	private static final Identifier ICON_COINFLIP = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/coinflip.png");
+	private static final Identifier ICON_OTHER = Identifier.fromNamespaceAndPath("edenmod", "textures/gui/event/other.png");
+	private static final Identifier ICON_EDEN = Identifier.fromNamespaceAndPath("edenmod", "icon.png");
 
 	private record ClickBox(int x, int y, int w, int h) {
 		boolean contains(double mx, double my) {
@@ -73,6 +86,8 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	private LongEventState state;
 	private final Map<String, Long> requestedResetAtMs = new HashMap<>();
 	private long lastStateRequestMs = 0L;
+	private boolean rerollPending = false;
+	private long rerollPendingSinceMs = 0L;
 
 	private int activeTab = 0; // 0 = Standard Missions, 1 = Special Missions
 	private int selectedSpecialSlot = 1; // 1 to 7
@@ -116,8 +131,6 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		submitGuessBtn.visible = false;
 		submitGuessBtn.active = false;
 		this.addRenderableWidget(submitGuessBtn);
-
-		preloadTextures();
 
 		if (mod.socket() != null && mod.socket().isConnected()) {
 			lastStateRequestMs = System.currentTimeMillis();
@@ -188,6 +201,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		seenGeneration = mod.longEventGeneration();
 		state = mod.knownLongEventState();
 		guessPending = false;
+		rerollPending = false;
 	}
 
 	@Override
@@ -197,7 +211,10 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			refreshSnapshot();
 		}
 		long now = System.currentTimeMillis();
-		if (state == null && mod.socket() != null && mod.socket().isConnected()) {
+		if (rerollPending && now - rerollPendingSinceMs > 5000L) {
+			rerollPending = false;
+		}
+		if ((state == null || !state.isSnapshot()) && mod.socket() != null && mod.socket().isConnected()) {
 			if (now - lastStateRequestMs > 3000L) {
 				lastStateRequestMs = now;
 				mod.socket().sendLongEventStateRequest();
@@ -206,7 +223,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		if (state != null && state.active() && mod.socket() != null && mod.socket().isConnected()) {
 			boolean requestNeeded = false;
 			for (LongEventState.Slot slot : state.slots()) {
-				if (checkTimer(now, "slot:" + slot.slot(), slot.resetAtMs())) {
+				if (checkTimer(now, "slot:" + slot.slot(), slot.resetAtMs()) || checkTimer(now, "reroll:" + slot.slot(), slot.rerollAtMs())) {
 					requestNeeded = true;
 					break;
 				}
@@ -237,22 +254,34 @@ public final class LongEventScreen extends EdenReferenceScreen {
 
 	private boolean checkTimer(long now, String key, long targetMs) {
 		if (targetMs > 0L && now >= targetMs) {
-			Long prev = requestedResetAtMs.get(key);
-			if (prev == null || prev != targetMs) {
-				requestedResetAtMs.put(key, targetMs);
+			Long lastReq = requestedResetAtMs.get(key);
+			if (lastReq == null || now - lastReq >= 3000L) {
+				requestedResetAtMs.put(key, now);
 				return true;
 			}
 		}
 		return false;
 	}
 
-	private ClickBox rerollBox(int slotIndex) {
-		if (layout == null || slotIndex < 0 || slotIndex >= STANDARD_CARD_BASE_X.length) {
+	private String[] currentStandardSlots() {
+		return (state != null && state.repeatSlot2Active()) ? STANDARD_SLOTS_4 : STANDARD_SLOTS_3;
+	}
+
+	private int standardCardBaseX(int slotIndex, int totalSlots) {
+		return totalSlots == 4 ? STANDARD_CARD_BASE_X_4[slotIndex] : STANDARD_CARD_BASE_X_3[slotIndex];
+	}
+
+	private int standardCardBaseW(int totalSlots) {
+		return totalSlots == 4 ? STANDARD_CARD_BASE_W_4 : STANDARD_CARD_BASE_W_3;
+	}
+
+	private ClickBox rerollBox(int slotIndex, int totalSlots) {
+		if (layout == null || slotIndex < 0 || slotIndex >= totalSlots) {
 			return null;
 		}
-		int cardX = layout.x(STANDARD_CARD_BASE_X[slotIndex]);
+		int cardX = layout.x(standardCardBaseX(slotIndex, totalSlots));
 		int cardY = layout.y(CARD_BASE_Y);
-		int cardW = layout.w(STANDARD_CARD_BASE_W);
+		int cardW = layout.w(standardCardBaseW(totalSlots));
 		int rerollSize = layout.w(14);
 		int rx = cardX + cardW - rerollSize - layout.w(4);
 		int ry = cardY + layout.h(4);
@@ -396,14 +425,16 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		} else if (!state.active()) {
 			g.drawCenteredString(this.font, "No event is running", layout.centerX(), layout.y(155), 0xFFAAAAAA);
 		} else if (activeTab == 0) {
-			// Tab 0: Three standard cards: Daily, Super, Repeatable
-			for (int i = 0; i < STANDARD_SLOTS.length; i++) {
-				String slotKey = STANDARD_SLOTS[i];
+			// Tab 0: Standard cards (Daily, Super, Repeatable 1, optional Repeatable 2)
+			String[] slotsToRender = currentStandardSlots();
+			int totalSlots = slotsToRender.length;
+			for (int i = 0; i < totalSlots; i++) {
+				String slotKey = slotsToRender[i];
 				LongEventState.Slot slot = state.findSlot(slotKey);
 
-				int cardX = layout.x(STANDARD_CARD_BASE_X[i]);
+				int cardX = layout.x(standardCardBaseX(i, totalSlots));
 				int cardY = layout.y(CARD_BASE_Y);
-				int cardW = layout.w(STANDARD_CARD_BASE_W);
+				int cardW = layout.w(standardCardBaseW(totalSlots));
 				int cardH = layout.h(CARD_BASE_H);
 				int cardCenterX = cardX + cardW / 2;
 
@@ -416,8 +447,10 @@ public final class LongEventScreen extends EdenReferenceScreen {
 					}
 				} else if (i == 1) {
 					slotLabel = "Super";
+				} else if (i == 2) {
+					slotLabel = totalSlots == 4 ? "Repeatable 1" : "Repeatable";
 				} else {
-					slotLabel = "Repeatable";
+					slotLabel = "Repeatable 2";
 				}
 
 				// Slot title + live countdown above card
@@ -434,12 +467,12 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				int frameSize = layout.w(42);
 				int frameX = cardCenterX - frameSize / 2;
 				int frameY = cardY + layout.h(4);
-				LoadedTexture tagIcon = iconForTag(slot != null ? slot.tag() : "Other");
+				Identifier tagIcon = iconForTag(slot != null ? slot.tag() : "Other");
 				if (tagIcon != null) {
 					int iconSize = layout.w(26);
 					drawTexture(g, tagIcon, frameX + (frameSize - iconSize) / 2, frameY + (frameSize - iconSize) / 2, iconSize, iconSize);
 				}
-				LoadedTexture frameTex = frameForSlot(slotKey);
+				Identifier frameTex = frameForSlot(slotKey);
 				if (frameTex != null) {
 					drawTexture(g, frameTex, frameX, frameY, frameSize, frameSize);
 				}
@@ -450,12 +483,12 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				}
 
 				// Reroll icon button in top-right corner
-				ClickBox rBox = rerollBox(i);
+				ClickBox rBox = rerollBox(i, totalSlots);
 				int rerollSize = rBox.w();
 				int rerollX = rBox.x();
 				int rerollY = rBox.y();
-				boolean canReroll = slot.canReroll();
-				boolean canBuyReroll = slot.canBuyReroll();
+				boolean canReroll = !rerollPending && slot.canReroll();
+				boolean canBuyReroll = !rerollPending && slot.canBuyReroll();
 				boolean rHover = rBox.contains(scaledMouseX, scaledMouseY);
 				if (rHover) {
 					hoveredRerollSlot = slot;
@@ -523,7 +556,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			List<LongEventState.Master> masters = state.masters();
 			if (!masters.isEmpty()) {
 				g.drawString(this.font, "Event Objectives", layout.x(12), layout.y(148), 0xFFFFD24A);
-				LoadedTexture masterFrame = getTexture("assets/edenmod/textures/gui/event/frame_master.png");
+				Identifier masterFrame = FRAME_MASTER;
 				for (int idx = 0; idx < Math.min(3, masters.size()); idx++) {
 					LongEventState.Master master = masters.get(idx);
 					int rowX = layout.x(12);
@@ -538,14 +571,12 @@ public final class LongEventScreen extends EdenReferenceScreen {
 					int fSize = layout.w(26);
 					int fx = rowX + layout.w(3);
 					int fy = rowY + (rowH - fSize) / 2;
-					LoadedTexture mIcon = iconForMaster(master.kind());
+					Identifier mIcon = iconForMaster(master.kind());
 					if (mIcon != null) {
 						int iSize = layout.w(18);
 						drawTexture(g, mIcon, fx + (fSize - iSize) / 2, fy + (fSize - iSize) / 2, iSize, iSize);
 					}
-					if (masterFrame != null) {
-						drawTexture(g, masterFrame, fx, fy, fSize, fSize);
-					}
+					drawTexture(g, masterFrame, fx, fy, fSize, fSize);
 
 					int textLeft = rowX + layout.w(34);
 					int topY = rowY + layout.h(4);
@@ -685,18 +716,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		} else if (helpBadgeBox != null && helpBadgeBox.contains(scaledMouseX, scaledMouseY)) {
 			g.setComponentTooltipForNextFrame(this.font, List.of(Component.literal("Need help? Ask an Event Manager for clarification.").withStyle(ChatFormatting.WHITE)), mouseX, mouseY);
 		} else if (hoveredImageUrl != null) {
-			if (activeTab != 1 && ImagePreviewManager.isPreviewable(hoveredImageUrl)) {
-				int imgW = ImagePreviewManager.getWidth(hoveredImageUrl);
-				int imgH = ImagePreviewManager.getHeight(hoveredImageUrl);
-				int boxW = imgW > 0 ? imgW : 100;
-				int boxH = imgH > 0 ? imgH : 16;
-				int rx = (this.width - boxW) / 2;
-				int ry = (this.height - boxH) / 2;
-				g.fill(rx - 2, ry - 2, rx + boxW + 2, ry + boxH + 2, 0xCC000000);
-				ImagePreviewManager.renderPreview(g, hoveredImageUrl, rx, ry);
-			} else {
-				g.setComponentTooltipForNextFrame(this.font, List.of(Component.literal("Click to open image in browser").withStyle(ChatFormatting.GRAY)), mouseX, mouseY);
-			}
+			g.setComponentTooltipForNextFrame(this.font, List.of(Component.literal("Click to open image in browser").withStyle(ChatFormatting.GRAY)), mouseX, mouseY);
 		} else if (hoveredClueNote != null && !hoveredClueNote.isEmpty()) {
 			List<Component> clueLines = new ArrayList<>();
 			String title = (hoveredTooltipTitle != null && !hoveredTooltipTitle.isEmpty()) ? hoveredTooltipTitle : "Clue Details";
@@ -1361,92 +1381,52 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		drawOutline(g, x, y, w, h, 0xFF3A3A3A);
 	}
 
-	private static void drawTexture(GuiGraphics g, LoadedTexture tex, int x, int y, int w, int h) {
-		if (tex == null || tex.id() == null) {
+	private static void drawTexture(GuiGraphics g, Identifier id, int x, int y, int w, int h) {
+		if (id == null) {
 			return;
 		}
 		g.pose().pushMatrix();
 		g.pose().translate(x, y);
-		g.pose().scale(w / (float) tex.width(), h / (float) tex.height());
-		g.blit(RenderPipelines.GUI_TEXTURED, tex.id(), 0, 0, 0.0f, 0.0f, tex.width(), tex.height(), tex.width(), tex.height());
+		g.pose().scale(w / 64.0f, h / 64.0f);
+		g.blit(RenderPipelines.GUI_TEXTURED, id, 0, 0, 0.0f, 0.0f, 64, 64, 64, 64);
 		g.pose().popMatrix();
 	}
 
-	private static LoadedTexture frameForSlot(String slotKey) {
-		String file = switch (slotKey.toLowerCase(Locale.ROOT)) {
-			case "daily" -> "frame_daily.png";
-			case "special", "weekly", "super" -> "frame_weekly.png";
-			default -> "frame_repeatable.png";
+	private static Identifier frameForSlot(String slotKey) {
+		return switch (slotKey.toLowerCase(Locale.ROOT)) {
+			case "daily" -> FRAME_DAILY;
+			case "special", "weekly", "super" -> FRAME_WEEKLY;
+			default -> FRAME_REPEATABLE;
 		};
-		return getTexture("assets/edenmod/textures/gui/event/" + file);
 	}
 
-	private static LoadedTexture iconForTag(String tag) {
+	private static Identifier iconForTag(String tag) {
 		if (tag == null) {
-			return getTexture("assets/edenmod/textures/gui/event/other.png");
+			return ICON_OTHER;
 		}
 		return switch (tag.trim().toUpperCase(Locale.ROOT)) {
-			case "NOTG" -> getTexture("assets/edenmod/textures/gui/icons/notg.png");
-			case "NOL" -> getTexture("assets/edenmod/textures/gui/icons/nol.png");
-			case "TCC" -> getTexture("assets/edenmod/textures/gui/icons/tcc.png");
-			case "TNA" -> getTexture("assets/edenmod/textures/gui/icons/tna.png");
-			case "WTP" -> getTexture("assets/edenmod/textures/gui/icons/wtp.png");
-			case "ALL RAIDS" -> getTexture("assets/edenmod/textures/gui/event/all_raids.png");
-			case "GUILD WARS" -> getTexture("assets/edenmod/textures/gui/event/guild_wars.png");
-			case "TRIVIA" -> getTexture("assets/edenmod/textures/gui/event/trivia.png");
-			case "DICEROLL" -> getTexture("assets/edenmod/textures/gui/event/diceroll.png");
-			case "COINFLIP" -> getTexture("assets/edenmod/textures/gui/event/coinflip.png");
-			default -> getTexture("assets/edenmod/textures/gui/event/other.png");
+			case "NOTG" -> ICON_NOTG;
+			case "NOL" -> ICON_NOL;
+			case "TCC" -> ICON_TCC;
+			case "TNA" -> ICON_TNA;
+			case "WTP" -> ICON_WTP;
+			case "ALL RAIDS" -> ICON_ALL_RAIDS;
+			case "GUILD WARS" -> ICON_GUILD_WARS;
+			case "TRIVIA" -> ICON_TRIVIA;
+			case "DICEROLL" -> ICON_DICEROLL;
+			case "COINFLIP" -> ICON_COINFLIP;
+			default -> ICON_OTHER;
 		};
 	}
 
-	private static LoadedTexture iconForMaster(String kind) {
+	private static Identifier iconForMaster(String kind) {
 		if ("raids".equalsIgnoreCase(kind)) {
-			return getTexture("assets/edenmod/textures/gui/event/all_raids.png");
+			return ICON_ALL_RAIDS;
 		}
 		if ("wars".equalsIgnoreCase(kind) || "guild_wars".equalsIgnoreCase(kind)) {
-			return getTexture("assets/edenmod/textures/gui/event/guild_wars.png");
+			return ICON_GUILD_WARS;
 		}
-		return getTexture("assets/edenmod/icon.png");
-	}
-
-	private static final String[] PRELOAD_TEXTURES = {"assets/edenmod/textures/gui/event/frame_daily.png", "assets/edenmod/textures/gui/event/frame_weekly.png", "assets/edenmod/textures/gui/event/frame_repeatable.png", "assets/edenmod/textures/gui/event/frame_master.png", "assets/edenmod/textures/gui/event/all_raids.png", "assets/edenmod/textures/gui/event/guild_wars.png", "assets/edenmod/textures/gui/event/trivia.png", "assets/edenmod/textures/gui/event/diceroll.png", "assets/edenmod/textures/gui/event/coinflip.png", "assets/edenmod/textures/gui/event/other.png", "assets/edenmod/textures/gui/icons/notg.png", "assets/edenmod/textures/gui/icons/nol.png", "assets/edenmod/textures/gui/icons/tcc.png", "assets/edenmod/textures/gui/icons/tna.png", "assets/edenmod/textures/gui/icons/wtp.png", "assets/edenmod/icon.png"};
-
-	public static void preloadTextures() {
-		for (String path : PRELOAD_TEXTURES) {
-			getTexture(path);
-		}
-	}
-
-	private static LoadedTexture getTexture(String resourcePath) {
-		LoadedTexture cached = TEXTURE_CACHE.get(resourcePath);
-		if (cached != null) {
-			if (cached == LoadedTexture.EMPTY) {
-				return null;
-			}
-			var tm = Minecraft.getInstance().getTextureManager();
-			var tex = tm.getTexture(cached.id());
-			if (tex != null && tex.getTexture() != null) {
-				return cached;
-			}
-			TEXTURE_CACHE.remove(resourcePath);
-		}
-		try (InputStream stream = LongEventScreen.class.getClassLoader().getResourceAsStream(resourcePath)) {
-			if (stream != null) {
-				NativeImage img = NativeImage.read(stream);
-				int w = img.getWidth();
-				int h = img.getHeight();
-				String slug = resourcePath.replace("assets/edenmod/", "").replace('/', '_').replace('.', '_');
-				Identifier loc = Identifier.parse("edenmod:event_tex/" + slug);
-				Minecraft.getInstance().getTextureManager().register(loc, new DynamicTexture(() -> slug, img));
-				LoadedTexture loaded = new LoadedTexture(loc, w, h);
-				TEXTURE_CACHE.put(resourcePath, loaded);
-				return loaded;
-			}
-		} catch (Exception ignored) {
-		}
-		TEXTURE_CACHE.put(resourcePath, LoadedTexture.EMPTY);
-		return null;
+		return ICON_EDEN;
 	}
 
 	@Override
@@ -1517,22 +1497,28 @@ public final class LongEventScreen extends EdenReferenceScreen {
 
 			if (state != null && state.active()) {
 				if (activeTab == 0) {
-					for (int i = 0; i < STANDARD_SLOTS.length; i++) {
-						String slotKey = STANDARD_SLOTS[i];
+					String[] slotsToRender = currentStandardSlots();
+					int totalSlots = slotsToRender.length;
+					for (int i = 0; i < totalSlots; i++) {
+						String slotKey = slotsToRender[i];
 						LongEventState.Slot slot = state.findSlot(slotKey);
 						if (slot == null || slot.missionId() == 0) {
 							continue;
 						}
-						ClickBox rBox = rerollBox(i);
+						ClickBox rBox = rerollBox(i, totalSlots);
 						if (rBox != null && rBox.contains(mx, my)) {
-							if (mod.socket() != null) {
+							if (mod.socket() != null && !rerollPending) {
 								boolean shift = RaidGambitSafety.isShiftKeyDown();
 								if (slot.canReroll()) {
 									this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(CLICK_SOUND, 1.0f));
+									rerollPending = true;
+									rerollPendingSinceMs = System.currentTimeMillis();
 									mod.socket().sendLongEventReroll(slotKey, false);
 									return true;
 								} else if (shift && slot.canBuyReroll()) {
 									this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(CLICK_SOUND, 1.0f));
+									rerollPending = true;
+									rerollPendingSinceMs = System.currentTimeMillis();
 									mod.socket().sendLongEventReroll(slotKey, true);
 									return true;
 								}
