@@ -99,8 +99,12 @@ public final class RaidGambitSafety {
 			return false;
 		}
 		for (String line : loreLines) {
+			if (line == null) {
+				continue;
+			}
 			String stripped = ChatFormatting.stripFormatting(line).trim();
-			if (stripped.equalsIgnoreCase("Click to Disable") || stripped.equalsIgnoreCase("Click to Enable") || stripped.contains("Rewards for Enabling") || stripped.contains("You may only enable 3 gambits") || stripped.toLowerCase(Locale.ROOT).contains("un-ready to change")) {
+			String lower = stripped.toLowerCase(Locale.ROOT);
+			if (stripped.equalsIgnoreCase("Click to Disable") || stripped.equalsIgnoreCase("Click to Enable") || stripped.contains("Rewards for Enabling") || stripped.contains("You may only enable 3 gambits") || lower.contains("un-ready to change") || lower.contains("unready to change")) {
 				return true;
 			}
 		}
@@ -123,6 +127,9 @@ public final class RaidGambitSafety {
 		boolean unreadyToChange = false;
 		boolean hasRewards = false;
 		for (String line : loreLines) {
+			if (line == null) {
+				continue;
+			}
 			String stripped = ChatFormatting.stripFormatting(line).trim();
 			if (stripped.equalsIgnoreCase("Click to Disable")) {
 				return true;

@@ -83,6 +83,8 @@ class RaidGambitSafetyTest {
 		assertTrue(RaidGambitSafety.isGambitEnabledLore(List.of("§8Refreshes in 19 hours", " ", "§eClick to Disable")));
 		assertTrue(RaidGambitSafety.isGambitEnabledLore(List.of("Click to Disable")));
 		assertTrue(RaidGambitSafety.isGambitEnabledLore(List.of("§8Refreshes in 20 hours", "§bRewards for Enabling", "§cUn-ready to change")));
+		assertTrue(RaidGambitSafety.isGambitEnabledLore(java.util.Arrays.asList(null, "§bRewards for Enabling", "§cUnready to change")));
+		assertTrue(RaidGambitSafety.isGambitEnabledLore(java.util.Arrays.asList("§eClick to Disable", null)));
 		assertFalse(RaidGambitSafety.isGambitEnabledLore(List.of("§8Refreshes in 20 hours", "§cUn-ready to change")));
 		assertFalse(RaidGambitSafety.isGambitEnabledLore(List.of("§8Refreshes in 19 hours", " ", "§aClick to Enable")));
 		assertFalse(RaidGambitSafety.isGambitEnabledLore(List.of("§cYou may only enable 3 gambits")));
@@ -95,6 +97,8 @@ class RaidGambitSafetyTest {
 		assertTrue(RaidGambitSafety.isGambitLore(List.of("§bRewards for Enabling", "§eClick to Disable")));
 		assertTrue(RaidGambitSafety.isGambitLore(List.of("§aClick to Enable")));
 		assertTrue(RaidGambitSafety.isGambitLore(List.of("§cYou may only enable 3 gambits")));
+		assertTrue(RaidGambitSafety.isGambitLore(List.of("§cUnready to change")));
+		assertTrue(RaidGambitSafety.isGambitLore(java.util.Arrays.asList(null, "§aClick to Enable")));
 		assertFalse(RaidGambitSafety.isGambitLore(List.of("§7Damage: 100-200", "§8Common Dagger")));
 	}
 
