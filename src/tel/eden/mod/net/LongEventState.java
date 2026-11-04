@@ -94,22 +94,20 @@ public record LongEventState(boolean active, long endsAtMs, int pendingLe, int r
 		return null;
 	}
 
-	/** Find a slot by its identifier ({@code "daily"}, {@code "special"}, {@code "repeatable"}, {@code "repeatable2"}). */
+	private static boolean isSuperAlias(String name) {
+		return "special".equalsIgnoreCase(name) || "super".equalsIgnoreCase(name) || "weekly".equalsIgnoreCase(name);
+	}
+
+	/** Find a slot by its identifier ({@code "daily"}, {@code "special"}, {@code "super"}, {@code "repeatable"}, {@code "repeatable2"}). */
 	public Slot findSlot(String slotName) {
 		for (Slot s : slots) {
 			if (s.slot().equalsIgnoreCase(slotName)) {
 				return s;
 			}
 		}
-		if ("special".equalsIgnoreCase(slotName) || "super".equalsIgnoreCase(slotName)) {
+		if (isSuperAlias(slotName)) {
 			for (Slot s : slots) {
-				if ("weekly".equalsIgnoreCase(s.slot()) || "special".equalsIgnoreCase(s.slot())) {
-					return s;
-				}
-			}
-		} else if ("weekly".equalsIgnoreCase(slotName)) {
-			for (Slot s : slots) {
-				if ("special".equalsIgnoreCase(s.slot()) || "super".equalsIgnoreCase(s.slot())) {
+				if (isSuperAlias(s.slot())) {
 					return s;
 				}
 			}

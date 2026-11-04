@@ -114,8 +114,12 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	private String hoveredClueNote = null;
 	private String hoveredTooltipTitle = "Clue Details";
 	private ClickBox helpBadgeBox = null;
+	private ClickBox mysteryRerollBox = null;
+	private boolean hoveredMysteryReroll = false;
+	private boolean triviaGuessArmed = false;
 	private boolean guessPending = false;
 	private long guessPendingSinceMs = 0L;
+	private boolean initialRequestSent = false;
 
 	private EditBox guessEditBox;
 	private Button submitGuessBtn;
@@ -135,19 +139,22 @@ public final class LongEventScreen extends EdenReferenceScreen {
 
 		this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose()).bounds(layout.x(160), layout.y(322), layout.w(160), layout.h(20)).build());
 
+		String prevGuess = guessEditBox != null ? guessEditBox.getValue() : "";
 		guessEditBox = new EditBox(this.font, layout.x(24), layout.y(278), layout.w(280), layout.h(20), Component.literal("Guess"));
 		guessEditBox.setHint(Component.literal("Enter suspect/solution..."));
 		guessEditBox.setMaxLength(64);
+		guessEditBox.setValue(prevGuess);
 		guessEditBox.visible = false;
 		guessEditBox.active = false;
 		this.addRenderableWidget(guessEditBox);
 
-		submitGuessBtn = Button.builder(Component.literal("Submit Guess"), b -> submitGuess()).bounds(layout.x(312), layout.y(278), layout.w(144), layout.h(20)).build();
+		submitGuessBtn = Button.builder(Component.literal("Submit Guess"), b -> submitGuess(false)).bounds(layout.x(312), layout.y(278), layout.w(118), layout.h(20)).build();
 		submitGuessBtn.visible = false;
 		submitGuessBtn.active = false;
 		this.addRenderableWidget(submitGuessBtn);
 
-		if (mod.socket() != null && mod.socket().isConnected()) {
+		if (!initialRequestSent && mod.socket() != null && mod.socket().isConnected()) {
+			initialRequestSent = true;
 			lastStateRequestMs = System.currentTimeMillis();
 			mod.socket().sendLongEventStateRequest();
 		}
@@ -156,6 +163,10 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	}
 
 	private void submitGuess() {
+		submitGuess(false);
+	}
+
+	private void submitGuess(boolean useTriviaOverride) {
 		if (guessEditBox == null || mod.socket() == null || !mod.socket().isConnected()) {
 			return;
 		}
@@ -175,18 +186,21 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			return;
 		}
 		boolean free = slot.canGuessFree() || (slot.nextGuessAtMs() > 0L && now >= slot.nextGuessAtMs());
-		boolean useTrivia = !free && slot.canGuessTrivia();
+		boolean canUseTrivia = slot.canGuessTrivia() || state.triviaPoints() >= 1;
+		boolean useTrivia = (useTriviaOverride || (!free && triviaGuessArmed)) && canUseTrivia;
 		if (!free && !useTrivia) {
 			return;
 		}
 		guessPending = true;
 		guessPendingSinceMs = now;
+		triviaGuessArmed = false;
 		this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(CLICK_SOUND, 1.0f));
 		mod.socket().sendLongEventMysteryGuess(guess, useTrivia);
 		guessEditBox.setValue("");
 	}
 
 	private void hideGuessWidgets() {
+		triviaGuessArmed = false;
 		if (guessEditBox != null) {
 			guessEditBox.visible = false;
 			guessEditBox.active = false;
@@ -206,7 +220,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	@Override
 	public boolean keyPressed(KeyEvent event) {
 		if ((event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER) && guessEditBox != null && guessEditBox.isFocused() && guessEditBox.visible) {
-			submitGuess();
+			submitGuess(false);
 			return true;
 		}
 		return super.keyPressed(event);
@@ -332,10 +346,12 @@ public final class LongEventScreen extends EdenReferenceScreen {
 
 		LongEventState.Slot hoveredRerollSlot = null;
 		String hoveredRerollSlotName = null;
+		hoveredMysteryReroll = false;
 		String hoveredImageUrl = null;
 		hoveredClueNote = null;
 		hoveredTooltipTitle = "Clue Details";
 		helpBadgeBox = null;
+		mysteryRerollBox = null;
 
 		imageClickTargets.clear();
 		specialImageNavPrevBox = null;
@@ -358,13 +374,17 @@ public final class LongEventScreen extends EdenReferenceScreen {
 						guessPending = false;
 					}
 					boolean free = slot4.canGuessFree() || (slot4.nextGuessAtMs() > 0L && nowMs >= slot4.nextGuessAtMs());
-					boolean trivia = !free && slot4.canGuessTrivia();
+					boolean canUseTrivia = slot4.canGuessTrivia() || state.triviaPoints() >= 1;
+					if (!canUseTrivia) {
+						triviaGuessArmed = false;
+					}
 					boolean hasText = !guessEditBox.getValue().trim().isEmpty();
 					boolean canSubmit = mod.socket() != null && mod.socket().isConnected() && hasText;
 					if (free) {
+						triviaGuessArmed = false;
 						submitGuessBtn.setMessage(Component.literal("Submit Guess"));
 						submitGuessBtn.active = canSubmit;
-					} else if (trivia) {
+					} else if (triviaGuessArmed) {
 						submitGuessBtn.setMessage(Component.literal("Submit (1 Trivia Pt)"));
 						submitGuessBtn.active = canSubmit;
 					} else {
@@ -429,10 +449,10 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		drawRainbowWaveString(g, tab1Text, t1TextX, t1TextY, nowMs);
 
 		// Help badge [?]
-		int helpX = layout.x(356);
-		int helpY = layout.y(6);
-		int helpW = layout.w(16);
-		int helpH = layout.h(16);
+		int helpW = layout.w(18);
+		int helpH = layout.h(18);
+		int helpX = layout.x(449);
+		int helpY = layout.y(323);
 		helpBadgeBox = new ClickBox(helpX, helpY, helpW, helpH);
 		boolean helpHover = helpBadgeBox.contains(scaledMouseX, scaledMouseY);
 		g.fill(helpX, helpY, helpX + helpW, helpY + helpH, helpHover ? 0x66444444 : 0x44161616);
@@ -738,6 +758,9 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		// Render hover tooltips / image previews in native screen space
 		if (hoveredRerollSlotName != null) {
 			g.setComponentTooltipForNextFrame(this.font, buildRerollTooltip(hoveredRerollSlotName, hoveredRerollSlot, nowMs), mouseX, mouseY);
+		} else if (hoveredMysteryReroll) {
+			LongEventState.SpecialSlot slot4 = (state != null) ? state.findSpecialSlot(4) : null;
+			g.setComponentTooltipForNextFrame(this.font, buildMysteryRerollTooltip(slot4, nowMs), mouseX, mouseY);
 		} else if (helpBadgeBox != null && helpBadgeBox.contains(scaledMouseX, scaledMouseY)) {
 			g.setComponentTooltipForNextFrame(this.font, List.of(Component.literal("Need help? Ask an Event Manager for clarification.").withStyle(ChatFormatting.WHITE)), mouseX, mouseY);
 		} else if (hoveredImageUrl != null) {
@@ -1212,13 +1235,52 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		int statusY = layout.y(264);
 		if (slot.completed()) {
 			g.drawCenteredString(this.font, "Mystery Solved! ✔", dX + dW / 2, statusY, 0xFF55FF55);
-		} else if (!slot.lastGuessStatus().isEmpty()) {
-			int statColor = slot.lastGuessStatus().toLowerCase(Locale.ROOT).contains("correct") ? 0xFF55FF55 : 0xFFFF5555;
-			drawFittedCenteredString(g, slot.lastGuessStatus(), dX + dW / 2, statusY, dW - layout.w(20), statColor);
-		} else if (!slot.canGuessFree() && slot.nextGuessAtMs() > nowMs) {
-			long rem = slot.nextGuessAtMs() - nowMs;
-			String freeIn = "Next free guess in " + LongEventState.formatCountdown(rem, false);
-			g.drawCenteredString(this.font, freeIn, dX + dW / 2, statusY, 0xFFAAAAAA);
+		} else {
+			if (slot.opened()) {
+				int btnX = layout.x(434);
+				int btnY = layout.y(278);
+				int btnW = layout.w(20);
+				int btnH = layout.h(20);
+				mysteryRerollBox = new ClickBox(btnX, btnY, btnW, btnH);
+				boolean mHover = mysteryRerollBox.contains(mouseX, mouseY);
+				if (mHover) {
+					hoveredMysteryReroll = true;
+				}
+				boolean free = slot.canGuessFree() || (slot.nextGuessAtMs() > 0L && nowMs >= slot.nextGuessAtMs());
+				boolean canBuyGuess = !free && (slot.canGuessTrivia() || (state != null && state.triviaPoints() >= 1));
+				boolean shiftHeld = RaidGambitSafety.isShiftKeyDown();
+				int rBg;
+				int rBorder;
+				int rFg;
+				if (free) {
+					rBg = mHover ? 0xFF484848 : 0xFF303030;
+					rBorder = mHover ? 0xFFFFD24A : 0xFF999999;
+					rFg = mHover ? 0xFFFFD24A : 0xFFFFFFFF;
+				} else if (canBuyGuess && shiftHeld && mHover) {
+					rBg = 0xFF203838;
+					rBorder = 0xFF55FFFF;
+					rFg = 0xFF55FFFF;
+				} else {
+					rBg = 0xFF1C1C1C;
+					rBorder = 0xFF404040;
+					rFg = 0xFF666666;
+				}
+				g.fill(btnX, btnY, btnX + btnW, btnY + btnH, rBg);
+				drawOutline(g, btnX, btnY, btnW, btnH, rBorder);
+				g.drawCenteredString(this.font, "⟳", btnX + btnW / 2, btnY + (btnH - 8) / 2, rFg);
+			}
+
+			if (!slot.lastGuessStatus().isEmpty()) {
+				boolean incorrect = slot.lastGuessStatus().toLowerCase(Locale.ROOT).contains("incorrect");
+				boolean correct = !incorrect && slot.lastGuessStatus().toLowerCase(Locale.ROOT).contains("correct");
+				int statColor = correct ? 0xFF55FF55 : 0xFFFF5555;
+				String displayStatus = incorrect ? "Incorrect!" : (correct ? "Correct!" : slot.lastGuessStatus());
+				drawFittedCenteredString(g, displayStatus, dX + dW / 2, statusY, dW - layout.w(20), statColor);
+			} else if (!slot.canGuessFree() && slot.nextGuessAtMs() > nowMs) {
+				long rem = slot.nextGuessAtMs() - nowMs;
+				String freeIn = "Next free guess in " + LongEventState.formatCountdown(rem, false);
+				g.drawCenteredString(this.font, freeIn, dX + dW / 2, statusY, 0xFFAAAAAA);
+			}
 		}
 	}
 
@@ -1357,6 +1419,35 @@ public final class LongEventScreen extends EdenReferenceScreen {
 					lines.add(Component.literal("Shift-Click to buy extra reroll").withStyle(ChatFormatting.DARK_GRAY));
 					lines.add(Component.literal("Requires " + cost + " Points (You have " + pts + ")").withStyle(ChatFormatting.RED));
 				}
+			}
+		}
+		return lines;
+	}
+
+	private List<Component> buildMysteryRerollTooltip(LongEventState.SpecialSlot slot, long nowMs) {
+		List<Component> lines = new ArrayList<>();
+		boolean free = slot != null && (slot.canGuessFree() || (slot.nextGuessAtMs() > 0L && nowMs >= slot.nextGuessAtMs()));
+		if (free) {
+			lines.add(Component.literal("Guess available").withStyle(ChatFormatting.GOLD));
+			lines.add(Component.literal("Murder Mystery: once every 6 hours").withStyle(ChatFormatting.GRAY));
+		} else {
+			lines.add(Component.literal("Guess on cooldown").withStyle(ChatFormatting.RED));
+			lines.add(Component.literal("Murder Mystery: once every 6 hours").withStyle(ChatFormatting.GRAY));
+			if (slot != null && slot.nextGuessAtMs() > nowMs) {
+				long rem = slot.nextGuessAtMs() - nowMs;
+				lines.add(Component.literal("Available in " + LongEventState.formatCountdown(rem, false)).withStyle(ChatFormatting.RED));
+			}
+		}
+
+		if (slot != null && !slot.completed()) {
+			int pts = state != null ? state.triviaPoints() : 0;
+			lines.add(Component.empty());
+			if (slot.canGuessTrivia() || pts >= 1) {
+				lines.add(Component.literal("Shift-Click to buy extra guess").withStyle(ChatFormatting.AQUA));
+				lines.add(Component.literal("Cost: 1 Point (You have " + pts + ")").withStyle(ChatFormatting.DARK_AQUA));
+			} else {
+				lines.add(Component.literal("Shift-Click to buy extra guess").withStyle(ChatFormatting.DARK_GRAY));
+				lines.add(Component.literal("Requires 1 Point (You have 0)").withStyle(ChatFormatting.RED));
 			}
 		}
 		return lines;
@@ -1554,6 +1645,38 @@ public final class LongEventScreen extends EdenReferenceScreen {
 						}
 					}
 				} else if (activeTab == 1) {
+					if (mysteryRerollBox != null && mysteryRerollBox.contains(mx, my)) {
+						if (!guessPending && mod.socket() != null && mod.socket().isConnected()) {
+							LongEventState.SpecialSlot slot4 = state.findSpecialSlot(4);
+							if (slot4 != null && slot4.opened() && !slot4.completed()) {
+								boolean free = slot4.canGuessFree() || (slot4.nextGuessAtMs() > 0L && System.currentTimeMillis() >= slot4.nextGuessAtMs());
+								boolean shift = RaidGambitSafety.isShiftKeyDown();
+								int pts = state.triviaPoints();
+								boolean canBuy = slot4.canGuessTrivia() || pts >= 1;
+								if (free) {
+									this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(CLICK_SOUND, 1.0f));
+									if (!guessEditBox.getValue().trim().isEmpty()) {
+										submitGuess(false);
+									} else {
+										guessEditBox.setFocused(true);
+										this.setFocused(guessEditBox);
+									}
+									return true;
+								} else if (shift && canBuy) {
+									this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(CLICK_SOUND, 1.0f));
+									if (!guessEditBox.getValue().trim().isEmpty()) {
+										submitGuess(true);
+									} else {
+										triviaGuessArmed = true;
+										guessEditBox.setFocused(true);
+										this.setFocused(guessEditBox);
+									}
+									return true;
+								}
+							}
+						}
+						return true;
+					}
 					for (int i = 0; i < SPECIAL_CARD_BASE_X.length; i++) {
 						ClickBox mBox = specialMiniCardBox(i);
 						if (mBox != null && mBox.contains(mx, my)) {

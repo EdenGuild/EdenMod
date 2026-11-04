@@ -87,6 +87,7 @@ public class ImagePreviewManager {
 	// Insertion order of loaded previews, for oldest-first LRU eviction.
 	private static final ConcurrentLinkedDeque<String> loadOrder = new ConcurrentLinkedDeque<>();
 	private static final ConcurrentLinkedDeque<String> pendingOrder = new ConcurrentLinkedDeque<>();
+	private static long lastPendingCleanMs = 0L;
 
 	private enum PreviewState {
 		DOWNLOADING, LOADED, ERROR
@@ -169,6 +170,7 @@ public class ImagePreviewManager {
 		if (url == null || url.isBlank()) {
 			return PreviewState.ERROR;
 		}
+		cleanStalePending();
 		PreviewState state = states.get(url);
 		if (state == null) {
 			PreviewState initial = isPreviewable(url) ? PreviewState.DOWNLOADING : PreviewState.ERROR;
@@ -318,8 +320,40 @@ public class ImagePreviewManager {
 		}
 	}
 
+	public static void clear() {
+		Minecraft mc = Minecraft.getInstance();
+		if (!mc.isSameThread()) {
+			mc.execute(ImagePreviewManager::clear);
+			return;
+		}
+		for (String url : new java.util.ArrayList<>(pendingImages.keySet())) {
+			Frames f = pendingImages.remove(url);
+			if (f != null) {
+				f.close();
+			}
+		}
+		pendingOrder.clear();
+		for (Identifier[] locs : textures.values()) {
+			if (locs != null) {
+				for (Identifier loc : locs) {
+					mc.getTextureManager().release(loc);
+				}
+			}
+		}
+		textures.clear();
+		states.clear();
+		sourceWidths.clear();
+		sourceHeights.clear();
+		frameDelays.clear();
+		loadOrder.clear();
+	}
+
 	private static void cleanStalePending() {
 		long now = System.currentTimeMillis();
+		if (now - lastPendingCleanMs < 5_000L) {
+			return;
+		}
+		lastPendingCleanMs = now;
 		for (java.util.Map.Entry<String, Frames> entry : pendingImages.entrySet()) {
 			if (now - entry.getValue().createdAtMs > 30_000L) {
 				String staleUrl = entry.getKey();

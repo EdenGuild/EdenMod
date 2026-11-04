@@ -1414,10 +1414,7 @@ public final class EdenModClient implements ClientModInitializer {
 					if (state.error() != null && !state.error().isEmpty()) {
 						longEventError = state.error();
 						longEventErrorAtMs = System.currentTimeMillis();
-						Minecraft mc = Minecraft.getInstance();
-						if (!(mc.screen instanceof LongEventScreen)) {
-							display(() -> DiscordChatFormatter.systemLine(state.error(), ChatFormatting.RED));
-						}
+						display(() -> Minecraft.getInstance().screen instanceof LongEventScreen ? null : DiscordChatFormatter.systemLine(state.error(), ChatFormatting.RED));
 					}
 					if (hasSnapshot) {
 						knownLongEventState = state;
@@ -2889,6 +2886,7 @@ public final class EdenModClient implements ClientModInitializer {
 		longEventGeneration.set(0);
 		longEventError = "";
 		longEventErrorAtMs = 0L;
+		tel.eden.mod.chat.ImagePreviewManager.clear();
 		// Before the socket goes: an outstanding deduct must not outlive the session that
 		// made it, or it resurfaces at the next connect naming a player from another
 		// server — or, after an account switch, another guild.

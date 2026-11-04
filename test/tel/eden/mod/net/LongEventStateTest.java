@@ -68,6 +68,16 @@ class LongEventStateTest {
 		assertNotNull(state.findSpecialSlot(1));
 		assertEquals("scavenger_hunt", state.findSpecialSlot(1).kind());
 		assertNull(state.findSpecialSlot(2));
+
+		// Slot named "super" in snapshot matches lookups for special, super, and weekly
+		LongEventState.Slot superSlot = new LongEventState.Slot("super", 200L, 2, "NOTG", "NOTG 1", 0, 3, 15, false, true, 0L, "", "");
+		LongEventState stateSuper = new LongEventState(true, 1000L, 0, 0, 0, true, "", List.of(daily, superSlot), List.of(), List.of(spec1));
+		assertNotNull(stateSuper.findSlot("special"));
+		assertEquals("NOTG", stateSuper.findSlot("special").tag());
+		assertNotNull(stateSuper.findSlot("super"));
+		assertEquals("NOTG", stateSuper.findSlot("super").tag());
+		assertNotNull(stateSuper.findSlot("weekly"));
+		assertEquals("NOTG", stateSuper.findSlot("weekly").tag());
 	}
 
 	@Test
