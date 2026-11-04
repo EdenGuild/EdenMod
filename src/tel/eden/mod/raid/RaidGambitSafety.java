@@ -35,6 +35,8 @@ public final class RaidGambitSafety {
 	public static final int READY_SLOT_MIN = 33;
 	public static final int READY_SLOT_MAX = 35;
 	public static final int STATUS_INDICATOR_SLOT = 27;
+	public static final int STATUS_SLOT_MIN = 27;
+	public static final int STATUS_SLOT_MAX = 30;
 	public static final int CONTAINER_SLOTS = 36;
 	public static final int TOTAL_SLOTS = 72;
 
@@ -54,12 +56,18 @@ public final class RaidGambitSafety {
 		if (menu == null || menu.slots.size() < TOTAL_SLOTS) {
 			return false;
 		}
-		Slot statusSlot = menu.getSlot(STATUS_INDICATOR_SLOT);
-		if (statusSlot == null || statusSlot.getItem().isEmpty()) {
-			return false;
+		boolean hasStatus = false;
+		for (int i = STATUS_SLOT_MIN; i <= STATUS_SLOT_MAX && i < menu.slots.size(); i++) {
+			Slot slot = menu.getSlot(i);
+			if (slot != null && !slot.getItem().isEmpty()) {
+				String statusName = ChatFormatting.stripFormatting(slot.getItem().getHoverName().getString()).trim();
+				if (statusName.equalsIgnoreCase("Not Ready!") || statusName.equalsIgnoreCase("Ready!")) {
+					hasStatus = true;
+					break;
+				}
+			}
 		}
-		String statusName = ChatFormatting.stripFormatting(statusSlot.getItem().getHoverName().getString()).trim();
-		if (!statusName.equalsIgnoreCase("Not Ready!") && !statusName.equalsIgnoreCase("Ready!")) {
+		if (!hasStatus) {
 			return false;
 		}
 		boolean hasGambit = false;
@@ -92,7 +100,7 @@ public final class RaidGambitSafety {
 		}
 		for (String line : loreLines) {
 			String stripped = ChatFormatting.stripFormatting(line).trim();
-			if (stripped.equalsIgnoreCase("Click to Disable") || stripped.equalsIgnoreCase("Click to Enable") || stripped.contains("Rewards for Enabling") || stripped.contains("You may only enable 3 gambits")) {
+			if (stripped.equalsIgnoreCase("Click to Disable") || stripped.equalsIgnoreCase("Click to Enable") || stripped.contains("Rewards for Enabling") || stripped.contains("You may only enable 3 gambits") || stripped.toLowerCase(Locale.ROOT).contains("un-ready to change")) {
 				return true;
 			}
 		}
@@ -107,18 +115,27 @@ public final class RaidGambitSafety {
 		return isGambitEnabledLore(getLoreLines(stack));
 	}
 
-	/** Checks if lore lines include the active "Click to Disable" prompt. */
+	/** Checks if lore lines include the active "Click to Disable" prompt or readied rewards. */
 	public static boolean isGambitEnabledLore(List<String> loreLines) {
 		if (loreLines == null) {
 			return false;
 		}
+		boolean unreadyToChange = false;
+		boolean hasRewards = false;
 		for (String line : loreLines) {
 			String stripped = ChatFormatting.stripFormatting(line).trim();
 			if (stripped.equalsIgnoreCase("Click to Disable")) {
 				return true;
 			}
+			String lower = stripped.toLowerCase(Locale.ROOT);
+			if (lower.contains("un-ready to change") || lower.contains("unready to change")) {
+				unreadyToChange = true;
+			}
+			if (lower.contains("rewards for enabling")) {
+				hasRewards = true;
+			}
 		}
-		return false;
+		return unreadyToChange && hasRewards;
 	}
 
 	/** Counts the number of active gambits (0 to 3) in the raid container. */
@@ -157,22 +174,42 @@ public final class RaidGambitSafety {
 		if (menu == null || menu.slots.size() < TOTAL_SLOTS) {
 			return false;
 		}
+		// 1. Ready button (slots 33-35) indicators: "Waiting for Others..", "Click to unmark as ready!"
+		for (int i = READY_SLOT_MIN; i <= READY_SLOT_MAX && i < menu.slots.size(); i++) {
+			Slot s = menu.getSlot(i);
+			if (s != null && !s.getItem().isEmpty()) {
+				String name = ChatFormatting.stripFormatting(s.getItem().getHoverName().getString()).toLowerCase(Locale.ROOT);
+				if (name.contains("unready") || name.contains("waiting")) {
+					return true;
+				}
+				for (String line : getLoreLines(s.getItem())) {
+					String stripped = ChatFormatting.stripFormatting(line).toLowerCase(Locale.ROOT);
+					if (stripped.contains("unmark as ready") || stripped.contains("unready")) {
+						return true;
+					}
+				}
+			}
+		}
+
+		// 2. Gambit items locked in readied state ("Un-ready to change")
+		for (int i = 0; i < Math.min(CONTAINER_SLOTS, menu.slots.size()); i++) {
+			ItemStack stack = menu.getSlot(i).getItem();
+			if (!stack.isEmpty() && isGambitItem(stack)) {
+				for (String line : getLoreLines(stack)) {
+					String stripped = ChatFormatting.stripFormatting(line).toLowerCase(Locale.ROOT);
+					if (stripped.contains("un-ready to change") || stripped.contains("unready to change")) {
+						return true;
+					}
+				}
+			}
+		}
+
+		// 3. Fallback for standalone/solo tests: slot 27 marked Ready!
 		Slot statusSlot = menu.getSlot(STATUS_INDICATOR_SLOT);
 		if (statusSlot != null && !statusSlot.getItem().isEmpty()) {
 			String statusName = ChatFormatting.stripFormatting(statusSlot.getItem().getHoverName().getString()).trim();
 			if (statusName.equalsIgnoreCase("Ready!")) {
 				return true;
-			}
-		}
-		for (int i = READY_SLOT_MIN; i <= READY_SLOT_MAX; i++) {
-			if (i < menu.slots.size()) {
-				Slot s = menu.getSlot(i);
-				if (s != null && !s.getItem().isEmpty()) {
-					String name = ChatFormatting.stripFormatting(s.getItem().getHoverName().getString()).toLowerCase(Locale.ROOT);
-					if (name.contains("unready")) {
-						return true;
-					}
-				}
 			}
 		}
 		return false;

@@ -82,6 +82,8 @@ class RaidGambitSafetyTest {
 	void detectsGambitActiveStateFromLore() {
 		assertTrue(RaidGambitSafety.isGambitEnabledLore(List.of("§8Refreshes in 19 hours", " ", "§eClick to Disable")));
 		assertTrue(RaidGambitSafety.isGambitEnabledLore(List.of("Click to Disable")));
+		assertTrue(RaidGambitSafety.isGambitEnabledLore(List.of("§8Refreshes in 20 hours", "§bRewards for Enabling", "§cUn-ready to change")));
+		assertFalse(RaidGambitSafety.isGambitEnabledLore(List.of("§8Refreshes in 20 hours", "§cUn-ready to change")));
 		assertFalse(RaidGambitSafety.isGambitEnabledLore(List.of("§8Refreshes in 19 hours", " ", "§aClick to Enable")));
 		assertFalse(RaidGambitSafety.isGambitEnabledLore(List.of("§cYou may only enable 3 gambits")));
 		assertFalse(RaidGambitSafety.isGambitEnabledLore(List.of()));
@@ -169,6 +171,55 @@ class RaidGambitSafetyTest {
 		assertTrue(RaidGambitSafety.isRaidReadyMenu(menu));
 		assertEquals(3, RaidGambitSafety.countEnabledGambits(menu));
 		assertTrue(RaidGambitSafety.getActiveBlockReasons(menu, menu.getSlot(33), ClickType.PICKUP, config).isEmpty());
+	}
+
+	@Test
+	void readiedUpPartyMenuWithGambitsSelectedDoesNotBlockAndRecognizesReadiedState() {
+		// Live container dump: player is ready with 3 gambits selected, player 1 is not ready.
+		ItemStack[] items = new ItemStack[36];
+		items[1] = createItem("Ingenuous Mage's Gambit", "§8Refreshes in 20 hours", "Your mana can only regenerate", "§bRewards for Enabling", "§b- Reward Pulls: 1", "§cUn-ready to change");
+		items[3] = createItem("Empath's Gambit", "§8Refreshes in 20 hours", "When a player within 6 blocks", "§bRewards for Enabling", "§b- Reward Pulls: 3", "§cUn-ready to change");
+		items[5] = createItem("Famished's Gambit", "§8Refreshes in 20 hours", "You have -1 less Raid Buff", "§bRewards for Enabling", "§b- Reward Pulls: 5", "§cUn-ready to change");
+		items[7] = createItem("Farsighted's Gambit", "§8Refreshes in 20 hours", "You deal 90% less damage", "§cUn-ready to change");
+		items[27] = createItem("Not Ready!");
+		items[28] = createItem("Ready!");
+		items[29] = createItem("Ready!");
+		items[30] = createItem("Not Ready!");
+		items[33] = createItem("Waiting for Others..", "Starting a Raid will lock equipment", "§b✮ Daily Bonuses Available!", "Click to unmark as ready!");
+		items[34] = createItem("Waiting for Others..", "Click to unmark as ready!");
+		items[35] = createItem("Waiting for Others..", "Click to unmark as ready!");
+		AbstractContainerMenu menu = createMenu(items);
+
+		config.raidGambitMinimum = 3;
+		assertTrue(RaidGambitSafety.isRaidReadyMenu(menu), "Menu with gambits and player status indicators must be recognized as raid ready menu");
+		assertTrue(RaidGambitSafety.isPlayerAlreadyReadied(menu), "Player with 'Waiting for Others..' and 'Un-ready to change' gambits must be recognized as already ready");
+		assertEquals(3, RaidGambitSafety.countEnabledGambits(menu), "Must count 3 enabled gambits having rewards even when locked in readied state");
+		assertTrue(RaidGambitSafety.getActiveBlockReasons(menu, menu.getSlot(33), ClickType.PICKUP, config).isEmpty(), "Clicking to unmark as ready must never be blocked");
+	}
+
+	@Test
+	void playerReadyDetectedFromWaitingButtonEvenIfPlayerOneIsNotReady() {
+		ItemStack[] items = new ItemStack[36];
+		items[1] = createItem("Ingenuous Mage's Gambit", "Click to Enable");
+		items[27] = createItem("Not Ready!"); // Player 1 not ready
+		items[28] = createItem("Ready!"); // Player 2 ready
+		items[33] = createItem("Waiting for Others.."); // Local player waiting/ready
+		AbstractContainerMenu menu = createMenu(items);
+
+		assertTrue(RaidGambitSafety.isRaidReadyMenu(menu));
+		assertTrue(RaidGambitSafety.isPlayerAlreadyReadied(menu), "Ready button 'Waiting for Others..' must signify player is already ready");
+	}
+
+	@Test
+	void playerReadyDetectedFromUnreadyToChangeGambitLore() {
+		ItemStack[] items = new ItemStack[36];
+		items[1] = createItem("Ingenuous Mage's Gambit", "§cUn-ready to change");
+		items[27] = createItem("Not Ready!");
+		items[33] = createItem("Button"); // Generic name
+		AbstractContainerMenu menu = createMenu(items);
+
+		assertTrue(RaidGambitSafety.isRaidReadyMenu(menu));
+		assertTrue(RaidGambitSafety.isPlayerAlreadyReadied(menu), "'Un-ready to change' gambit lore must signify player is already ready");
 	}
 
 	@Test
