@@ -73,7 +73,9 @@ class RaidGambitSafetyTest {
 		for (int i = 0; i < Math.max(RaidGambitSafety.TOTAL_SLOTS, items.length); i++) {
 			ItemStack stack = i < items.length && items[i] != null ? items[i] : ItemStack.EMPTY;
 			container.setItem(i, stack);
-			menu.slots.add(new Slot(container, i, 0, 0));
+			Slot slot = new Slot(container, i, 0, 0);
+			slot.index = i;
+			menu.slots.add(slot);
 		}
 		return menu;
 	}
@@ -224,6 +226,21 @@ class RaidGambitSafetyTest {
 
 		assertTrue(RaidGambitSafety.isRaidReadyMenu(menu));
 		assertTrue(RaidGambitSafety.isPlayerAlreadyReadied(menu), "'Un-ready to change' gambit lore must signify player is already ready");
+	}
+
+	@Test
+	void playerNotReadyWhenPlayerOneIsReadyAndLocalButtonIsReadyUp() {
+		ItemStack[] items = new ItemStack[36];
+		items[1] = createItem("Ingenuous Mage's Gambit", "Click to Enable");
+		items[27] = createItem("Ready!"); // Player 1 is ready!
+		items[28] = createItem("Not Ready!"); // Player 2 (local player) is not ready
+		items[33] = createItem("Ready Up!", "Click to ready up"); // Local player action button
+		AbstractContainerMenu menu = createMenu(items);
+
+		config.raidGambitMinimum = 1;
+		assertTrue(RaidGambitSafety.isRaidReadyMenu(menu));
+		assertFalse(RaidGambitSafety.isPlayerAlreadyReadied(menu), "Player 1 being ready in slot 27 must NOT make local player considered already readied");
+		assertFalse(RaidGambitSafety.getActiveBlockReasons(menu, menu.getSlot(33), ClickType.PICKUP, config).isEmpty(), "Ready click must be blocked when 0 gambits enabled even if Player 1 is ready");
 	}
 
 	@Test

@@ -211,14 +211,6 @@ public final class RaidGambitSafety {
 			}
 		}
 
-		// 3. Fallback for standalone/solo tests: slot 27 marked Ready!
-		Slot statusSlot = menu.getSlot(STATUS_INDICATOR_SLOT);
-		if (statusSlot != null && !statusSlot.getItem().isEmpty()) {
-			String statusName = ChatFormatting.stripFormatting(statusSlot.getItem().getHoverName().getString()).trim();
-			if (statusName.equalsIgnoreCase("Ready!")) {
-				return true;
-			}
-		}
 		return false;
 	}
 
