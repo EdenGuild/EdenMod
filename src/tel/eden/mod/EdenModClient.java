@@ -1043,6 +1043,9 @@ public final class EdenModClient implements ClientModInitializer {
 			socket = BridgeWebSocketClient.create(BridgeConfig.DEFAULT_BACKEND_URL, MOD_VERSION, new BridgeWebSocketClient.MessageSink() {
 				@Override
 				public void onDiscordMessage(String author, String content, String replyTo, String replyExcerpt, String color, String messageId) {
+					if (!config.discordBridgeMessages) {
+						return;
+					}
 					displayColored(color, () -> DiscordChatFormatter.format(author, content, replyTo, replyExcerpt, messageId));
 				}
 

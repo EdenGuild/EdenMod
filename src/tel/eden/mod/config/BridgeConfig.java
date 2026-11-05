@@ -48,6 +48,12 @@ public final class BridgeConfig {
 	public boolean enabled = true;
 
 	/**
+	 * Whether messages relayed from Discord by other members are shown in your
+	 * in-game client chat. On by default.
+	 */
+	public boolean discordBridgeMessages = true;
+
+	/**
 	 * Whether your own login/logout is announced to the guild bridge (both in-game
 	 * and in the Discord bridge chat). On by default; turn it off to keep your own
 	 * comings and goings quiet. Other members' presence notices are unaffected, and
