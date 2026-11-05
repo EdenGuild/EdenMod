@@ -44,7 +44,7 @@ public final class BridgeWebSocketClient {
 	 * it (the last one, "guildLogSync", was retired once the server-side code
 	 * that checked for it was removed).
 	 */
-	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of("mail");
+	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of("mail", "longEvent");
 
 	/** Callbacks for inbound bridge events (delivered off the game thread). */
 	public interface MessageSink {
@@ -141,9 +141,10 @@ public final class BridgeWebSocketClient {
 		 * announcements): a pill labelled {@code label}, then {@code content}.
 		 * {@code colorHex} is an optional {@code "RRGGBB"} override; empty means the
 		 * default gold. {@code bold} makes a message that needs to stand out further
-		 * than color alone (e.g. the storage-nearly-full warning).
+		 * than color alone (e.g. the storage-nearly-full warning). {@code own} is the
+		 * bot's {@code self} flag: the line is about this player (their own event win).
 		 */
-		void onPillMessage(String label, String content, String colorHex, boolean bold);
+		void onPillMessage(String label, String content, String colorHex, boolean bold, boolean own);
 
 		/**
 		 * Offline mail the bot held for this player ({@code mailDelivery}), sent when the
@@ -197,6 +198,14 @@ public final class BridgeWebSocketClient {
 
 		/** TCC Room 2 Exit reached notice. */
 		default void onTccExitReached(String sender, String path, double x, double z) {
+		}
+
+		/** Long-event mission state snapshot (or error notice). */
+		default void onLongEventState(LongEventState state, boolean hasSnapshot) {
+		}
+
+		/** Response to a {@code longEventRewardsRequest}. */
+		default void onLongEventRewards(int pendingLe, String error) {
 		}
 
 		/**
@@ -1012,6 +1021,49 @@ public final class BridgeWebSocketClient {
 		enqueueSend(current, obj.toString());
 	}
 
+	/** Ask the backend for this player's current long-event mission state. */
+	public void sendLongEventStateRequest() {
+		sendType("longEventStateRequest");
+	}
+
+	/** Ask the backend to reroll a long-event mission slot ({@code "daily"}, {@code "weekly"}, or {@code "repeatable"}). */
+	public void sendLongEventReroll(String slot) {
+		sendLongEventReroll(slot, false);
+	}
+
+	/** Ask the backend to reroll a long-event mission slot, optionally purchasing with trivia points. */
+	public void sendLongEventReroll(String slot, boolean buy) {
+		WebSocket current = socket;
+		if (current == null || slot == null || slot.isEmpty()) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "longEventReroll");
+		obj.addProperty("slot", slot);
+		if (buy) {
+			obj.addProperty("buy", true);
+		}
+		enqueueSend(current, obj.toString());
+	}
+
+	/** Ask the backend for this player's pending event LE. */
+	public void sendLongEventRewardsRequest() {
+		sendType("longEventRewardsRequest");
+	}
+
+	/** Send a Murder Mystery solution guess, optionally spending a trivia point if on cooldown. */
+	public void sendLongEventMysteryGuess(String guess, boolean useTrivia) {
+		WebSocket current = socket;
+		if (current == null || guess == null || guess.isBlank()) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "longEventMysteryGuess");
+		obj.addProperty("guess", guess.trim());
+		obj.addProperty("useTrivia", useTrivia);
+		enqueueSend(current, obj.toString());
+	}
+
 	/**
 	 * Tell the server whether this client is active in a game world ({@code true})
 	 * or dormant (in queue, hub, or AFK with no recent guild activity — {@code false}).
@@ -1446,7 +1498,7 @@ public final class BridgeWebSocketClient {
 				}
 				case "partyFeedback" -> sink.onPartyFeedback(get(obj, "message"), get(obj, "color"));
 				case "gameFeedback" -> sink.onGameFeedback(get(obj, "message"), get(obj, "color"));
-				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"));
+				case "pillMessage" -> sink.onPillMessage(get(obj, "label"), get(obj, "content"), get(obj, "color"), getBool(obj, "bold"), getBool(obj, "self"));
 				case "mailDelivery" -> sink.onMailDelivery(parseMail(obj));
 				case "warCountsReply" -> sink.onWarCounts(getInt(obj, "days", 7), parseWarCounts(obj), get(obj, "requester"), get(obj, "color"));
 				case "allyActivityReply" -> sink.onAllyActivity(parseAllyActivity(obj));
@@ -1457,6 +1509,11 @@ public final class BridgeWebSocketClient {
 				case "tccMapPos" -> sink.onTccMapPos(get(obj, "sender"), get(obj, "senderUuid"), getDouble(obj, "x", 0.0), getDouble(obj, "y", 0.0), getDouble(obj, "z", 0.0), getFloat(obj, "yaw", 0.0f), getBool(obj, "isWings"));
 				case "tccGolemDefeated" -> sink.onTccGolemDefeated(get(obj, "sender"), get(obj, "golemId"));
 				case "tccExitReached" -> sink.onTccExitReached(get(obj, "sender"), get(obj, "path"), getDouble(obj, "x", 0.0), getDouble(obj, "z", 0.0));
+				case "longEventState" -> {
+					LongEventState state = parseLongEventState(obj);
+					sink.onLongEventState(state, state.isSnapshot());
+				}
+				case "longEventRewards" -> sink.onLongEventRewards(getInt(obj, "pendingLe", 0), get(obj, "error"));
 				case "authChallenge" -> handleAuthChallenge(get(obj, "serverId"));
 				case "authOk" -> {
 					authenticated = true;
@@ -1754,5 +1811,54 @@ public final class BridgeWebSocketClient {
 			}
 		}
 		return out;
+	}
+
+	static LongEventState parseLongEventState(JsonObject obj) {
+		java.util.List<LongEventState.Slot> slots = new java.util.ArrayList<>();
+		if (obj.has("slots") && obj.get("slots").isJsonArray()) {
+			for (var element : obj.get("slots").getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject s = element.getAsJsonObject();
+					slots.add(new LongEventState.Slot(get(s, "slot"), getLong(s, "resetAtMs", 0L), getInt(s, "missionId", 0), get(s, "tag"), get(s, "title"), getInt(s, "progress", 0), getInt(s, "target", 0), getInt(s, "rewardLe", 0), getBool(s, "completed"), getBool(s, "canReroll"), getBool(s, "canBuyReroll"), getLong(s, "rerollAtMs", 0L), get(s, "note"), get(s, "imageUrl"), getInt(s, "completions", 0), getInt(s, "maxCompletions", 0)));
+				}
+			}
+		}
+		java.util.List<LongEventState.Master> masters = new java.util.ArrayList<>();
+		if (obj.has("masters") && obj.get("masters").isJsonArray()) {
+			for (var element : obj.get("masters").getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject m = element.getAsJsonObject();
+					masters.add(new LongEventState.Master(get(m, "kind"), get(m, "title"), getInt(m, "tier", 1), getInt(m, "tierCount", 1), getInt(m, "progress", 0), getInt(m, "target", 0), getInt(m, "rewardLe", 0), getInt(m, "earnedLe", 0), getBool(m, "completed")));
+				}
+			}
+		}
+		java.util.List<LongEventState.SpecialSlot> specialSlots = new java.util.ArrayList<>();
+		if (obj.has("specialSlots") && obj.get("specialSlots").isJsonArray()) {
+			for (var element : obj.get("specialSlots").getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject s = element.getAsJsonObject();
+					java.util.List<LongEventState.ScavengerItem> items = new java.util.ArrayList<>();
+					if (s.has("items") && s.get("items").isJsonArray()) {
+						for (var itElem : s.get("items").getAsJsonArray()) {
+							if (itElem.isJsonObject()) {
+								JsonObject it = itElem.getAsJsonObject();
+								items.add(new LongEventState.ScavengerItem(get(it, "difficulty"), getBool(it, "unlocked"), getLong(it, "unlockAtMs", 0L), get(it, "note"), get(it, "imageUrl")));
+							}
+						}
+					}
+					java.util.List<LongEventState.ClueEntry> clues = new java.util.ArrayList<>();
+					if (s.has("clues") && s.get("clues").isJsonArray()) {
+						for (var clElem : s.get("clues").getAsJsonArray()) {
+							if (clElem.isJsonObject()) {
+								JsonObject cl = clElem.getAsJsonObject();
+								clues.add(new LongEventState.ClueEntry(get(cl, "note"), get(cl, "imageUrl")));
+							}
+						}
+					}
+					specialSlots.add(new LongEventState.SpecialSlot(getInt(s, "slotNum", 0), get(s, "kind"), get(s, "title"), getBool(s, "opened"), getBool(s, "completed"), getInt(s, "completions", 0), getLong(s, "unlockAtMs", 0L), getInt(s, "raidProgress", 0), getInt(s, "raidRequirement", 0), getLong(s, "expiresAtMs", 0L), getInt(s, "rewardLe", 0), get(s, "note"), get(s, "imageUrl"), items, clues, getInt(s, "clueRaidProgress", 0), getInt(s, "clueRaidTarget", 0), getBool(s, "clueUnlockedToday"), getLong(s, "nextClueAtMs", 0L), getLong(s, "nextGuessAtMs", 0L), getBool(s, "canGuessFree"), getBool(s, "canGuessTrivia"), get(s, "lastGuessStatus")));
+				}
+			}
+		}
+		return new LongEventState(getBool(obj, "active"), getLong(obj, "endsAtMs", 0L), getInt(obj, "pendingLe", 0), getInt(obj, "rerollCost", 0), getInt(obj, "triviaPoints", 0), getBool(obj, "repeatSlot2Active"), get(obj, "error"), slots, masters, specialSlots);
 	}
 }

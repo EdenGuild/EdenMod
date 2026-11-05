@@ -65,6 +65,12 @@ public final class BridgeConfig {
 	 */
 	public boolean partyAnnounce = true;
 
+	/**
+	 * Whether other members' event announcements (Weekly, Master) are displayed in chat.
+	 * When false, only your own event completions are shown. On by default.
+	 */
+	public boolean eventAnnouncements = true;
+
 	public enum GameDisplayMode {
 		ALL("Shown (All)"), NONE("Hidden (All)"), REACTIONS("Show Only Reactions");
 
