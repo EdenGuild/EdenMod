@@ -66,6 +66,12 @@ public final class BridgeConfig {
 	public Boolean announceSelfPresence = null;
 
 	/**
+	 * Whether messages relayed from Discord by other members are shown in your
+	 * in-game client chat. On by default.
+	 */
+	public boolean discordBridgeMessages = true;
+
+	/**
 	 * Visibility of login/logout and streak notices:
 	 * ALL: broadcast own login/logout and streaks, and display others'.
 	 * HIDE_MINE: keep own login/logout and streaks quiet, and display others'.
@@ -82,6 +88,12 @@ public final class BridgeConfig {
 	 * {@code /eden party list}. Toggle with {@code /eden party announce on|off}.
 	 */
 	public boolean partyAnnounce = true;
+
+	/**
+	 * Whether other members' event announcements (Weekly, Master) are displayed in chat.
+	 * When false, only your own event completions are shown. On by default.
+	 */
+	public boolean eventAnnouncements = true;
 
 	public enum GameDisplayMode {
 		ALL("Shown (All)"), NONE("Hidden (All)"), REACTIONS("Show Only Reactions");

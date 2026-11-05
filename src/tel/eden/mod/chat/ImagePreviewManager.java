@@ -72,7 +72,7 @@ public class ImagePreviewManager {
 
 	// Cap the number of decoded previews kept in GPU memory for a session; the
 	// oldest is evicted (and its textures released) once the cap is exceeded.
-	private static final int MAX_CACHED = 8;
+	private static final int MAX_CACHED = 16;
 
 	private static final ConcurrentHashMap<String, PreviewState> states = new ConcurrentHashMap<>();
 	private static final ConcurrentHashMap<String, Identifier[]> textures = new ConcurrentHashMap<>();
@@ -86,23 +86,41 @@ public class ImagePreviewManager {
 
 	// Insertion order of loaded previews, for oldest-first LRU eviction.
 	private static final ConcurrentLinkedDeque<String> loadOrder = new ConcurrentLinkedDeque<>();
+	private static final ConcurrentLinkedDeque<String> pendingOrder = new ConcurrentLinkedDeque<>();
+	private static long lastPendingCleanMs = 0L;
 
 	private enum PreviewState {
 		DOWNLOADING, LOADED, ERROR
 	}
 
 	/** One decoded preview: every GIF frame (a single element for non-animated images) plus its delay. */
-	private static final class Frames {
+	private static final class Frames implements AutoCloseable {
 		final NativeImage[] images;
 		final int[] delaysMs;
+		final long createdAtMs;
 
 		Frames(NativeImage[] images, int[] delaysMs) {
 			this.images = images;
 			this.delaysMs = delaysMs;
+			this.createdAtMs = System.currentTimeMillis();
 		}
 
 		static Frames single(NativeImage image) {
 			return new Frames(new NativeImage[]{image}, new int[]{0});
+		}
+
+		@Override
+		public void close() {
+			if (images != null) {
+				for (NativeImage img : images) {
+					if (img != null) {
+						try {
+							img.close();
+						} catch (Throwable ignored) {
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -148,7 +166,11 @@ public class ImagePreviewManager {
 		return new int[]{Math.max(1, (int) (srcW * scale)), Math.max(1, (int) (srcH * scale))};
 	}
 
-	public static void renderPreview(GuiGraphics guiGraphics, String url, int x, int y) {
+	private static PreviewState prepareTexture(String url) {
+		if (url == null || url.isBlank()) {
+			return PreviewState.ERROR;
+		}
+		cleanStalePending();
 		PreviewState state = states.get(url);
 		if (state == null) {
 			PreviewState initial = isPreviewable(url) ? PreviewState.DOWNLOADING : PreviewState.ERROR;
@@ -162,6 +184,7 @@ public class ImagePreviewManager {
 		}
 
 		if (state == PreviewState.DOWNLOADING && pendingImages.containsKey(url)) {
+			pendingOrder.remove(url);
 			Frames frames = pendingImages.remove(url);
 			if (frames != null) {
 				// Keep only the source dimensions; the on-screen size is computed live
@@ -184,7 +207,11 @@ public class ImagePreviewManager {
 				trackAndEvict(url);
 			}
 		}
+		return state;
+	}
 
+	public static void renderPreview(GuiGraphics guiGraphics, String url, int x, int y) {
+		PreviewState state = prepareTexture(url);
 		if (state == PreviewState.LOADED) {
 			Identifier[] locs = textures.get(url);
 			if (locs != null && locs.length > 0) {
@@ -198,6 +225,41 @@ public class ImagePreviewManager {
 			guiGraphics.drawString(Minecraft.getInstance().font, "Loading preview...", x, y, 0xFFFFFFFF);
 		} else if (state == PreviewState.ERROR) {
 			guiGraphics.drawString(Minecraft.getInstance().font, "Failed to load image", x, y, 0xFFFF5555);
+		}
+	}
+
+	/**
+	 * Renders an image scaled to fit within (maxW, maxH) while preserving its aspect ratio,
+	 * centered within the target bounding box (x, y, maxW, maxH).
+	 */
+	public static void renderFitted(GuiGraphics guiGraphics, String url, int x, int y, int maxW, int maxH) {
+		PreviewState state = prepareTexture(url);
+		if (state == PreviewState.LOADED) {
+			Identifier[] locs = textures.get(url);
+			if (locs != null && locs.length > 0) {
+				int srcWidth = sourceWidths.getOrDefault(url, 0);
+				int srcHeight = sourceHeights.getOrDefault(url, 0);
+				if (srcWidth <= 0 || srcHeight <= 0) {
+					return;
+				}
+				float scale = Math.min((float) maxW / srcWidth, (float) maxH / srcHeight);
+				int drawW = Math.max(1, (int) (srcWidth * scale));
+				int drawH = Math.max(1, (int) (srcHeight * scale));
+				int drawX = x + (maxW - drawW) / 2;
+				int drawY = y + (maxH - drawH) / 2;
+				Identifier loc = locs[currentFrameIndex(url, locs.length)];
+				guiGraphics.blit(RenderPipelines.GUI_TEXTURED, loc, drawX, drawY, 0.0f, 0.0f, drawW, drawH, srcWidth, srcHeight, srcWidth, srcHeight);
+			}
+		} else if (state == PreviewState.DOWNLOADING) {
+			net.minecraft.client.gui.Font font = Minecraft.getInstance().font;
+			String text = "Loading image...";
+			int tw = font.width(text);
+			guiGraphics.drawString(font, text, x + (maxW - tw) / 2, y + (maxH - 8) / 2, 0xFFAAAAAA);
+		} else if (state == PreviewState.ERROR) {
+			net.minecraft.client.gui.Font font = Minecraft.getInstance().font;
+			String text = "Failed to load image";
+			int tw = font.width(text);
+			guiGraphics.drawString(font, text, x + (maxW - tw) / 2, y + (maxH - 8) / 2, 0xFFFF5555);
 		}
 	}
 
@@ -244,12 +306,73 @@ public class ImagePreviewManager {
 		states.remove(url);
 		sourceWidths.remove(url);
 		sourceHeights.remove(url);
-		pendingImages.remove(url);
+		pendingOrder.remove(url);
+		Frames pending = pendingImages.remove(url);
+		if (pending != null) {
+			pending.close();
+		}
 		frameDelays.remove(url);
 		Identifier[] locs = textures.remove(url);
 		if (locs != null) {
 			for (Identifier loc : locs) {
 				Minecraft.getInstance().getTextureManager().release(loc);
+			}
+		}
+	}
+
+	public static void clear() {
+		Minecraft mc = Minecraft.getInstance();
+		if (!mc.isSameThread()) {
+			mc.execute(ImagePreviewManager::clear);
+			return;
+		}
+		for (String url : new java.util.ArrayList<>(pendingImages.keySet())) {
+			Frames f = pendingImages.remove(url);
+			if (f != null) {
+				f.close();
+			}
+		}
+		pendingOrder.clear();
+		for (Identifier[] locs : textures.values()) {
+			if (locs != null) {
+				for (Identifier loc : locs) {
+					mc.getTextureManager().release(loc);
+				}
+			}
+		}
+		textures.clear();
+		states.clear();
+		sourceWidths.clear();
+		sourceHeights.clear();
+		frameDelays.clear();
+		loadOrder.clear();
+	}
+
+	private static void cleanStalePending() {
+		long now = System.currentTimeMillis();
+		if (now - lastPendingCleanMs < 5_000L) {
+			return;
+		}
+		lastPendingCleanMs = now;
+		for (java.util.Map.Entry<String, Frames> entry : pendingImages.entrySet()) {
+			if (now - entry.getValue().createdAtMs > 30_000L) {
+				String staleUrl = entry.getKey();
+				pendingOrder.remove(staleUrl);
+				Frames stale = pendingImages.remove(staleUrl);
+				if (stale != null) {
+					stale.close();
+				}
+				states.remove(staleUrl);
+			}
+		}
+		while (pendingOrder.size() > MAX_CACHED) {
+			String oldest = pendingOrder.pollFirst();
+			if (oldest != null) {
+				Frames stale = pendingImages.remove(oldest);
+				if (stale != null) {
+					stale.close();
+				}
+				states.remove(oldest);
 			}
 		}
 	}
@@ -285,7 +408,16 @@ public class ImagePreviewManager {
 				}
 				try (InputStream is = conn.getInputStream()) {
 					Frames frames = readImage(urlString, is);
-					pendingImages.put(urlString, frames);
+					if (states.get(urlString) != PreviewState.DOWNLOADING) {
+						frames.close();
+						return;
+					}
+					Frames old = pendingImages.put(urlString, frames);
+					if (old != null) {
+						old.close();
+					}
+					pendingOrder.addLast(urlString);
+					cleanStalePending();
 				}
 			} catch (Exception e) {
 				LOGGER.error("Failed to download image preview for {}", urlString, e);
@@ -413,35 +545,47 @@ public class ImagePreviewManager {
 
 				NativeImage[] images = new NativeImage[frameCount];
 				int[] delays = new int[frameCount];
-				for (int i = 0; i < frameCount; i++) {
-					java.awt.image.BufferedImage patch = reader.read(i);
-					javax.imageio.metadata.IIOMetadata meta = reader.getImageMetadata(i);
-					int[] rect = frameRect(meta, patch);
-					String disposal = disposalMethod(meta);
+				try {
+					for (int i = 0; i < frameCount; i++) {
+						java.awt.image.BufferedImage patch = reader.read(i);
+						javax.imageio.metadata.IIOMetadata meta = reader.getImageMetadata(i);
+						int[] rect = frameRect(meta, patch);
+						String disposal = disposalMethod(meta);
 
-					if (canvas == null) {
-						int w = canvasSize[0] > 0 ? canvasSize[0] : patch.getWidth();
-						int h = canvasSize[1] > 0 ? canvasSize[1] : patch.getHeight();
-						canvas = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
-					} else {
-						// Apply the PREVIOUS frame's disposal now — it takes effect after
-						// that frame was shown and before this one is drawn.
-						applyDisposal(canvas, disposeSnapshot, prevRect, prevDisposal);
+						if (canvas == null) {
+							int w = canvasSize[0] > 0 ? canvasSize[0] : patch.getWidth();
+							int h = canvasSize[1] > 0 ? canvasSize[1] : patch.getHeight();
+							canvas = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+						} else {
+							// Apply the PREVIOUS frame's disposal now — it takes effect after
+							// that frame was shown and before this one is drawn.
+							applyDisposal(canvas, disposeSnapshot, prevRect, prevDisposal);
+						}
+
+						// Snapshot before drawing, in case THIS frame disposes to "previous".
+						disposeSnapshot = "restoreToPrevious".equals(disposal) ? copyImage(canvas) : disposeSnapshot;
+
+						java.awt.Graphics2D g = canvas.createGraphics();
+						g.drawImage(patch, rect[0], rect[1], null);
+						g.dispose();
+
+						images[i] = toNativeImage(canvas);
+						delays[i] = frameDelayMs(meta);
+						prevRect = rect;
+						prevDisposal = disposal;
 					}
-
-					// Snapshot before drawing, in case THIS frame disposes to "previous".
-					disposeSnapshot = "restoreToPrevious".equals(disposal) ? copyImage(canvas) : disposeSnapshot;
-
-					java.awt.Graphics2D g = canvas.createGraphics();
-					g.drawImage(patch, rect[0], rect[1], null);
-					g.dispose();
-
-					images[i] = toNativeImage(canvas);
-					delays[i] = frameDelayMs(meta);
-					prevRect = rect;
-					prevDisposal = disposal;
+					return new Frames(images, delays);
+				} catch (Exception e) {
+					for (NativeImage img : images) {
+						if (img != null) {
+							try {
+								img.close();
+							} catch (Throwable ignored) {
+							}
+						}
+					}
+					throw e;
 				}
-				return new Frames(images, delays);
 			} finally {
 				reader.dispose();
 			}

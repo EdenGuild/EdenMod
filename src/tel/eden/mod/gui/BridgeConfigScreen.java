@@ -115,9 +115,11 @@ public final class BridgeConfigScreen extends Screen {
 		// --- One line per setting; the list handles layout + smooth scrolling. ---
 		// General
 		addToggleRow(Category.GENERAL, "Bridge", () -> config.enabled, v -> config.enabled = v, "Enabled", "Disabled", true);
+		addToggleRow(Category.GENERAL, "Discord Bridge Messages", () -> config.discordBridgeMessages, v -> config.discordBridgeMessages = v, "On", "Off", true);
 		addCycleRow(Category.GENERAL, "Login/logout messages", () -> config.loginLogoutMode.label(), () -> config.loginLogoutMode = nextLoginLogoutMode(config.loginLogoutMode), () -> config.loginLogoutMode = BridgeConfig.LoginLogoutMode.ALL);
 		addToggleRow(Category.GENERAL, "Mail sound", () -> config.mailSound, v -> config.mailSound = v, "On", "Off", true);
 		addToggleRow(Category.GENERAL, "Party feed", () -> config.partyAnnounce, v -> config.partyAnnounce = v, "On", "Off", true);
+		addToggleRow(Category.GENERAL, "Event announcements", () -> config.eventAnnouncements, v -> config.eventAnnouncements = v, "On", "Off", true);
 		addToggleRow(Category.GENERAL, "Auto /stream on join", () -> config.autoStream, v -> config.autoStream = v, "On", "Off", false);
 		addToggleRow(Category.GENERAL, "Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);
 		addToggleRow(Category.GENERAL, "Click-to-congratulate", () -> config.clickToCongratulate, v -> config.clickToCongratulate = v, "On", "Off", false);
