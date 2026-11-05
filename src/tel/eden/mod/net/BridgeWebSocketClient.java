@@ -1855,7 +1855,7 @@ public final class BridgeWebSocketClient {
 							}
 						}
 					}
-					specialSlots.add(new LongEventState.SpecialSlot(getInt(s, "slotNum", 0), get(s, "kind"), get(s, "title"), getBool(s, "opened"), getBool(s, "completed"), getInt(s, "completions", 0), getLong(s, "unlockAtMs", 0L), getInt(s, "raidProgress", 0), getInt(s, "raidRequirement", 0), getLong(s, "expiresAtMs", 0L), getInt(s, "rewardLe", 0), get(s, "note"), get(s, "imageUrl"), items, clues, getInt(s, "clueRaidProgress", 0), getInt(s, "clueRaidTarget", 0), getBool(s, "clueUnlockedToday"), getLong(s, "nextGuessAtMs", 0L), getBool(s, "canGuessFree"), getBool(s, "canGuessTrivia"), get(s, "lastGuessStatus")));
+					specialSlots.add(new LongEventState.SpecialSlot(getInt(s, "slotNum", 0), get(s, "kind"), get(s, "title"), getBool(s, "opened"), getBool(s, "completed"), getInt(s, "completions", 0), getLong(s, "unlockAtMs", 0L), getInt(s, "raidProgress", 0), getInt(s, "raidRequirement", 0), getLong(s, "expiresAtMs", 0L), getInt(s, "rewardLe", 0), get(s, "note"), get(s, "imageUrl"), items, clues, getInt(s, "clueRaidProgress", 0), getInt(s, "clueRaidTarget", 0), getBool(s, "clueUnlockedToday"), getLong(s, "nextClueAtMs", 0L), getLong(s, "nextGuessAtMs", 0L), getBool(s, "canGuessFree"), getBool(s, "canGuessTrivia"), get(s, "lastGuessStatus")));
 				}
 			}
 		}

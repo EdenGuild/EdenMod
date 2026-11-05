@@ -186,7 +186,8 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			return;
 		}
 		boolean free = slot.canGuessFree() || (slot.nextGuessAtMs() > 0L && now >= slot.nextGuessAtMs());
-		boolean canUseTrivia = slot.canGuessTrivia() || state.triviaPoints() >= 1;
+		boolean freeExtra = state.rerollCost() == -1;
+		boolean canUseTrivia = slot.canGuessTrivia() || freeExtra || state.triviaPoints() >= 1;
 		boolean useTrivia = (useTriviaOverride || (!free && triviaGuessArmed)) && canUseTrivia;
 		if (!free && !useTrivia) {
 			return;
@@ -261,7 +262,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			}
 			if (!requestNeeded) {
 				for (LongEventState.SpecialSlot ss : state.specialSlots()) {
-					if (checkTimer(now, "special_unlock:" + ss.slotNum(), ss.unlockAtMs()) || checkTimer(now, "special_exp:" + ss.slotNum(), ss.expiresAtMs()) || checkTimer(now, "special_guess:" + ss.slotNum(), ss.nextGuessAtMs())) {
+					if (checkTimer(now, "special_unlock:" + ss.slotNum(), ss.unlockAtMs()) || checkTimer(now, "special_exp:" + ss.slotNum(), ss.expiresAtMs()) || checkTimer(now, "special_guess:" + ss.slotNum(), ss.nextGuessAtMs()) || checkTimer(now, "special_clue:" + ss.slotNum(), ss.nextClueAtMs())) {
 						requestNeeded = true;
 						break;
 					}
@@ -374,7 +375,8 @@ public final class LongEventScreen extends EdenReferenceScreen {
 						guessPending = false;
 					}
 					boolean free = slot4.canGuessFree() || (slot4.nextGuessAtMs() > 0L && nowMs >= slot4.nextGuessAtMs());
-					boolean canUseTrivia = slot4.canGuessTrivia() || state.triviaPoints() >= 1;
+					boolean freeExtra = state.rerollCost() == -1;
+					boolean canUseTrivia = slot4.canGuessTrivia() || freeExtra || state.triviaPoints() >= 1;
 					if (!canUseTrivia) {
 						triviaGuessArmed = false;
 					}
@@ -385,7 +387,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 						submitGuessBtn.setMessage(Component.literal("Submit Guess"));
 						submitGuessBtn.active = canSubmit;
 					} else if (triviaGuessArmed) {
-						submitGuessBtn.setMessage(Component.literal("Submit (1 Trivia Pt)"));
+						submitGuessBtn.setMessage(Component.literal(freeExtra ? "Submit (Free)" : "Submit (1 Trivia Pt)"));
 						submitGuessBtn.active = canSubmit;
 					} else {
 						long rem = slot4.nextGuessAtMs() > nowMs ? slot4.nextGuessAtMs() - nowMs : 0L;
@@ -1137,10 +1139,14 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		}
 
 		int progY = dY + layout.h(30);
-		String clueProg = "Today's Clue Progress: " + slot.clueRaidProgress() + " / " + slot.clueRaidTarget() + " Raids";
+		String clueProg = "Clue Progress: " + slot.clueRaidProgress() + " / " + slot.clueRaidTarget() + " Raids";
 		g.drawString(this.font, clueProg, dX + layout.w(10), progY, 0xFFFFFFFF);
 		if (slot.clueUnlockedToday()) {
-			g.drawString(this.font, "Today's clue unlocked! ✔", dX + layout.w(10) + this.font.width(clueProg) + layout.w(12), progY, 0xFF55FF55);
+			String unlockedMsg = "Clue unlocked! ✔";
+			if (slot.nextClueAtMs() > nowMs) {
+				unlockedMsg += " (Next in " + LongEventState.formatCountdown(slot.nextClueAtMs() - nowMs, false) + ")";
+			}
+			g.drawString(this.font, unlockedMsg, dX + layout.w(10) + this.font.width(clueProg) + layout.w(12), progY, 0xFF55FF55);
 		} else {
 			int cBarW = layout.w(110);
 			int cBarH = Math.max(3, layout.h(5));
@@ -1247,7 +1253,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 					hoveredMysteryReroll = true;
 				}
 				boolean free = slot.canGuessFree() || (slot.nextGuessAtMs() > 0L && nowMs >= slot.nextGuessAtMs());
-				boolean canBuyGuess = !free && (slot.canGuessTrivia() || (state != null && state.triviaPoints() >= 1));
+				boolean canBuyGuess = !free && (slot.canGuessTrivia() || (state != null && (state.rerollCost() == -1 || state.triviaPoints() >= 1)));
 				boolean shiftHeld = RaidGambitSafety.isShiftKeyDown();
 				int rBg;
 				int rBorder;
@@ -1410,7 +1416,11 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		if (slot != null && !slot.completed()) {
 			int cost = state != null ? state.rerollCost() : 0;
 			int pts = state != null ? state.triviaPoints() : 0;
-			if (cost > 0) {
+			if (cost == -1) {
+				lines.add(Component.empty());
+				lines.add(Component.literal("Shift-Click for free extra reroll").withStyle(ChatFormatting.AQUA));
+				lines.add(Component.literal("Cost: Free").withStyle(ChatFormatting.GREEN));
+			} else if (cost > 0) {
 				lines.add(Component.empty());
 				if (slot.canBuyReroll()) {
 					lines.add(Component.literal("Shift-Click to buy extra reroll").withStyle(ChatFormatting.AQUA));
@@ -1440,9 +1450,13 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		}
 
 		if (slot != null && !slot.completed()) {
+			int cost = state != null ? state.rerollCost() : 0;
 			int pts = state != null ? state.triviaPoints() : 0;
 			lines.add(Component.empty());
-			if (slot.canGuessTrivia() || pts >= 1) {
+			if (cost == -1) {
+				lines.add(Component.literal("Shift-Click for free extra guess").withStyle(ChatFormatting.AQUA));
+				lines.add(Component.literal("Cost: Free").withStyle(ChatFormatting.GREEN));
+			} else if (slot.canGuessTrivia() || pts >= 1) {
 				lines.add(Component.literal("Shift-Click to buy extra guess").withStyle(ChatFormatting.AQUA));
 				lines.add(Component.literal("Cost: 1 Point (You have " + pts + ")").withStyle(ChatFormatting.DARK_AQUA));
 			} else {
@@ -1652,7 +1666,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 								boolean free = slot4.canGuessFree() || (slot4.nextGuessAtMs() > 0L && System.currentTimeMillis() >= slot4.nextGuessAtMs());
 								boolean shift = RaidGambitSafety.isShiftKeyDown();
 								int pts = state.triviaPoints();
-								boolean canBuy = slot4.canGuessTrivia() || pts >= 1;
+								boolean canBuy = slot4.canGuessTrivia() || state.rerollCost() == -1 || pts >= 1;
 								if (free) {
 									this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(CLICK_SOUND, 1.0f));
 									if (!guessEditBox.getValue().trim().isEmpty()) {

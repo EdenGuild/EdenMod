@@ -56,7 +56,10 @@ public record LongEventState(boolean active, long endsAtMs, int pendingLe, int r
 		}
 	}
 
-	public record SpecialSlot(int slotNum, String kind, String title, boolean opened, boolean completed, int completions, long unlockAtMs, int raidProgress, int raidRequirement, long expiresAtMs, int rewardLe, String note, String imageUrl, List<ScavengerItem> items, List<ClueEntry> clues, int clueRaidProgress, int clueRaidTarget, boolean clueUnlockedToday, long nextGuessAtMs, boolean canGuessFree, boolean canGuessTrivia, String lastGuessStatus) {
+	public record SpecialSlot(int slotNum, String kind, String title, boolean opened, boolean completed, int completions, long unlockAtMs, int raidProgress, int raidRequirement, long expiresAtMs, int rewardLe, String note, String imageUrl, List<ScavengerItem> items, List<ClueEntry> clues, int clueRaidProgress, int clueRaidTarget, boolean clueUnlockedToday, long nextClueAtMs, long nextGuessAtMs, boolean canGuessFree, boolean canGuessTrivia, String lastGuessStatus) {
+		public SpecialSlot(int slotNum, String kind, String title, boolean opened, boolean completed, int completions, long unlockAtMs, int raidProgress, int raidRequirement, long expiresAtMs, int rewardLe, String note, String imageUrl, List<ScavengerItem> items, List<ClueEntry> clues, int clueRaidProgress, int clueRaidTarget, boolean clueUnlockedToday, long nextGuessAtMs, boolean canGuessFree, boolean canGuessTrivia, String lastGuessStatus) {
+			this(slotNum, kind, title, opened, completed, completions, unlockAtMs, raidProgress, raidRequirement, expiresAtMs, rewardLe, note, imageUrl, items, clues, clueRaidProgress, clueRaidTarget, clueUnlockedToday, 0L, nextGuessAtMs, canGuessFree, canGuessTrivia, lastGuessStatus);
+		}
 		public SpecialSlot {
 			kind = kind == null ? "" : kind;
 			title = title == null ? "" : title;
