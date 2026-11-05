@@ -1051,11 +1051,17 @@ public final class EdenModClient implements ClientModInitializer {
 
 				@Override
 				public void onLoginNotice(String username, String color) {
+					if (config.loginLogoutMode == BridgeConfig.LoginLogoutMode.HIDE_ALL) {
+						return;
+					}
 					displayColored(color, () -> DiscordChatFormatter.loginNotice(username));
 				}
 
 				@Override
 				public void onLogoutNotice(String username, String color) {
+					if (config.loginLogoutMode == BridgeConfig.LoginLogoutMode.HIDE_ALL) {
+						return;
+					}
 					displayColored(color, () -> DiscordChatFormatter.logoutNotice(username));
 				}
 
@@ -2823,7 +2829,7 @@ public final class EdenModClient implements ClientModInitializer {
 				// backend pairs the logout to this, so skipping it keeps both quiet.
 				// Presence is always sent — it drives the online/dormant state, not a
 				// chat notice.
-				if (config.announceSelfPresence) {
+				if (config.loginLogoutMode == BridgeConfig.LoginLogoutMode.ALL) {
 					current.sendLogin();
 				}
 				current.sendPresence(inGameWorld); // send whatever state we already detected
