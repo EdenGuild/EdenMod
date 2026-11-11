@@ -879,7 +879,15 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			g.drawString(this.font, exp, dX + dW - layout.w(10) - this.font.width(exp), dY + layout.h(8), 0xFFCCCCCC);
 		}
 		if (!slot.note().isEmpty()) {
-			drawFittedString(g, slot.note(), dX + layout.w(10), dY + layout.h(22), dW - layout.w(20), 0xFFBBBBBB);
+			int noteX = dX + layout.w(10);
+			int noteY = dY + layout.h(22);
+			int noteW = dW - layout.w(20);
+			String cleanNote = slot.note().replace('\n', ' ').trim();
+			drawFittedString(g, cleanNote, noteX, noteY, noteW, 0xFFBBBBBB);
+			if (mouseX >= noteX && mouseX < noteX + noteW && mouseY >= noteY - layout.h(2) && mouseY < noteY + layout.h(10)) {
+				hoveredClueNote = slot.note();
+				hoveredTooltipTitle = slot.title().isEmpty() ? "Scavenger Hunt" : slot.title();
+			}
 		}
 
 		List<String> images = getSpecialSlotImages(slot);
@@ -1133,7 +1141,15 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		}
 
 		if (!slot.note().isEmpty()) {
-			drawFittedString(g, slot.note(), dX + layout.w(10), dY + layout.h(18), dW - layout.w(20), 0xFFCCCCCC);
+			int noteX = dX + layout.w(10);
+			int noteY = dY + layout.h(18);
+			int noteW = dW - layout.w(20);
+			String cleanNote = slot.note().replace('\n', ' ').trim();
+			drawFittedString(g, cleanNote, noteX, noteY, noteW, 0xFFCCCCCC);
+			if (mouseX >= noteX && mouseX < noteX + noteW && mouseY >= noteY - layout.h(2) && mouseY < noteY + layout.h(10)) {
+				hoveredClueNote = slot.note();
+				hoveredTooltipTitle = slot.title().isEmpty() ? "Murder Mystery" : slot.title();
+			}
 		}
 
 		int progY = dY + layout.h(30);
@@ -1466,31 +1482,61 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	}
 
 	private void drawFittedString(GuiGraphics g, String text, int x, int y, int maxWidth, int color) {
+		if (text == null || text.isEmpty() || maxWidth <= 0) {
+			return;
+		}
 		int textW = this.font.width(text);
-		if (textW <= maxWidth || textW <= 0) {
+		if (textW <= maxWidth) {
 			g.drawString(this.font, text, x, y, color);
 			return;
 		}
-		float s = maxWidth / (float) textW;
+		float minScale = 0.8f;
+		float s = Math.max(minScale, maxWidth / (float) textW);
+		String toDraw = text;
+		if (maxWidth / (float) textW < minScale) {
+			int avail = Math.round(maxWidth / minScale);
+			toDraw = trimToWidth(text, avail);
+		}
 		g.pose().pushMatrix();
 		g.pose().translate(x, y);
 		g.pose().scale(s, s);
-		g.drawString(this.font, text, 0, 0, color);
+		g.drawString(this.font, toDraw, 0, 0, color);
 		g.pose().popMatrix();
 	}
 
 	private void drawFittedCenteredString(GuiGraphics g, String text, int centerX, int y, int maxWidth, int color) {
+		if (text == null || text.isEmpty() || maxWidth <= 0) {
+			return;
+		}
 		int textW = this.font.width(text);
-		if (textW <= maxWidth || textW <= 0) {
+		if (textW <= maxWidth) {
 			g.drawCenteredString(this.font, text, centerX, y, color);
 			return;
 		}
-		float s = maxWidth / (float) textW;
+		float minScale = 0.8f;
+		float s = Math.max(minScale, maxWidth / (float) textW);
+		String toDraw = text;
+		if (maxWidth / (float) textW < minScale) {
+			int avail = Math.round(maxWidth / minScale);
+			toDraw = trimToWidth(text, avail);
+		}
+		int drawW = this.font.width(toDraw);
 		g.pose().pushMatrix();
 		g.pose().translate(centerX, y);
 		g.pose().scale(s, s);
-		g.drawString(this.font, text, -textW / 2, 0, color);
+		g.drawString(this.font, toDraw, -drawW / 2, 0, color);
 		g.pose().popMatrix();
+	}
+
+	private String trimToWidth(String text, int width) {
+		if (text == null || this.font.width(text) <= width) {
+			return text;
+		}
+		int ellipsisW = this.font.width("...");
+		if (width <= ellipsisW) {
+			return "...";
+		}
+		return this.font.plainSubstrByWidth(text, width - ellipsisW).trim() + "...";
 	}
 
 	private static void drawOutline(GuiGraphics g, int x, int y, int w, int h, int color) {
