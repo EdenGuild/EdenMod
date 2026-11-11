@@ -359,9 +359,9 @@ tasks.matching { it.name == 'runClientGameTest' }.configureEach { task ->
 		def software = rendererName == null || rendererName.toLowerCase().contains('llvmpipe')
 		if (resultsFile.exists()) {
 			def budgets = json.parse(budgetsFile)[software ? 'software' : 'gpu']
-			println String.format(Locale.ROOT, '%-28s %12s %10s %8s', 'scene', 'EdenMod %', 'budget %', 'hitch x')
+			println String.format(Locale.ROOT, '%-28s %12s %10s %8s %14s %10s', 'scene', 'EdenMod %', 'budget %', 'hitch x', 'alloc KiB/f', 'budget')
 			json.parse(resultsFile).each { r ->
-				println String.format(Locale.ROOT, '%-28s %12.1f %10.1f %8.1f', r.name, r.modSharePercent, budgets[r.name]?.maxModSharePercent ?: Double.NaN, r.hitchRatio)
+				println String.format(Locale.ROOT, '%-28s %12.1f %10.1f %8.1f %14.2f %10.1f', r.name, r.modSharePercent, budgets[r.name]?.maxModSharePercent ?: Double.NaN, r.hitchRatio, r.modAllocKiBPerFrame, budgets[r.name]?.maxModAllocKiBPerFrame ?: Double.NaN)
 			}
 		}
 		// A client that cannot open a window can still exit 0, so success means every test wrote its output.

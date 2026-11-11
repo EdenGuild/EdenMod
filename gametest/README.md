@@ -180,26 +180,48 @@ the test thread, so wall-clock gaps include waiting that is not the mod's.
 
 ## Budgets: `perf-budgets.json`
 
-Budgets are per renderer and enforced for both. Software rendering (CI) and a GPU spend their time
-differently, so each profile was calibrated on its own: measure the fixed code a few times for noise,
-measure the code from before the fixes, and put the budget between the two. Numbers are EdenMod's
-share of render-thread Java time:
+Two metrics are gated per scene, each with its own budget, and budgets are per renderer (`software` is
+CI, `gpu` is a desktop GPU).
 
-| scene | software: fixed | software: before | software budget | GPU: fixed | GPU: before | GPU budget |
+**Mod allocation per frame** (`maxModAllocKiBPerFrame`): the bytes the render thread allocates in code
+under `tel.eden.mod`, measured with JFR allocation samples and attributed to the mod method that
+allocated them. This is the metric to trust. It does not depend on how fast the machine is, so it keeps
+its meaning on a slow CI runner, and it names the method. The limits are the same for both renderers.
+
+| scene | unfixed code | fixed code | budget |
+|---|---|---|---|
+| idle | 0 | 0 | 1.0 KiB |
+| displays | 3-5 KiB | 0 | 2.0 |
+| displays-baby-mode | 95-125 | 0 | 10 |
+| ghost-players-baby-mode | 99-110 | 0 | 10 |
+| inventory-of-potions | 5-8 | 0 | 3.0 |
+| ground-items | 67-83 | 5-9 | 15 |
+
+Measured on a GPU and in the CI-equivalent container (see "Reproducing CI locally"); both agree.
+
+**EdenMod's share of render-thread Java time** (`maxModSharePercent`): a coarse net for CPU-bound
+regressions. Use it with care, because it depends heavily on the machine: the same unfixed code read
+9-17% on a 12-core desktop but about 1-3% in the CI-equivalent container, where most of the frame is
+native software rendering. So on CI it only catches large regressions. The budgets were chosen between
+the fixed and unfixed readings of each environment:
+
+| scene | software: fixed | software: unfixed | software budget | GPU: fixed | GPU: unfixed | GPU budget |
 |---|---|---|---|---|---|---|
 | idle | 0.0-0.6% | 0.0-0.3% | 2.0% | 0.0-1.3% | 0.0-0.5% | 2.0% |
-| displays | 0.2-0.7% | 8.7-9.8% | 3.0% | 0.2-0.6% | 5.2-8.7% | 3.0% |
-| displays-baby-mode | 2.2-4.8% | 13.4-13.5% | 7.0% | 5.0-5.4% | 15.8-16.6% | 9.0% |
-| ghost-players-baby-mode | 2.6-4.9% | 14.4% | 7.0% | 4.0-5.3% | 16.5-16.8% | 9.0% |
-| inventory-of-potions | 1.1-2.2% | 6.1-7.6% | 4.5% | 1.8-2.2% | 8.9-9.3% | 4.5% |
-| ground-items | 0.2-1.9% | 3.5-4.6% | 4.0% | 0.1-1.0% | 4.3-4.5% | 2.5% |
+| displays | 0.0-1.1% | 1.3-9.8% | 3.0% | 0.2-0.6% | 5.2-8.7% | 3.0% |
+| displays-baby-mode | 0.1-4.8% | 1.0-13.5% | 7.0% | 5.0-5.4% | 15.8-16.6% | 9.0% |
+| ghost-players-baby-mode | 1.1-3.5% | 3.4-14.4% | 7.0% | 4.0-5.3% | 16.5-16.8% | 9.0% |
+| inventory-of-potions | 1.1-4.2% | 4.8-7.6% | 7.0% | 1.8-2.2% | 8.9-9.3% | 4.5% |
+| ground-items | 0.0-1.9% | 0.8-4.6% | 4.0% | 0.1-1.0% | 4.3-4.5% | 2.5% |
 
-The software numbers were measured on llvmpipe, the GPU ones on an AMD desktop GPU. Another GPU may
-need its own numbers; if a scene fails there with nothing wrong, recalibrate the `gpu` profile the
-same way. `ground-items` separates weakly on software; treat that one as a loose guard.
+The software inventory budget is deliberately loose (7%): GitHub's runner showed 4.2% for the fixed code
+and the unfixed code reads 4.8-7.6%, so the share cannot tell them apart there. The allocation budget
+catches that regression instead. The software numbers come from my desktop's software renderer, the CI
+container and one GitHub run; a different GPU may need its own `gpu` numbers.
 
 The hitch ratio (p99 frame / median frame) only counts when the slowest frame is also at least 15 ms.
-On a GPU a normal frame is about 1 ms, so a 4 ms frame would otherwise read as a 4x stall.
+On a GPU a normal frame is about 1 ms, so a 4 ms frame would otherwise read as a 4x stall. Each scene
+skips its first 60 frames, which is when starting the JFR recording costs a few slow frames.
 
 A scene with fewer than `minRenderSamples` Java samples fails rather than passes, since a share from
 a few samples is noise.

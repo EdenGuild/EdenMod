@@ -34,7 +34,7 @@ public final class BabyPlayerEmoteTracker {
 	private static final ConcurrentHashMap<UUID, PivotState> PIVOTS = new ConcurrentHashMap<>();
 	// A display can invoke the player-head renderer several layers below its own submit
 	// call. Keep the source state available without depending on an optional renderer mod.
-	private static final ThreadLocal<ArrayDeque<DisplayEntityRenderState>> DISPLAY_SUBMISSIONS = new ThreadLocal<>();
+	private static final ThreadLocal<ArrayDeque<DisplayEntityRenderState>> DISPLAY_SUBMISSIONS = ThreadLocal.withInitial(ArrayDeque::new);
 	// Player classification runs from several render hooks. Cache the address-derived
 	// server gate so player-shaped NPCs do not repeatedly normalize the same address.
 	private static String classifiedServerAddress;
@@ -110,27 +110,21 @@ public final class BabyPlayerEmoteTracker {
 
 	/** Make the source display available to special item renderers called beneath it. */
 	public static void beginDisplaySubmission(DisplayEntityRenderState state) {
-		ArrayDeque<DisplayEntityRenderState> submissions = DISPLAY_SUBMISSIONS.get();
-		if (submissions == null) {
-			submissions = new ArrayDeque<>();
-			DISPLAY_SUBMISSIONS.set(submissions);
-		}
-		submissions.push(state);
+		// The deque is kept for the thread's lifetime: this runs for every display every frame, and creating and
+		// discarding one each time was among the largest sources of garbage the mod made.
+		DISPLAY_SUBMISSIONS.get().push(state);
 	}
 
 	public static void endDisplaySubmission() {
 		ArrayDeque<DisplayEntityRenderState> submissions = DISPLAY_SUBMISSIONS.get();
-		if (submissions != null && !submissions.isEmpty()) {
+		if (!submissions.isEmpty()) {
 			submissions.pop();
-		}
-		if (submissions != null && submissions.isEmpty()) {
-			DISPLAY_SUBMISSIONS.remove();
 		}
 	}
 
 	public static Display currentDisplaySubmission() {
 		ArrayDeque<DisplayEntityRenderState> submissions = DISPLAY_SUBMISSIONS.get();
-		return submissions == null || submissions.isEmpty() ? null : EdenDisplayState.sourceOf(submissions.peek());
+		return submissions.isEmpty() ? null : EdenDisplayState.sourceOf(submissions.peek());
 	}
 
 	/** Match Wynncraft's cross-server team names, for example {@code _WC12}. */
@@ -182,6 +176,11 @@ public final class BabyPlayerEmoteTracker {
 	}
 
 	public static AbstractClientPlayer findActiveOwner(Entity entity) {
+		// Nothing is active unless a player has rendered an emote part, which is the normal case. Then there is no
+		// owner, and walking the vehicle hierarchy below, which allocates, would be wasted on every display every frame.
+		if (LAST_RENDERED.isEmpty()) {
+			return null;
+		}
 		// Prefer the vehicle hierarchy used by Wynncraft emotes. The proximity fallback
 		// covers companion displays that are spawned alongside, rather than mounted to, it.
 		Entity root = entity.getRootVehicle();

@@ -15,15 +15,21 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.player.RemotePlayer;
+import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.phys.AABB;
 import support.Background;
 import support.Failures;
 import support.Output;
 import support.Worlds;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.config.BridgeConfig;
+import tel.eden.mod.gui.EdenMenuScreen;
+import tel.eden.mod.util.BabyPlayerEmoteTracker;
 
 /**
  * Renders scenes that stress EdenMod's per-frame hooks in a real client and fails the build
@@ -47,6 +53,7 @@ public final class PerfClientGameTest implements FabricClientGameTest {
 	private static final int WINDOW_HEIGHT = 360;
 	private static final int DISPLAYS = 400;
 	private static final int GHOSTS = 60;
+	private static final int GROUND_ITEMS = 120;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
 	@Override
@@ -78,18 +85,25 @@ public final class PerfClientGameTest implements FabricClientGameTest {
 				client.options.hideGui = false;
 			});
 
-			results.add(measure(context, probe, outDir, "idle", 800));
+			context.runOnClient(client -> EdenModClient.instance().config().babyPlayers = false);
+			require(context, "idle", new Expect(false, 0, 0, 0));
+			// Idle is mostly native rendering, so few frames land in Java code: samples per frame ranged from 0.08 to 0.31
+			// across environments, and the minimum is 100 samples. 3000 frames keeps even the lowest rate above it.
+			results.add(measure(context, probe, outDir, "idle", 3000));
 
 			summonDisplays(server);
 			context.waitTicks(20);
 			context.runOnClient(client -> EdenModClient.instance().config().babyPlayers = false);
+			require(context, "displays", new Expect(false, DISPLAYS, 0, 0));
 			results.add(measure(context, probe, outDir, "displays", 1000));
 
 			context.runOnClient(client -> EdenModClient.instance().config().babyPlayers = true);
+			require(context, "displays-baby-mode", new Expect(true, DISPLAYS, 0, 0));
 			results.add(measure(context, probe, outDir, "displays-baby-mode", 1500));
 
 			// Wynncraft's ghosts: lots of other players, each of which baby mode has to classify.
 			List<Integer> ghosts = spawnGhosts(context, GHOSTS);
+			require(context, "ghost-players-baby-mode", new Expect(true, DISPLAYS, GHOSTS, 0));
 			results.add(measure(context, probe, outDir, "ghost-players-baby-mode", 1500));
 			removeGhosts(context, ghosts);
 			context.runOnClient(client -> EdenModClient.instance().config().babyPlayers = false);
@@ -98,12 +112,14 @@ public final class PerfClientGameTest implements FabricClientGameTest {
 			context.waitTicks(10);
 			context.runOnClient(client -> client.setScreen(new InventoryScreen(client.player)));
 			context.waitTicks(5);
+			require(context, "inventory-of-potions", new Expect(false, DISPLAYS, 0, 0));
 			results.add(measure(context, probe, outDir, "inventory-of-potions", 1000));
 			context.runOnClient(client -> client.setScreen(null));
 
 			enableGroundItemRule(context);
 			summonGroundItems(server);
 			context.waitTicks(20);
+			require(context, "ground-items", new Expect(false, DISPLAYS, 0, GROUND_ITEMS));
 			results.add(measure(context, probe, outDir, "ground-items", 600));
 		}
 
@@ -131,7 +147,7 @@ public final class PerfClientGameTest implements FabricClientGameTest {
 			samples.set(probe.stop());
 		});
 		PhaseResult result = PhaseResult.of(name, samples.get(), share);
-		System.out.printf("[perf] %-22s median %.2f ms  p99 %.2f ms  max %.2f ms  hitch x%.1f  alloc %.0f KiB/frame  edenmod %.1f%% of render-thread Java samples%n           slowest frames: %s%n", result.name(), result.medianCpuMs(), result.p99CpuMs(), result.maxCpuMs(), result.hitchRatio(), result.allocKiBPerFrame(), result.modSharePercent(), result.slowestFrames());
+		System.out.printf("[perf] %-22s median %.2f ms  p99 %.2f ms  max %.2f ms  hitch x%.1f  alloc %.0f KiB/frame  edenmod %.1f%% of render-thread Java samples%n           mod allocates %.2f KiB/frame (%.1f%% of the render thread's allocation)  slowest frames: %s%n", result.name(), result.medianCpuMs(), result.p99CpuMs(), result.maxCpuMs(), result.hitchRatio(), result.allocKiBPerFrame(), result.modSharePercent(), result.modAllocKiBPerFrame(), result.modAllocPercent(), result.slowestFrames());
 		// What the scene looked like, so a human can see that it really contains the entities and items.
 		Output.keepScreenshot(context.takeScreenshot("perf-" + name));
 		return result;
@@ -160,14 +176,64 @@ public final class PerfClientGameTest implements FabricClientGameTest {
 		}
 	}
 
+	/** What a scene is supposed to contain. Ghost players are counted exactly, the rest as at-least. */
+	private record Expect(boolean babyMode, int displays, int ghostPlayers, int droppedItems) {
+	}
+
+	private static final AABB SCENE_AREA = new AABB(-60, -70, -60, 60, -30, 90);
+
+	/**
+	 * Checks, on the client, that the scene really is what its name says, just before it is measured. A scene
+	 * that silently lacks its entities, or has the mod's baby mode in the wrong state, would report a clean
+	 * result for the wrong reason: "the mod costs nothing" and "the mod never ran" look the same in a profile.
+	 */
+	private static void require(ClientGameTestContext context, String scene, Expect expect) {
+		try {
+			context.waitFor(client -> sceneProblems(client, expect).isEmpty(), 600);
+		} catch (AssertionError timeout) {
+			List<String> problems = context.computeOnClient(client -> sceneProblems(client, expect));
+			throw new AssertionError("Scene '" + scene + "' is not set up as it claims: " + String.join("; ", problems));
+		}
+	}
+
+	private static List<String> sceneProblems(Minecraft client, Expect expect) {
+		List<String> problems = new ArrayList<>();
+		if (EdenMenuScreen.isBabyModeEnabled() != expect.babyMode()) {
+			problems.add("baby mode is " + (expect.babyMode() ? "off" : "on") + " but should be " + (expect.babyMode() ? "on" : "off"));
+		}
+		int displays = client.level.getEntitiesOfClass(Display.class, SCENE_AREA).size();
+		if (displays < expect.displays()) {
+			problems.add("only " + displays + " display entities on the client, expected " + expect.displays());
+		}
+		// The mod's own test for "is this a real player", which is what its render hooks apply to each ghost.
+		long ghosts = client.level.players().stream().filter(player -> player != client.player && BabyPlayerEmoteTracker.isActualPlayer(player)).count();
+		if (ghosts != expect.ghostPlayers()) {
+			problems.add(ghosts + " ghost players the mod treats as real players, expected " + expect.ghostPlayers());
+		}
+		int items = client.level.getEntitiesOfClass(ItemEntity.class, SCENE_AREA).size();
+		if (items < expect.droppedItems()) {
+			problems.add("only " + items + " dropped items on the client, expected " + expect.droppedItems());
+		}
+		if (expect.droppedItems() > 0) {
+			// The dropped-item hooks do nothing unless a rule is configured, so entities alone would read as "free".
+			BridgeConfig config = EdenModClient.instance().config();
+			if (!config.groundItemVisibility || config.groundItemVisibilityRules == null || config.groundItemVisibilityRules.isEmpty()) {
+				problems.add("the dropped-item rule is not active, so the mod's dropped-item code would not run");
+			}
+		}
+		return problems;
+	}
+
 	/** Client-side only players, like the ghosts Wynncraft shows: they render but the server never hears of them. */
 	private static List<Integer> spawnGhosts(ClientGameTestContext context, int count) {
 		List<Integer> ids = new ArrayList<>();
 		context.runOnClient(client -> {
 			for (int i = 0; i < count; i++) {
 				RemotePlayer ghost = new RemotePlayer(client.level, new GameProfile(UUID.randomUUID(), "Ghost" + i));
-				// In front of the player (who faces +z), beyond the displays: players behind the camera are culled and cost nothing.
-				ghost.setPos(-10 + (i % 10) * 2.0, -60, 24 + (i / 10) * 2.0);
+				// Among the displays, 8 to 23 blocks in front of the player (who faces +z): close enough to be
+				// a real part of the frame. They used to stand 24 to 34 blocks out and showed as a strip of
+				// specks on the horizon, so the scene hardly exercised them.
+				ghost.setPos(-8 + (i % 10) * 1.8, -60, 8 + (i / 10) * 3.0);
 				client.level.addEntity(ghost);
 				ids.add(ghost.getId());
 			}
@@ -199,7 +265,7 @@ public final class PerfClientGameTest implements FabricClientGameTest {
 	}
 
 	private static void summonGroundItems(TestServerContext server) {
-		for (int i = 0; i < 120; i++) {
+		for (int i = 0; i < GROUND_ITEMS; i++) {
 			double x = -6 + (i % 12) * 1.2;
 			double z = 6 + (i / 12) * 1.2;
 			server.runCommand("summon item " + x + " -60 " + z + " {Item:{id:\"minecraft:potion\",count:1,components:{custom_name:{text:\"Perf drop " + i + "\"}}},PickupDelay:32767s,Age:-32768s}");

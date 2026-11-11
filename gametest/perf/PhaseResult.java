@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Everything measured for one scene, in units that are meaningful across machines. */
-record PhaseResult(String name, int frames, double medianCpuMs, double p99CpuMs, double maxCpuMs, double hitchRatio, double allocKiBPerFrame, double modSharePercent, Map<String, Integer> topModFrames, int renderSamples, String slowestFrames) {
+record PhaseResult(String name, int frames, double medianCpuMs, double p99CpuMs, double maxCpuMs, double hitchRatio, double allocKiBPerFrame, double modSharePercent, Map<String, Integer> topModFrames, int renderSamples, String slowestFrames, double modAllocPercent, double modAllocKiBPerFrame, Map<String, Long> topModAllocators) {
 	static PhaseResult of(String name, List<FrameProbe.Sample> samples, JfrShare share) {
 		double[] cpu = samples.stream().mapToDouble(s -> s.cpuNanos() / 1e6).sorted().toArray();
 		double alloc = samples.stream().mapToDouble(s -> s.allocBytes() / 1024.0).average().orElse(0);
@@ -24,6 +24,6 @@ record PhaseResult(String name, int frames, double medianCpuMs, double p99CpuMs,
 		for (int i = 0; i < Math.min(6, order.size()); i++) {
 			slowest.append(i == 0 ? "" : ", ").append('#').append(order.get(i)).append('=').append(String.format(java.util.Locale.ROOT, "%.1f", samples.get(order.get(i)).cpuNanos() / 1e6)).append(" ms");
 		}
-		return new PhaseResult(name, cpu.length, median, p99, max, hitch, alloc, share.modPercent(), share.topModFrames(), share.renderSamples(), slowest.toString());
+		return new PhaseResult(name, cpu.length, median, p99, max, hitch, alloc, share.modPercent(), share.topModFrames(), share.renderSamples(), slowest.toString(), share.modAllocPercent(), share.modAllocPercent() / 100.0 * alloc, share.topModAllocators());
 	}
 }

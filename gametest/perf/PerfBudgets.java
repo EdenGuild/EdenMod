@@ -13,7 +13,7 @@ record PerfBudgets(int minRenderSamples, Map<String, Budget> software, Map<Strin
 	/** The slowest frame must also be at least this long for the hitch ratio to matter. */
 	private static final double HITCH_FLOOR_MS = 15.0;
 
-	record Budget(double maxModSharePercent, double maxHitchRatio) {
+	record Budget(double maxModSharePercent, double maxHitchRatio, double maxModAllocKiBPerFrame) {
 	}
 
 	static PerfBudgets load() {
@@ -40,6 +40,11 @@ record PerfBudgets(int minRenderSamples, Map<String, Budget> software, Map<Strin
 			}
 			if (result.modSharePercent() > budget.maxModSharePercent()) {
 				violations.add(String.format("%s: EdenMod is %.1f%% of render-thread Java time (budget %.1f%%); hottest: %s", result.name(), result.modSharePercent(), budget.maxModSharePercent(), result.topModFrames()));
+			}
+			// Allocation does not depend on how fast the machine is, so unlike the CPU share it keeps its meaning on a
+			// slow CI runner, where a per-frame allocation regression is only a few CPU samples out of hundreds.
+			if (result.modAllocKiBPerFrame() > budget.maxModAllocKiBPerFrame()) {
+				violations.add(String.format("%s: EdenMod allocates %.1f KiB per frame (budget %.1f KiB); allocated by: %s", result.name(), result.modAllocKiBPerFrame(), budget.maxModAllocKiBPerFrame(), result.topModAllocators()));
 			}
 			// A ratio of tiny frames is noise: on a GPU a normal frame is about 1 ms, so a 4 ms one reads as 4x.
 			// Only a frame that is slow in absolute terms counts as a stall.

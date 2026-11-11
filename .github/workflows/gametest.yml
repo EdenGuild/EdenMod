@@ -58,6 +58,11 @@ jobs:
           mkdir -p ~/apt-archives/partial
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Dir::Cache::archives="$HOME/apt-archives" -o APT::Sandbox::User=root xvfb libgl1-mesa-dri libglx-mesa0 libegl1 libxrandr2 libxcursor1 libxi6 libxxf86vm1 libopenal1
+          # apt ran as root, so what it left in the cache folder is root-owned: a 0640 lock file and a 0700 partial/
+          # directory. The cache action's tar, running as the normal user, cannot read them ("Cannot open:
+          # Permission denied"), so the cache was never saved. Drop the lock and hand the folder over.
+          sudo rm -f ~/apt-archives/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
 
       # Spotless is enforced by the build job; skipping it here keeps this job independent of the
       # Eclipse formatter download.

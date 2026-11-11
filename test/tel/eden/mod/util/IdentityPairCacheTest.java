@@ -65,4 +65,32 @@ class IdentityPairCacheTest {
 		assertNull(cache.get(first, lore));
 		assertEquals(99, cache.get(overflow, lore));
 	}
+
+	@Test
+	void overwritingTheSamePairReplacesItsValueWithoutGrowing() {
+		IdentityPairCache<Object, Object, Integer> cache = new IdentityPairCache<>(8);
+		Object name = new Object();
+		Object lore = new Object();
+		cache.put(name, lore, 1);
+		cache.put(name, lore, 2);
+
+		assertEquals(2, cache.get(name, lore));
+		assertEquals(1, cache.size());
+	}
+
+	@Test
+	void manyPairsSharingOneFirstKeyAreAllFound() {
+		// Probing must keep distinct pairs apart even when one half of the key repeats and the table is busy.
+		IdentityPairCache<Object, Object, Integer> cache = new IdentityPairCache<>(512);
+		Object shared = new Object();
+		Object[] seconds = new Object[400];
+		for (int i = 0; i < seconds.length; i++) {
+			seconds[i] = new Object();
+			cache.put(shared, seconds[i], i);
+		}
+		for (int i = 0; i < seconds.length; i++) {
+			assertEquals(i, cache.get(shared, seconds[i]));
+		}
+		assertNull(cache.get(shared, new Object()));
+	}
 }
