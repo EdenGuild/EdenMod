@@ -28,7 +28,7 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 	private final List<String> addedMembers = new ArrayList<>();
 	private int maxPartySize = 4;
 	private int filledSlots = 0;
-	private boolean sendToAlly = false;
+	private boolean sendToAlly = true;
 
 	private Button btnNotg;
 	private Button btnNol;
