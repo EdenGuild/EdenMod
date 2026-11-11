@@ -21,7 +21,6 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 	private static final int BASE_PANEL_WIDTH = 350;
 	private static final int BASE_PANEL_HEIGHT = 330;
 
-	private final Screen parent;
 	private final EdenModClient mod;
 	private final String initialTarget;
 
@@ -67,8 +66,7 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 	}
 
 	public PartyCreateScreen(Screen parent, EdenModClient mod, String initialTarget) {
-		super(Component.literal("Create Guild Party"));
-		this.parent = parent;
+		super(Component.literal("Create Guild Party"), parent);
 		this.mod = mod;
 		this.initialTarget = initialTarget;
 		this.filledSlots = 0;
@@ -76,8 +74,7 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 
 	@Override
 	protected void init() {
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
 		// Targets Grid (24px tall buttons with icons)
 		// Row 1
@@ -443,11 +440,6 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 		}
 
 		onClose();
-	}
-
-	@Override
-	public void onClose() {
-		this.minecraft.setScreen(this.parent);
 	}
 
 	@Override

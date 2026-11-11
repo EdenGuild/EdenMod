@@ -1,42 +1,30 @@
 package tel.eden.mod.item;
 
-import java.util.Map;
-import java.util.WeakHashMap;
 import net.minecraft.client.renderer.entity.state.ItemEntityRenderState;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import tel.eden.mod.config.BridgeConfig;
+import tel.eden.mod.render.EdenItemScaleState;
 
 /**
  * Resolves dropped-item scale rules and applies their render-only state to item entities.
  */
 public final class GroundItemVisibilityRenderer {
-	private static final Map<ItemEntityRenderState, Float> SCALE_BY_STATE = java.util.Collections.synchronizedMap(new WeakHashMap<>());
-
 	private GroundItemVisibilityRenderer() {
 	}
 
 	public static void extract(BridgeConfig config, ItemEntity itemEntity, ItemEntityRenderState state) {
+		float scale = 1.0f;
 		BridgeConfig.GroundItemVisibilityRule rule = matchingRule(config, itemEntity.getItem());
-		if (rule == null) {
-			SCALE_BY_STATE.remove(state);
-			return;
+		if (rule != null) {
+			scale = Float.isFinite(rule.size) ? rule.size : 1.0f;
+			scale = Math.max(BridgeConfig.GROUND_ITEM_MIN_SCALE, Math.min(BridgeConfig.GROUND_ITEM_MAX_SCALE, scale));
 		}
-		float scale = rule.size;
-		if (!Float.isFinite(scale)) {
-			scale = 1.0f;
-		}
-		scale = Math.max(BridgeConfig.GROUND_ITEM_MIN_SCALE, Math.min(BridgeConfig.GROUND_ITEM_MAX_SCALE, scale));
-		if (scale != 1.0f) {
-			SCALE_BY_STATE.put(state, scale);
-		} else {
-			SCALE_BY_STATE.remove(state);
-		}
+		((EdenItemScaleState) state).edenmod$setScale(scale);
 	}
 
-	public static float consumeScale(ItemEntityRenderState state) {
-		Float scale = SCALE_BY_STATE.remove(state);
-		return scale != null ? scale : 1.0f;
+	public static float scaleFor(ItemEntityRenderState state) {
+		return EdenItemScaleState.scaleOf(state);
 	}
 
 	private static BridgeConfig.GroundItemVisibilityRule matchingRule(BridgeConfig config, ItemStack stack) {
@@ -51,7 +39,7 @@ public final class GroundItemVisibilityRenderer {
 			if (rule == null) {
 				continue;
 			}
-			String nameFilter = BridgeConfig.normalizeGroundItemName(rule.nameContains);
+			String nameFilter = rule.normalizedNameContains();
 			if (nameFilter.isEmpty() || normalizedName.contains(nameFilter)) {
 				// A rule supplies the complete scale. Returning the first match makes list
 				// order the priority and prevents overlapping rules from stacking transforms.

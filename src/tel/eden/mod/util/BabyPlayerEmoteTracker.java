@@ -1,9 +1,10 @@
 package tel.eden.mod.util;
 
 import java.util.ArrayDeque;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.AbstractClientPlayer;
@@ -12,8 +13,9 @@ import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.equine.AbstractHorse;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import tel.eden.mod.render.EdenDisplayState;
 
 /**
  * Render-only state shared by the player-head and display renderers used for Wynncraft
@@ -30,9 +32,6 @@ public final class BabyPlayerEmoteTracker {
 	private static final int COMPLETE_LEG_MASK = 0b11;
 	private static final ConcurrentHashMap<UUID, Long> LAST_RENDERED = new ConcurrentHashMap<>();
 	private static final ConcurrentHashMap<UUID, PivotState> PIVOTS = new ConcurrentHashMap<>();
-	// Render states are short-lived and do not expose their source entity. Weak keys keep
-	// this lookup from extending a state's lifetime after Minecraft discards it.
-	private static final WeakHashMap<DisplayEntityRenderState, Display> DISPLAY_ENTITIES = new WeakHashMap<>();
 	// A display can invoke the player-head renderer several layers below its own submit
 	// call. Keep the source state available without depending on an optional renderer mod.
 	private static final ThreadLocal<ArrayDeque<DisplayEntityRenderState>> DISPLAY_SUBMISSIONS = new ThreadLocal<>();
@@ -64,7 +63,8 @@ public final class BabyPlayerEmoteTracker {
 	public static boolean isActive(AbstractClientPlayer player) {
 		// Passenger state alone does not imply an emote. Treating it that way leaves a
 		// normal mount associated with an emote long after its final body part disappeared.
-		return isActualPlayer(player) && isActive(player.getUUID());
+		// The map lookup is far cheaper than classifying the player, and most players are not active.
+		return isActive(player.getUUID()) && isActualPlayer(player);
 	}
 
 	/**
@@ -108,15 +108,6 @@ public final class BabyPlayerEmoteTracker {
 		return entity instanceof AbstractClientPlayer player && isActualPlayer(player);
 	}
 
-	/** Link a short-lived display render state back to the entity it was extracted from. */
-	public static synchronized void trackDisplay(DisplayEntityRenderState state, Display display) {
-		DISPLAY_ENTITIES.put(state, display);
-	}
-
-	public static synchronized Display displayFor(DisplayEntityRenderState state) {
-		return DISPLAY_ENTITIES.get(state);
-	}
-
 	/** Make the source display available to special item renderers called beneath it. */
 	public static void beginDisplaySubmission(DisplayEntityRenderState state) {
 		ArrayDeque<DisplayEntityRenderState> submissions = DISPLAY_SUBMISSIONS.get();
@@ -139,7 +130,7 @@ public final class BabyPlayerEmoteTracker {
 
 	public static Display currentDisplaySubmission() {
 		ArrayDeque<DisplayEntityRenderState> submissions = DISPLAY_SUBMISSIONS.get();
-		return submissions == null || submissions.isEmpty() ? null : displayFor(submissions.peek());
+		return submissions == null || submissions.isEmpty() ? null : EdenDisplayState.sourceOf(submissions.peek());
 	}
 
 	/** Match Wynncraft's cross-server team names, for example {@code _WC12}. */
@@ -207,8 +198,25 @@ public final class BabyPlayerEmoteTracker {
 		double nearestDistance = NEARBY_DISPLAY_DISTANCE_SQUARED;
 		// Some effect and item displays are not passengers. Only consider active
 		// emote players within five blocks so ordinary displays are left alone.
-		for (Player candidate : entity.level().players()) {
-			if (!(candidate instanceof AbstractClientPlayer player) || !isActive(player)) {
+		// Walk the players that rendered recently instead of every player in the level: with
+		// Wynncraft's ghosts that is hundreds of players per display per frame. Entries older
+		// than the grace period are dropped here, as isActive would have done.
+		long now = System.nanoTime();
+		Level level = entity.level();
+		for (Iterator<Map.Entry<UUID, Long>> iterator = LAST_RENDERED.entrySet().iterator(); iterator.hasNext();) {
+			Map.Entry<UUID, Long> entry = iterator.next();
+			if (now - entry.getValue() > EMOTE_ACTIVE_GRACE_NANOS) {
+				iterator.remove();
+				continue;
+			}
+			if (!(level.getPlayerByUUID(entry.getKey()) instanceof AbstractClientPlayer player) || !isActualPlayer(player)) {
+				continue;
+			}
+			// A rider's mount is drawn in the same packed format as an emote, which keeps the
+			// rider "active" for the whole ride. Its own parts are in the vehicle hierarchy and
+			// were handled above; anything merely nearby (time-trial rings, mobs, other players'
+			// cosmetics) is not part of it and must not be scaled.
+			if (isGroundedMount(player.getRootVehicle())) {
 				continue;
 			}
 			double distance = entity.distanceToSqr(player);

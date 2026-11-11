@@ -38,7 +38,6 @@ public final class CommandKeybindScreen extends EdenReferenceScreen {
 	private static final Component EDIT_HINT = Component.literal("Double click a cell to edit");
 	private static final long ADD_HINT_MS = 5_000L;
 
-	private final Screen parent;
 	private final EdenModClient mod;
 	private final List<KeybindRow> rows = new ArrayList<>();
 
@@ -57,15 +56,13 @@ public final class CommandKeybindScreen extends EdenReferenceScreen {
 	private boolean capturingKeybind;
 
 	public CommandKeybindScreen(Screen parent, EdenModClient mod) {
-		super(Component.literal("Command Keybinds"));
-		this.parent = parent;
+		super(Component.literal("Command Keybinds"), parent);
 		this.mod = mod;
 	}
 
 	@Override
 	protected void init() {
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
 		this.addRenderableWidget(Button.builder(Component.literal("Add"), button -> onAdd()).bounds(layout.x(15), layout.y(252), layout.w(160), layout.h(20)).build());
 		deleteButton = this.addRenderableWidget(Button.builder(Component.literal("Delete"), button -> onDelete()).bounds(layout.x(185), layout.y(252), layout.w(160), layout.h(20)).build());
@@ -493,10 +490,9 @@ public final class CommandKeybindScreen extends EdenReferenceScreen {
 	}
 
 	@Override
-	public void onClose() {
+	protected void beforeClose() {
 		commitInlineEdit();
 		stopCapturingKeybind();
-		this.minecraft.setScreen(this.parent);
 	}
 
 	private static final class KeybindRow {

@@ -1,7 +1,7 @@
 plugins {
-    id 'fabric-loom' version "${loom_version}"
-    id 'java'
-    id 'com.diffplug.spotless' version '6.25.0'
+	id 'fabric-loom' version "${loom_version}"
+	id 'java'
+	id 'com.diffplug.spotless' version '6.25.0'
 }
 
 version = project.mod_version
@@ -14,103 +14,122 @@ group = project.maven_group
 def hookSource = file('.githooks/pre-commit')
 def gitHooksDir = file('.git/hooks')
 if (hookSource.exists() && gitHooksDir.exists()) {
-    def hookTarget = new File(gitHooksDir, 'pre-commit')
-    if (!hookTarget.exists() || hookTarget.text != hookSource.text) {
-        hookTarget.text = hookSource.text
-        hookTarget.setExecutable(true)
-    }
+	def hookTarget = new File(gitHooksDir, 'pre-commit')
+	if (!hookTarget.exists() || hookTarget.text != hookSource.text) {
+		hookTarget.text = hookSource.text
+		hookTarget.setExecutable(true)
+	}
 }
 
 base {
-    archivesName = project.archives_base_name
+	archivesName = project.archives_base_name
 }
 
 sourceSets {
-    main {
-        java { srcDirs = ['src'] }
-        resources { srcDirs = ['resources'] }
-    }
-    test {
-        java { srcDirs = ['test'] }
-    }
+	main {
+		java { srcDirs = ['src'] }
+		resources { srcDirs = ['resources'] }
+	}
+	test {
+		java { srcDirs = ['test'] }
+	}
 }
 
 loom {
-    mixin {
-        useLegacyMixinAp = true
-        defaultRefmapName = "edenmod.refmap.json"
-    }
+	mixin {
+		useLegacyMixinAp = true
+		defaultRefmapName = "edenmod.refmap.json"
+	}
+}
+
+// Real-client gametests (gametest/): performance scenes, behaviour checks and screen layout.
+// Run with `./gradlew runClientGameTest`.
+// Kept out of `build`/`test`: it needs a display (Xvfb on CI) and downloads game assets.
+fabricApi {
+	configureTests {
+		createSourceSet = true
+		modId = "edenmod-gametest"
+		// The server-side game tests (runGameTest) would run on every `build` and we have none;
+		// only the client gametest in gametest/ is used.
+		enableGameTests = false
+		enableClientGameTests = true
+		eula = true
+		clearRunDirectory = true
+		username = "FadeDave"
+	}
 }
 
 repositories {
-    // Fabric/Mojang/Minecraft repos are added by Loom automatically.
-    // Mod Menu is sourced from Modrinth's (Cloudflare-backed) maven — terraformersmc's
-    // own maven intermittently truncates downloads, which stalls CI. Kept as a fallback.
-    maven { url "https://api.modrinth.com/maven" }
-    maven { url "https://maven.terraformersmc.com/releases/" }
-    // TwelveMonkeys ImageIO plugins (image-preview decoding) live on Maven Central.
-    mavenCentral()
+	// Fabric/Mojang/Minecraft repos are added by Loom automatically.
+	// Mod Menu is sourced from Modrinth's (Cloudflare-backed) maven — terraformersmc's
+	// own maven intermittently truncates downloads, which stalls CI. Kept as a fallback.
+	maven { url "https://api.modrinth.com/maven" }
+	maven { url "https://maven.terraformersmc.com/releases/" }
+	// TwelveMonkeys ImageIO plugins (image-preview decoding) live on Maven Central.
+	mavenCentral()
 }
 
 dependencies {
-    minecraft "com.mojang:minecraft:${minecraft_version}"
-    // Official Mojang mappings: the in-game class/method names match the
-    // build spec (ClientPacketListener#handleSystemChat, etc.).
-    mappings loom.officialMojangMappings()
-    modImplementation "net.fabricmc:fabric-loader:${loader_version}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
-    // Mod Menu API (compile-only): adds a config-screen button in Mod Menu when
-    // it's installed; not bundled, and the entrypoint is inert without Mod Menu.
-    // From Modrinth's maven (project "modmenu") for reliable CI downloads.
-    modCompileOnly "maven.modrinth:modmenu:${modmenu_version}"
+	minecraft "com.mojang:minecraft:${minecraft_version}"
+	// Official Mojang mappings: the in-game class/method names match the
+	// build spec (ClientPacketListener#handleSystemChat, etc.).
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+	// Mod Menu API (compile-only): adds a config-screen button in Mod Menu when
+	// it's installed; not bundled, and the entrypoint is inert without Mod Menu.
+	// From Modrinth's maven (project "modmenu") for reliable CI downloads.
+	modCompileOnly "maven.modrinth:modmenu:${modmenu_version}"
 
-    // ImageIO plugins for in-game image previews. STB (NativeImage) only decodes
-    // PNG/JPEG/BMP/GIF, so WebP (Discord/Tenor/Giphy) and awkward JPEGs fail. These
-    // add WebP read support and a more tolerant JPEG reader, registered by hand at
-    // runtime (Fabric's classloader hides them from ImageIO's default plugin scan).
-    // Bundled jar-in-jar via include(); the whole TwelveMonkeys transitive set is
-    // listed explicitly (Loom's include is non-transitive). See ImagePreviewManager.
-    implementation include("com.twelvemonkeys.imageio:imageio-webp:${twelvemonkeys_version}")
-    implementation include("com.twelvemonkeys.imageio:imageio-jpeg:${twelvemonkeys_version}")
-    implementation include("com.twelvemonkeys.imageio:imageio-core:${twelvemonkeys_version}")
-    implementation include("com.twelvemonkeys.imageio:imageio-metadata:${twelvemonkeys_version}")
-    implementation include("com.twelvemonkeys.common:common-lang:${twelvemonkeys_version}")
-    implementation include("com.twelvemonkeys.common:common-io:${twelvemonkeys_version}")
-    implementation include("com.twelvemonkeys.common:common-image:${twelvemonkeys_version}")
+	// ImageIO plugins for in-game image previews. STB (NativeImage) only decodes
+	// PNG/JPEG/BMP/GIF, so WebP (Discord/Tenor/Giphy) and awkward JPEGs fail. These
+	// add WebP read support and a more tolerant JPEG reader, registered by hand at
+	// runtime (Fabric's classloader hides them from ImageIO's default plugin scan).
+	// Bundled jar-in-jar via include(); the whole TwelveMonkeys transitive set is
+	// listed explicitly (Loom's include is non-transitive). See ImagePreviewManager.
+	implementation include("com.twelvemonkeys.imageio:imageio-webp:${twelvemonkeys_version}")
+	implementation include("com.twelvemonkeys.imageio:imageio-jpeg:${twelvemonkeys_version}")
+	implementation include("com.twelvemonkeys.imageio:imageio-core:${twelvemonkeys_version}")
+	implementation include("com.twelvemonkeys.imageio:imageio-metadata:${twelvemonkeys_version}")
+	implementation include("com.twelvemonkeys.common:common-lang:${twelvemonkeys_version}")
+	implementation include("com.twelvemonkeys.common:common-io:${twelvemonkeys_version}")
+	implementation include("com.twelvemonkeys.common:common-image:${twelvemonkeys_version}")
 
-    testImplementation platform("org.junit:junit-bom:5.14.1")
-    testImplementation "org.junit.jupiter:junit-jupiter"
-    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+	testImplementation platform("org.junit:junit-bom:5.14.1")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-    withSourcesJar()
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+	withSourcesJar()
 }
 
 tasks.withType(JavaCompile).configureEach {
-    it.options.release = 21
-    it.options.encoding = 'UTF-8'
+	it.options.release = 21
+	it.options.encoding = 'UTF-8'
 }
 
 tasks.withType(Test).configureEach {
-    useJUnitPlatform()
-    // Minecraft's registry bootstrap initialises Log4j, which otherwise writes its
-    // standard logs/latest.log into the project root during unit tests. Keep that
-    // test-only runtime state under build/ instead of polluting the source tree.
-    def testRuntimeDir = layout.buildDirectory.dir("test-runtime").get().asFile
-    doFirst {
-        testRuntimeDir.mkdirs()
-    }
-    workingDir = testRuntimeDir
+	useJUnitPlatform()
+	// Minecraft's registry bootstrap initialises Log4j, which otherwise writes its
+	// standard logs/latest.log into the project root during unit tests. Keep that
+	// test-only runtime state under build/ instead of polluting the source tree.
+	def testRuntimeDir = layout.buildDirectory.dir("test-runtime").get().asFile
+	doFirst {
+		testRuntimeDir.mkdirs()
+	}
+	workingDir = testRuntimeDir
+	// RenderHotPathTest scans the sources for render-thread anti-patterns.
+	systemProperty 'edenmod.srcDir', file('src').absolutePath
 }
 
 processResources {
-    inputs.property 'version', project.version
-    filesMatching('fabric.mod.json') {
-        expand version: project.version
-    }
+	inputs.property 'version', project.version
+	filesMatching('fabric.mod.json') {
+		expand version: project.version
+	}
 }
 
 ext.emoteFontId = 'edenmod:emotes'
@@ -123,78 +142,78 @@ ext.emoteAscent = 10
 ext.emoteHeight = 14
 
 tasks.register('generateEmoteAssets') {
-    def assetsDir = file('resources/assets/edenmod')
-    def texturesDir = new File(assetsDir, 'textures')
-    def fontFile = new File(assetsDir, 'font/emotes.json')
-    def manifestFile = new File(assetsDir, 'emotes_manifest.json')
+	def assetsDir = file('resources/assets/edenmod')
+	def texturesDir = new File(assetsDir, 'textures')
+	def fontFile = new File(assetsDir, 'font/emotes.json')
+	def manifestFile = new File(assetsDir, 'emotes_manifest.json')
 
-    inputs.files(fileTree(texturesDir) { include '**/*.png' }).skipWhenEmpty(false)
-    outputs.files(fontFile, manifestFile)
+	inputs.files(fileTree(texturesDir) { include '**/*.png' }).skipWhenEmpty(false)
+	outputs.files(fontFile, manifestFile)
 
-    doLast {
-        def images = []
-        emoteDirs.each { dirName ->
-            def dir = new File(texturesDir, dirName)
-            if (dir.directory) {
-                dir.listFiles({ f -> f.isFile() && f.name.toLowerCase().endsWith('.png') } as FileFilter)?.each {
-                    images << [dir: dirName, file: it]
-                }
-            }
-        }
-        // Natural sort so catplush2 sorts before catplush10.
-        images.sort { a, b ->
-            def numOf = { java.io.File f ->
-                def m = (f.name =~ /(\d+)/)
-                m.find() ? m.group(1).toInteger() : 0
-            }
-            def na = numOf(a.file)
-            def nb = numOf(b.file)
-            na != nb ? na <=> nb : a.file.name <=> b.file.name
-        }
+	doLast {
+		def images = []
+		emoteDirs.each { dirName ->
+			def dir = new File(texturesDir, dirName)
+			if (dir.directory) {
+				dir.listFiles({ f -> f.isFile() && f.name.toLowerCase().endsWith('.png') } as FileFilter)?.each {
+					images << [dir: dirName, file: it]
+				}
+			}
+		}
+		// Natural sort so catplush2 sorts before catplush10.
+		images.sort { a, b ->
+			def numOf = { java.io.File f ->
+				def m = (f.name =~ /(\d+)/)
+				m.find() ? m.group(1).toInteger() : 0
+			}
+			def na = numOf(a.file)
+			def nb = numOf(b.file)
+			na != nb ? na <=> nb : a.file.name <=> b.file.name
+		}
 
-        def providers = []
-        def emotes = [:]
-        images.eachWithIndex { img, idx ->
-            def name = img.file.name
-            def shortcode = name.take(name.lastIndexOf('.'))
-            int codepoint = emoteCodepointBase + idx
-            // "file" is resolved under assets/<namespace>/textures/, so it must
-            // NOT repeat the "textures" segment.
-            providers << [
-                type  : 'bitmap',
-                file  : "edenmod:${img.dir}/${name}".toString(),
-                ascent: emoteAscent,
-                height: emoteHeight,
-                chars : [new String(Character.toChars(codepoint))]
-            ]
-            emotes[shortcode] = codepoint
-        }
+		def providers = []
+		def emotes = [:]
+		images.eachWithIndex { img, idx ->
+			def name = img.file.name
+			def shortcode = name.take(name.lastIndexOf('.'))
+			int codepoint = emoteCodepointBase + idx
+			// "file" is resolved under assets/<namespace>/textures/, so it must
+			// NOT repeat the "textures" segment.
+			providers << [
+				type  : 'bitmap',
+				file  : "edenmod:${img.dir}/${name}".toString(),
+				ascent: emoteAscent,
+				height: emoteHeight,
+				chars : [new String(Character.toChars(codepoint))]
+			]
+			emotes[shortcode] = codepoint
+		}
 
-        fontFile.parentFile.mkdirs()
-        fontFile.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([providers: providers])), 'UTF-8')
-        manifestFile.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([font: emoteFontId, emotes: emotes])), 'UTF-8')
+		fontFile.parentFile.mkdirs()
+		fontFile.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([providers: providers])), 'UTF-8')
+		manifestFile.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([font: emoteFontId, emotes: emotes])), 'UTF-8')
 
-        logger.lifecycle("EdenMod: generated ${images.size()} chat emote(s)" + (images.isEmpty() ? '' : ": " + emotes.keySet().join(', ')))
-    }
+		logger.lifecycle("EdenMod: generated ${images.size()} chat emote(s)" + (images.isEmpty() ? '' : ": " + emotes.keySet().join(', ')))
+	}
 }
 
 processResources.dependsOn generateEmoteAssets
 tasks.named('sourcesJar').configure {
-    dependsOn 'generateEmoteAssets'
+	dependsOn 'generateEmoteAssets'
 }
 
 jar {
-    from('LICENSE') {
-        rename { "${it}_${project.archivesBaseName}" }
-    }
+	from('LICENSE') {
+		rename { "${it}_${project.archivesBaseName}" }
+	}
 }
 
 spotless {
-    lineEndings 'UNIX'
-    java {
-        target 'src/**/*.java', 'test/**/*.java'
-        eclipse().configFile('eclipse-formatter.xml')
-    }
+	lineEndings 'UNIX'
+	java {
+		target 'src/**/*.java', 'test/**/*.java', 'gametest/**/*.java'
+		eclipse().configFile('eclipse-formatter.xml')
+	}
 }
 
 // Belt-and-suspenders alongside the commit-time hook: format on every compile
@@ -222,65 +241,170 @@ compileJava.dependsOn spotlessApply
 def FULCIO_TRUST_BUNDLE_URL = 'https://fulcio.githubapp.com/api/v2/trustBundle'
 
 def fetchFulcioRootCert = {
-    def response = new groovy.json.JsonSlurper().parseText(new URL(FULCIO_TRUST_BUNDLE_URL).text)
-    def chains = response.chains
-    if (!chains || chains.isEmpty()) throw new GradleException('No chains in Fulcio trust bundle response')
-    def pemCerts = chains[0].certificates
-    if (!pemCerts || pemCerts.size() < 3) throw new GradleException("Expected at least 3 certs in chain, got ${pemCerts?.size()}")
-    // pemCerts[0]=l2, pemCerts[1]=l1, pemCerts[2]=root
-    def cf = java.security.cert.CertificateFactory.getInstance('X.509')
-    def rootCert = cf.generateCertificate(new java.io.ByteArrayInputStream(pemCerts[2].bytes))
-    return [cert: rootCert, b64: java.util.Base64.getEncoder().encodeToString(rootCert.encoded)]
+	def response = new groovy.json.JsonSlurper().parseText(new URL(FULCIO_TRUST_BUNDLE_URL).text)
+	def chains = response.chains
+	if (!chains || chains.isEmpty()) throw new GradleException('No chains in Fulcio trust bundle response')
+	def pemCerts = chains[0].certificates
+	if (!pemCerts || pemCerts.size() < 3) throw new GradleException("Expected at least 3 certs in chain, got ${pemCerts?.size()}")
+	// pemCerts[0]=l2, pemCerts[1]=l1, pemCerts[2]=root
+	def cf = java.security.cert.CertificateFactory.getInstance('X.509')
+	def rootCert = cf.generateCertificate(new java.io.ByteArrayInputStream(pemCerts[2].bytes))
+	return [cert: rootCert, b64: java.util.Base64.getEncoder().encodeToString(rootCert.encoded)]
 }
 
 tasks.register('updateFulcioCert') {
-    group = 'edenmod'
-    description = 'Pull the current Fulcio root cert from fulcio.githubapp.com and update fulcio_root.b64.'
-    doLast {
-        def live = fetchFulcioRootCert()
-        def committedB64 = file('resources/fulcio_root.b64').text.trim()
-        def cf = java.security.cert.CertificateFactory.getInstance('X.509')
-        if (committedB64 == live.b64) {
-            logger.lifecycle("EdenMod: fulcio_root.b64 is already up to date (expires ${live.cert.notAfter})")
-            return
-        }
-        // Root changed — significant trust event; log before updating.
-        def oldCert = cf.generateCertificate(new java.io.ByteArrayInputStream(java.util.Base64.getDecoder().decode(committedB64)))
-        logger.lifecycle("EdenMod: WARNING — Fulcio root cert changed!")
-        logger.lifecycle("  Old: subject=${oldCert.subjectX500Principal}, expires=${oldCert.notAfter}")
-        logger.lifecycle("  New: subject=${live.cert.subjectX500Principal}, expires=${live.cert.notAfter}")
-        file('resources/fulcio_root.b64').text = live.b64 + '\n'
-        logger.lifecycle("EdenMod: fulcio_root.b64 updated.")
-    }
+	group = 'edenmod'
+	description = 'Pull the current Fulcio root cert from fulcio.githubapp.com and update fulcio_root.b64.'
+	doLast {
+		def live = fetchFulcioRootCert()
+		def committedB64 = file('resources/fulcio_root.b64').text.trim()
+		def cf = java.security.cert.CertificateFactory.getInstance('X.509')
+		if (committedB64 == live.b64) {
+			logger.lifecycle("EdenMod: fulcio_root.b64 is already up to date (expires ${live.cert.notAfter})")
+			return
+		}
+		// Root changed — significant trust event; log before updating.
+		def oldCert = cf.generateCertificate(new java.io.ByteArrayInputStream(java.util.Base64.getDecoder().decode(committedB64)))
+		logger.lifecycle("EdenMod: WARNING — Fulcio root cert changed!")
+		logger.lifecycle("  Old: subject=${oldCert.subjectX500Principal}, expires=${oldCert.notAfter}")
+		logger.lifecycle("  New: subject=${live.cert.subjectX500Principal}, expires=${live.cert.notAfter}")
+		file('resources/fulcio_root.b64').text = live.b64 + '\n'
+		logger.lifecycle("EdenMod: fulcio_root.b64 updated.")
+	}
 }
 
 tasks.register('checkFulcioCert') {
-    group = 'edenmod'
-    description = 'Fail the build if the committed Fulcio root cert is expiring soon or has drifted from fulcio.githubapp.com.'
-    doLast {
-        def cf = java.security.cert.CertificateFactory.getInstance('X.509')
-        def certFile = file('resources/fulcio_root.b64')
-        if (!certFile.exists()) throw new GradleException("fulcio_root.b64 is missing — run ./gradlew updateFulcioCert")
-        def cert = cf.generateCertificate(new java.io.ByteArrayInputStream(java.util.Base64.getDecoder().decode(certFile.text.trim())))
-        long daysLeft = (cert.notAfter.time - System.currentTimeMillis()) / 86_400_000L
-        if (daysLeft < 0) {
-            throw new GradleException("Committed Fulcio root cert has EXPIRED (${cert.notAfter}) — run ./gradlew updateFulcioCert")
-        }
-        if (daysLeft < 180) {
-            throw new GradleException("Committed Fulcio root cert expires in ${daysLeft} days (${cert.notAfter}) — run ./gradlew updateFulcioCert")
-        }
-        logger.lifecycle("EdenMod: Fulcio root cert OK (expires ${cert.notAfter}, ${daysLeft} days left)")
-        // Drift check against live Fulcio trust bundle.
-        try {
-            def live = fetchFulcioRootCert()
-            if (live.b64 != certFile.text.trim()) {
-                throw new GradleException("Committed Fulcio root cert has DRIFTED from ${FULCIO_TRUST_BUNDLE_URL} — run ./gradlew updateFulcioCert")
-            }
-            logger.lifecycle("EdenMod: Fulcio root cert matches live trust bundle")
-        } catch (GradleException e) {
-            throw e
-        } catch (Exception e) {
-            logger.warn("EdenMod: drift check failed (${e.message}) — skipping")
-        }
-    }
+	group = 'edenmod'
+	description = 'Fail the build if the committed Fulcio root cert is expiring soon or has drifted from fulcio.githubapp.com.'
+	doLast {
+		def cf = java.security.cert.CertificateFactory.getInstance('X.509')
+		def certFile = file('resources/fulcio_root.b64')
+		if (!certFile.exists()) throw new GradleException("fulcio_root.b64 is missing — run ./gradlew updateFulcioCert")
+		def cert = cf.generateCertificate(new java.io.ByteArrayInputStream(java.util.Base64.getDecoder().decode(certFile.text.trim())))
+		long daysLeft = (cert.notAfter.time - System.currentTimeMillis()) / 86_400_000L
+		if (daysLeft < 0) {
+			throw new GradleException("Committed Fulcio root cert has EXPIRED (${cert.notAfter}) — run ./gradlew updateFulcioCert")
+		}
+		if (daysLeft < 180) {
+			throw new GradleException("Committed Fulcio root cert expires in ${daysLeft} days (${cert.notAfter}) — run ./gradlew updateFulcioCert")
+		}
+		logger.lifecycle("EdenMod: Fulcio root cert OK (expires ${cert.notAfter}, ${daysLeft} days left)")
+		// Drift check against live Fulcio trust bundle.
+		try {
+			def live = fetchFulcioRootCert()
+			if (live.b64 != certFile.text.trim()) {
+				throw new GradleException("Committed Fulcio root cert has DRIFTED from ${FULCIO_TRUST_BUNDLE_URL} — run ./gradlew updateFulcioCert")
+			}
+			logger.lifecycle("EdenMod: Fulcio root cert matches live trust bundle")
+		} catch (GradleException e) {
+			throw e
+		} catch (Exception e) {
+			logger.warn("EdenMod: drift check failed (${e.message}) — skipping")
+		}
+	}
+}
+
+// The gametest source set is its own folder, apart from the unit tests in test/: those run under
+// plain JUnit, this one needs a launched client. Sources and resources share the folder.
+sourceSets.matching { it.name == 'gametest' }.configureEach {
+	java { srcDirs = ['gametest'] }
+	resources { srcDirs = ['gametest']; exclude '**/*.java', '**/*.md' }
+}
+
+tasks.matching { it.name == 'runClientGameTest' }.configureEach { task ->
+	def outDir = layout.buildDirectory.dir('gametest').get().asFile
+	def clientLog = new File(outDir, 'client.log')
+	def budgetsFile = file('gametest/perf-budgets.json')
+	def logSink = []
+	// Each test leaves one of these when it runs to the end; see support/Output.java.
+	// -Pgametest.suites=ui runs only the screens test (seconds, no profiling); the default runs all three.
+	// runBgClientGameTest is the short way to ask for the background variant (hidden window).
+	def background = findProperty('gametest.background') == 'true' || gradle.startParameter.taskNames.any { it.split(':').last() == 'runBgClientGameTest' }
+	def suites = (findProperty('gametest.suites') ?: 'perf,behaviour,ui').split(',') as List
+	def expectedOutputs = [perf: 'results.json', behaviour: 'behaviour.ok', ui: 'ui-screens.ok'].findAll { suites.contains(it.key) }.values().toList()
+	systemProperty 'edenmod.gametest.suites', suites.join(',')
+	// Loom runs a client through `xvfb-run` by itself when one is installed, which is the case on CI (the
+	// workflow installs it). That path ignores the settings below (the output folder, the log redirect, the
+	// exit handling), so the run went to the wrong folder and its artifacts were lost. The workflow already
+	// provides a virtual display, so use the normal path, the same one every local run takes.
+	task.useXvfb.set(false)
+	systemProperty 'edenmod.gametest.out', outDir.absolutePath
+	// No audio output at all: OpenAL's "null" backend plays nothing, from process start. Muting in the game only
+	// happens once the test begins, so the title-screen and toast sounds before it would still be heard.
+	environment 'ALSOFT_DRIVERS', 'null'
+	// -Pgametest.background=true also hides the game window (it is always muted); for runs on a real desktop.
+	systemProperty 'edenmod.gametest.background', background.toString()
+	// JFR is started from inside the test; DebugNonSafepoints makes its stacks accurate.
+	jvmArgs '-XX:+UnlockDiagnosticVMOptions', '-XX:+DebugNonSafepoints', '-Xmx2g'
+	// Minecraft logs hundreds of lines. Keep them in a file and print only what matters.
+	ignoreExitValue = true
+	doFirst {
+		outDir.mkdirs()
+		println "[gametest] suites=${suites.join(',')} out=${outDir} useXvfb=${task.useXvfb.get()} background=${background}"
+		// Stale output from an earlier run must never be mistaken for this run's.
+		(['results.json', 'behaviour.ok', 'ui-screens.ok']).each { new File(outDir, it).delete() }
+		new File(outDir, 'screens').deleteDir()
+		def sink = new FileOutputStream(clientLog)
+		logSink << sink
+		standardOutput = sink
+		errorOutput = sink
+	}
+	doLast {
+		logSink.each { it.close() }
+		def json = new groovy.json.JsonSlurper()
+		def resultsFile = new File(outDir, 'results.json')
+		def renderer = clientLog.exists() ? clientLog.readLines().find { it.contains('[gametest] GL renderer: ') } : null
+		def rendererName = renderer ? renderer.substring(renderer.indexOf('GL renderer: ') + 13) : null
+		// Budgets are per renderer (software on CI, a GPU elsewhere); the table shows the ones that applied.
+		def software = rendererName == null || rendererName.toLowerCase().contains('llvmpipe')
+		if (resultsFile.exists()) {
+			def budgets = json.parse(budgetsFile)[software ? 'software' : 'gpu']
+			println String.format(Locale.ROOT, '%-28s %12s %10s %8s', 'scene', 'EdenMod %', 'budget %', 'hitch x')
+			json.parse(resultsFile).each { r ->
+				println String.format(Locale.ROOT, '%-28s %12.1f %10.1f %8.1f', r.name, r.modSharePercent, budgets[r.name]?.maxModSharePercent ?: Double.NaN, r.hitchRatio)
+			}
+		}
+		// A client that cannot open a window can still exit 0, so success means every test wrote its output.
+		def missing = expectedOutputs.findAll { !new File(outDir, it).exists() }
+		def exitValue = executionResult.get().exitValue
+		if (exitValue != 0 || missing) {
+			def lines = clientLog.readLines()
+			def isNoise = { String l -> l.contains('Realms') || l.contains('SignedJWT') }
+			// Every suite runs even if another failed; the last thing printed lists them all.
+			def first = lines.findLastIndexOf { it.contains('EdenMod gametests failed:') }
+			if (first < 0) {
+				first = lines.findIndexOf { it.contains('AssertionError') }
+			}
+			if (first < 0) {
+				first = lines.findIndexOf { !isNoise(it) && it =~ /(Exception|Error): / }
+			}
+			println first >= 0 ? lines.subList(first, Math.min(lines.size(), first + 40)).join('\n') : lines.takeRight(30).join('\n')
+			if (lines.any { it.contains('GLFW error') || it.contains('GLX') }) {
+				println 'Hint: the client could not open a window. It needs a display and OpenGL libraries.'
+				println '  NixOS:           put the GL/X11 libraries on the task\'s LD_LIBRARY_PATH (gametest/README.md, "NixOS")'
+				println '  Other, headless: xvfb-run -a ./gradlew runClientGameTest'
+			}
+			def why = exitValue != 0 ? "the client exited with ${exitValue}" : "no output was produced (${missing.join(', ')} missing), so the scenes did not run"
+			throw new GradleException("Client gametest failed: ${why}. Full log: ${clientLog}")
+		}
+		if (rendererName) {
+			println "Rendered on: ${rendererName}" + (software ? ' (software)' : ' (GPU)')
+		}
+		println "Full Minecraft log: ${clientLog}"
+	}
+}
+
+// Compiles the gametest sources on every build so they cannot rot unnoticed, without
+// running them (they need a display; see gametest/README.md).
+// A plain task name, on purpose. A closure filter such as tasks.matching { it.name == ... } makes Gradle
+// create every task to evaluate it, including spotlessJava, whose creation downloads the Eclipse
+// formatter. When Eclipse's server is down that failed `build` even with -x spotlessCheck, which is
+// exactly what the CI formatting escape hatch is meant to survive.
+tasks.named('check') { dependsOn 'compileGametestJava' }
+
+// Short name for the background variant: the same run with the game window hidden. Always muted either way.
+tasks.register('runBgClientGameTest') {
+	group = 'verification'
+	description = 'Runs the client gametests with the game window hidden (see gametest/README.md).'
+	dependsOn 'runClientGameTest'
 }

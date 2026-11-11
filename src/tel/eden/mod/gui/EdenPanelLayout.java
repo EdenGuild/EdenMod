@@ -6,7 +6,18 @@ import net.minecraft.client.gui.GuiGraphics;
 /** Shared centered dialog layout rendered inside a fixed reference GUI space. */
 final class EdenPanelLayout {
 	private static final int SCREEN_MARGIN = 12;
-	private static final float REFERENCE_GUI_SCALE = 3.0f;
+	/** When the screen is too small for the panel the panel runs nearly edge to edge, since every unit of margin costs text size. */
+	private static final int TIGHT_MARGIN = 2;
+	/**
+	 * Last resort when even the smallest {@link #MIN_UI_SCALE} cannot fit a panel. Shrinking only the
+	 * widgets leaves their text full-size, so labels get cut off and overlap; prefer shrinking the
+	 * whole screen, which {@link #fittingScaleFactor} does first.
+	 */
+	private static final float MIN_PANEL_SCALE = 0.55f;
+	/** How small a panel may be laid out, relative to its design size, before the screen is shrunk instead. */
+	private static final float SNAP_MIN_PANEL_SCALE = 0.75f;
+	/** Below this the whole screen is too small to read, so we stop shrinking and let it overflow. */
+	private static final float MIN_UI_SCALE = 0.5f;
 
 	private final int screenWidth;
 	private final int screenHeight;
@@ -27,10 +38,10 @@ final class EdenPanelLayout {
 	}
 
 	static EdenPanelLayout centered(int screenWidth, int screenHeight, int baseWidth, int baseHeight) {
-		float widthScale = (screenWidth - (SCREEN_MARGIN * 2f)) / baseWidth;
-		float heightScale = (screenHeight - (SCREEN_MARGIN * 2f)) / baseHeight;
+		float widthScale = (screenWidth - (marginFor(screenWidth, baseWidth) * 2f)) / baseWidth;
+		float heightScale = (screenHeight - (marginFor(screenHeight, baseHeight) * 2f)) / baseHeight;
 		float scale = Math.min(1.0f, Math.min(widthScale, heightScale));
-		scale = Math.max(0.55f, scale);
+		scale = Math.max(MIN_PANEL_SCALE, scale);
 		int panelWidth = Math.max(1, Math.round(baseWidth * scale));
 		int panelHeight = Math.max(1, Math.round(baseHeight * scale));
 		int panelX = (screenWidth - panelWidth) / 2;
@@ -38,12 +49,32 @@ final class EdenPanelLayout {
 		return new EdenPanelLayout(screenWidth, screenHeight, scale, panelX, panelY, panelWidth, panelHeight);
 	}
 
-	static float referenceScaleFactor() {
-		double currentScale = Minecraft.getInstance().getWindow().getGuiScale();
-		if (currentScale <= 0.0d) {
-			return 1.0f;
+	/**
+	 * The scale to draw a reference-space screen at, relative to the player's GUI scale, so these
+	 * screens are never bigger than the rest of the GUI at the setting the player chose.
+	 *
+	 * <p>When the panel does not fit, the whole screen is drawn smaller, text and widgets together.
+	 * The result is snapped to a whole number of screen pixels per GUI unit: Minecraft's bitmap font
+	 * is only sharp when each font pixel covers a whole number of screen pixels, and a fractional
+	 * scale (0.52x, say) makes the text blurry and jagged. To keep the snap from throwing away too
+	 * much size, the panel may be laid out down to {@link #SNAP_MIN_PANEL_SCALE} of its design size
+	 * first; below that the labels stop fitting their buttons.
+	 */
+	static float fittingScaleFactor(int screenWidth, int screenHeight, int baseWidth, int baseHeight, int guiScale) {
+		float fitWidth = screenWidth / (baseWidth * SNAP_MIN_PANEL_SCALE + TIGHT_MARGIN * 2f);
+		float fitHeight = screenHeight / (baseHeight * SNAP_MIN_PANEL_SCALE + TIGHT_MARGIN * 2f);
+		float pixelsPerUnit = guiScale * Math.min(1.0f, Math.min(fitWidth, fitHeight));
+		int whole = (int) Math.floor(pixelsPerUnit + 1.0e-3f);
+		if (whole >= 1) {
+			return whole / (float) guiScale;
 		}
-		return REFERENCE_GUI_SCALE / (float) currentScale;
+		// The window is too small for even one screen pixel per unit: fit it, blurry but visible.
+		return Math.max(MIN_UI_SCALE, pixelsPerUnit / guiScale);
+	}
+
+	/** The usual margin, or the tight one when the panel only fits at full size without the usual margin. */
+	private static int marginFor(int screenSize, int baseSize) {
+		return screenSize - SCREEN_MARGIN * 2 >= baseSize ? SCREEN_MARGIN : TIGHT_MARGIN;
 	}
 
 	int x(int baseOffset) {

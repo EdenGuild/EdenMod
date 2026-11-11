@@ -38,7 +38,6 @@ public final class AspectGiveawayScreen extends EdenReferenceScreen implements B
 	private static final String DEFAULT_FROM_RANK = "Recruiter";
 	private static final String DEFAULT_TO_RANK = "Owner";
 
-	private final Screen parent;
 	private final EdenModClient mod;
 
 	private List<GiveawayCandidate> allCandidates = List.of();
@@ -67,16 +66,14 @@ public final class AspectGiveawayScreen extends EdenReferenceScreen implements B
 	private Button backButton;
 
 	public AspectGiveawayScreen(Screen parent, EdenModClient mod) {
-		super(Component.literal("Aspect Giveaways"));
-		this.parent = parent;
+		super(Component.literal("Aspect Giveaways"), parent);
 		this.mod = mod;
 	}
 
 	@Override
 	protected void init() {
 		super.init();
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
 		toggleButton = Button.builder(Component.literal("← Payouts"), b -> this.minecraft.setScreen(new PayoutScreen(parent, mod))).bounds(layout.x(315), layout.y(8), layout.w(90), layout.h(16)).build();
 

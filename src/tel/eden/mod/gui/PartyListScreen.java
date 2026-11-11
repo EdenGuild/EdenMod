@@ -16,7 +16,6 @@ public final class PartyListScreen extends EdenReferenceScreen {
 	private static final int ROW_HEIGHT = 44;
 	private static final int VISIBLE_ROWS = 5;
 
-	private final Screen parent;
 	private final EdenModClient mod;
 
 	private final List<PartyInfo> lastKnownParties = new ArrayList<>();
@@ -27,16 +26,14 @@ public final class PartyListScreen extends EdenReferenceScreen {
 	private boolean draggingScrollbar;
 
 	public PartyListScreen(Screen parent, EdenModClient mod) {
-		super(Component.literal("Party List"));
-		this.parent = parent;
+		super(Component.literal("Party List"), parent);
 		this.mod = mod;
 	}
 
 	@Override
 	protected void init() {
 		super.init();
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
 		this.addRenderableWidget(Button.builder(Component.literal("Refresh"), button -> requestPartyList()).bounds(layout.x(15), layout.y(266), layout.w(190), layout.h(20)).build());
 		this.addRenderableWidget(Button.builder(Component.literal("Back"), button -> this.minecraft.setScreen(parent)).bounds(layout.x(215), layout.y(266), layout.w(190), layout.h(20)).build());

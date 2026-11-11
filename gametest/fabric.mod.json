@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "edenmod-gametest",
+  "version": "1.0.0",
+  "name": "EdenMod gametests",
+  "environment": "client",
+  "mixins": ["edenmod-gametest.mixins.json"],
+  "entrypoints": {
+    "fabric-client-gametest": ["perf.PerfClientGameTest", "behaviour.BehaviourGameTest", "ui.ScreensGameTest", "support.FailureReport"]
+  },
+  "depends": {
+    "edenmod": "*"
+  }
+}

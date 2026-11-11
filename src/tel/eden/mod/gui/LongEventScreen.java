@@ -79,9 +79,9 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	private record ImageClickTarget(ClickBox box, String imageUrl) {
 	}
 
-	private final Screen parent;
 	private final EdenModClient mod;
 	private EdenPanelLayout layout;
+
 	private static final class TimerRequest {
 		final long targetMs;
 		final int generation;
@@ -126,16 +126,14 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	private final List<ImageClickTarget> imageClickTargets = new ArrayList<>();
 
 	public LongEventScreen(Screen parent, EdenModClient mod) {
-		super(Component.literal("Event"));
-		this.parent = parent;
+		super(Component.literal("Event"), parent);
 		this.mod = mod;
 	}
 
 	@Override
 	protected void init() {
 		super.init();
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
 		this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose()).bounds(layout.x(160), layout.y(322), layout.w(160), layout.h(20)).build());
 
@@ -1764,8 +1762,4 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		return super.mouseScrolled(mouseX / uiScale, mouseY / uiScale, d, e);
 	}
 
-	@Override
-	public void onClose() {
-		this.minecraft.setScreen(parent);
-	}
 }

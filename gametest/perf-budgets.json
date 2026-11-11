@@ -1,0 +1,19 @@
+{
+  "minRenderSamples": 100,
+  "software": {
+    "idle": { "maxModSharePercent": 2.0, "maxHitchRatio": 3.0 },
+    "displays": { "maxModSharePercent": 3.0, "maxHitchRatio": 3.0 },
+    "displays-baby-mode": { "maxModSharePercent": 7.0, "maxHitchRatio": 3.0 },
+    "ghost-players-baby-mode": { "maxModSharePercent": 7.0, "maxHitchRatio": 3.0 },
+    "inventory-of-potions": { "maxModSharePercent": 4.5, "maxHitchRatio": 3.0 },
+    "ground-items": { "maxModSharePercent": 4.0, "maxHitchRatio": 3.0 }
+  },
+  "gpu": {
+    "idle": { "maxModSharePercent": 2.0, "maxHitchRatio": 3.0 },
+    "displays": { "maxModSharePercent": 3.0, "maxHitchRatio": 3.0 },
+    "displays-baby-mode": { "maxModSharePercent": 9.0, "maxHitchRatio": 3.0 },
+    "ghost-players-baby-mode": { "maxModSharePercent": 9.0, "maxHitchRatio": 3.0 },
+    "inventory-of-potions": { "maxModSharePercent": 4.5, "maxHitchRatio": 3.0 },
+    "ground-items": { "maxModSharePercent": 2.5, "maxHitchRatio": 3.0 }
+  }
+}

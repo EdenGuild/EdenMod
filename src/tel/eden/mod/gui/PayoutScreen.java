@@ -61,7 +61,6 @@ public final class PayoutScreen extends EdenReferenceScreen implements Backgroun
 	// fit on screen at once.
 	private static final List<String> RANK_ORDER = List.of("Recruit", "Recruiter", "Captain", "Strategist", "Chief", "Owner");
 
-	private final Screen parent;
 	private final EdenModClient mod;
 
 	private final List<PendingEntry> rows = new ArrayList<>();
@@ -88,16 +87,14 @@ public final class PayoutScreen extends EdenReferenceScreen implements Backgroun
 	private boolean defaultsApplied;
 
 	public PayoutScreen(Screen parent, EdenModClient mod) {
-		super(Component.literal("Payout"));
-		this.parent = parent;
+		super(Component.literal("Payout"), parent);
 		this.mod = mod;
 	}
 
 	@Override
 	protected void init() {
 		super.init();
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 		applyWidgetsForMode();
 	}
 
@@ -112,7 +109,7 @@ public final class PayoutScreen extends EdenReferenceScreen implements Backgroun
 		seenGeneration = -1;
 		defaultsApplied = false;
 
-		this.addRenderableWidget(CycleButton.<GuildRewards.RewardType>builder(type -> Component.literal(type == GuildRewards.RewardType.ASPECT ? "Aspects" : "Emeralds"), mode).withValues(List.of(GuildRewards.RewardType.ASPECT, GuildRewards.RewardType.EMERALD)).create(layout.x(15), layout.y(8), layout.w(90), layout.h(16), Component.literal("Reward"), (b, value) -> {
+		this.addRenderableWidget(CycleButton.<GuildRewards.RewardType>builder(type -> Component.literal(type == GuildRewards.RewardType.ASPECT ? "Aspects" : "Emeralds"), mode).withValues(List.of(GuildRewards.RewardType.ASPECT, GuildRewards.RewardType.EMERALD)).create(layout.x(15), layout.y(8), layout.w(110), layout.h(16), Component.literal("Reward"), (b, value) -> {
 			mode = value;
 			applyWidgetsForMode();
 		}));

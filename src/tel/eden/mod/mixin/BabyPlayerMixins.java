@@ -38,6 +38,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import tel.eden.mod.gui.EdenMenuScreen;
+import tel.eden.mod.render.EdenDisplayState;
 import tel.eden.mod.util.BabyPlayerEmoteTracker;
 import tel.eden.mod.util.Wynncraft;
 
@@ -147,9 +148,12 @@ abstract class BabyPlayerEmoteDisplayMixin {
 
 	@Inject(method = "extractRenderState(Lnet/minecraft/world/entity/Display;Lnet/minecraft/client/renderer/entity/state/DisplayEntityRenderState;F)V", at = @At("TAIL"))
 	private void edenmod$trackDisplayEntity(Display display, DisplayEntityRenderState state, float partialTick, CallbackInfo ci) {
-		// submit() receives only the render state. Keep the source entity so the
-		// display can later be associated with the player performing the emote.
-		BabyPlayerEmoteTracker.trackDisplay(state, display);
+		// submit() receives only the render state. Keep the source entity on the state
+		// so the display can later be associated with the player performing the emote.
+		// Do not move this into a map keyed by state: every display gets a fresh state
+		// every frame, and the churn shows up as render-thread spikes (see
+		// RenderHotPathTest).
+		((EdenDisplayState) state).edenmod$setSourceDisplay(display);
 	}
 
 	@Inject(method = "submit(Lnet/minecraft/client/renderer/entity/state/DisplayEntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/CameraRenderState;)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/entity/DisplayRenderer;submitInner(Lnet/minecraft/client/renderer/entity/state/DisplayEntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;IF)V"))
@@ -158,7 +162,7 @@ abstract class BabyPlayerEmoteDisplayMixin {
 			return;
 		}
 
-		Display display = BabyPlayerEmoteTracker.displayFor(state);
+		Display display = EdenDisplayState.sourceOf(state);
 		// Player-head displays make up the animated body and are transformed in
 		// BabyPlayerEmoteMixin, where Wynncraft's packed position can be decoded.
 		if (display instanceof Display.ItemDisplay itemDisplay && itemDisplay.itemRenderState() != null && itemDisplay.itemRenderState().itemStack().is(Items.PLAYER_HEAD)) {

@@ -44,7 +44,6 @@ public final class TerritoryLossBlacklistScreen extends EdenReferenceScreen {
 	private static final int FOOTER_BUTTON_WIDTH = 190;
 	private static final int FOOTER_GAP = 10;
 
-	private final Screen parent;
 	private final BridgeConfig config;
 
 	private EdenPanelLayout layout;
@@ -57,8 +56,7 @@ public final class TerritoryLossBlacklistScreen extends EdenReferenceScreen {
 	}
 
 	public TerritoryLossBlacklistScreen(Screen parent, BridgeConfig config, int scrollOffset) {
-		super(Component.literal("Territory Loss Blacklist"));
-		this.parent = parent;
+		super(Component.literal("Territory Loss Blacklist"), parent);
 		this.config = config;
 		this.scrollOffset = scrollOffset;
 	}
@@ -66,8 +64,7 @@ public final class TerritoryLossBlacklistScreen extends EdenReferenceScreen {
 	@Override
 	protected void init() {
 		super.init();
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
 		addBox = new EditBox(this.font, layout.x(PANEL_PADDING), layout.y(INPUT_Y), layout.w(INPUT_WIDTH), layout.h(20), Component.literal("Territory name"));
 		addBox.setMaxLength(100);
@@ -313,8 +310,7 @@ public final class TerritoryLossBlacklistScreen extends EdenReferenceScreen {
 	}
 
 	@Override
-	public void onClose() {
+	protected void beforeClose() {
 		config.save();
-		this.minecraft.setScreen(parent);
 	}
 }

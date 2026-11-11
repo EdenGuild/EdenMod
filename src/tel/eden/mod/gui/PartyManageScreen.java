@@ -23,7 +23,6 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 	private static final int BASE_PANEL_WIDTH = 360;
 	private static final int BASE_PANEL_HEIGHT = 320;
 
-	private final Screen parent;
 	private final EdenModClient mod;
 	private PartyInfo party;
 
@@ -47,8 +46,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 	private EdenPanelLayout layout;
 
 	public PartyManageScreen(Screen parent, EdenModClient mod, PartyInfo party) {
-		super(Component.literal("Manage Guild Party"));
-		this.parent = parent;
+		super(Component.literal("Manage Guild Party"), parent);
 		this.mod = mod;
 		this.party = party;
 		this.filledSlots = filledCount(party);
@@ -118,8 +116,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 
 	@Override
 	protected void init() {
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 		int rightColX = layout.x(190);
 
 		String self = mod != null ? mod.playerName() : null;
@@ -411,11 +408,6 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		if (ws != null) {
 			ws.sendPartyManage("remove", null, 0, ign);
 		}
-	}
-
-	@Override
-	public void onClose() {
-		this.minecraft.setScreen(this.parent);
 	}
 
 	@Override

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import java.util.Map;
 import net.fabricmc.loader.api.FabricLoader;
 import tel.eden.mod.EdenLogger;
@@ -152,12 +153,25 @@ public final class BridgeConfig {
 		/** Render-only dropped-item scale multiplier. Range 0.1-10.0; 1.0 means unchanged. */
 		public float size = 1.0f;
 
+		// nameContains in normalised form. The renderer needs it for every dropped item every
+		// frame, so it is recomputed only when the field is reassigned (compared by reference).
+		private transient String normalizedSource;
+		private transient String normalizedName = "";
+
 		public GroundItemVisibilityRule() {
 		}
 
 		public GroundItemVisibilityRule(String nameContains, float size) {
 			this.nameContains = nameContains;
 			this.size = size;
+		}
+
+		public String normalizedNameContains() {
+			if (nameContains != normalizedSource) {
+				normalizedSource = nameContains;
+				normalizedName = normalizeGroundItemName(nameContains);
+			}
+			return normalizedName;
 		}
 
 		public void sanitize() {
@@ -606,11 +620,35 @@ public final class BridgeConfig {
 		}
 	}
 
+	// Precompiled: String.replaceAll compiles its pattern on every call, and this runs per dropped item per frame.
+	private static final Pattern WHITESPACE_RUNS = Pattern.compile("\\s+");
+
 	public static String sanitizeGroundItemName(String value) {
 		if (value == null) {
 			return "";
 		}
-		return value.trim().replaceAll("\\s+", " ");
+		String trimmed = value.trim();
+		// Item names rarely contain whitespace runs, so skip the regex unless one is present.
+		return hasWhitespaceRun(trimmed) ? WHITESPACE_RUNS.matcher(trimmed).replaceAll(" ") : trimmed;
+	}
+
+	/** True if collapsing {@code \s+} to one space would change the text. */
+	private static boolean hasWhitespaceRun(String text) {
+		boolean previousWasSpace = false;
+		for (int i = 0; i < text.length(); i++) {
+			char c = text.charAt(i);
+			if (c == ' ') {
+				if (previousWasSpace) {
+					return true;
+				}
+				previousWasSpace = true;
+			} else if (c == '\t' || c == '\n' || c == '\u000B' || c == '\f' || c == '\r') {
+				return true;
+			} else {
+				previousWasSpace = false;
+			}
+		}
+		return false;
 	}
 
 	public static String normalizeGroundItemName(String value) {

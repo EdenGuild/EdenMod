@@ -14,6 +14,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ItemLore;
 import tel.eden.mod.EdenModClient;
+import tel.eden.mod.util.IdentityPairCache;
 
 /**
  * Client-side custom textures for crafted consumables (food/potions/scrolls), ported from
@@ -62,6 +63,12 @@ public final class CustomItemTextures {
 	// costs no extra scanning.
 	private static final int CACHE_LIMIT = 4096;
 	private static final Map<CacheKey, Decision> DECISION_CACHE = new HashMap<>();
+	// First level in front of DECISION_CACHE. Hashing a CacheKey walks every sibling and
+	// style of the name and every lore line, and a stack that no rule matches is never
+	// re-modelled, so it would pay that on every frame. An unchanged stack hands back the
+	// same component instances, so look them up by reference and only fall through to the
+	// value-keyed cache for components not seen before.
+	private static final IdentityPairCache<Component, ItemLore, Decision> IDENTITY_CACHE = new IdentityPairCache<>(512);
 
 	/** Value-equality cache key: the item's name and lore components. */
 	private record CacheKey(Component name, ItemLore lore) {
@@ -137,19 +144,28 @@ public final class CustomItemTextures {
 		// Key off the components directly (cheap, no string flattening) and check the cache
 		// before doing any lore/name string work.
 		ItemLore loreComponent = stack.get(DataComponents.LORE);
-		CacheKey key = new CacheKey(stack.getHoverName(), loreComponent == null ? ItemLore.EMPTY : loreComponent);
-		Decision cached = DECISION_CACHE.get(key);
+		Component hoverName = stack.getHoverName();
+		ItemLore loreKey = loreComponent == null ? ItemLore.EMPTY : loreComponent;
+		Decision cached = IDENTITY_CACHE.get(hoverName, loreKey);
+		if (cached == null) {
+			cached = DECISION_CACHE.get(new CacheKey(hoverName, loreKey));
+			if (cached != null) {
+				IDENTITY_CACHE.put(hoverName, loreKey, cached);
+			}
+		}
 		if (cached != null) {
 			return cached == NO_MATCH ? null : cached;
 		}
 		// Cache miss: now pay for flattening the lore to strings and scanning the rules.
-		String name = stack.getHoverName().getString();
+		String name = hoverName.getString();
 		List<String> lore = loreStrings(stack);
 		Decision match = name.equals("Air") ? null : resolve(stack, name, lore);
 		if (DECISION_CACHE.size() >= CACHE_LIMIT) {
 			DECISION_CACHE.clear();
 		}
-		DECISION_CACHE.put(key, match == null ? NO_MATCH : match);
+		Decision decision = match == null ? NO_MATCH : match;
+		DECISION_CACHE.put(new CacheKey(hoverName, loreKey), decision);
+		IDENTITY_CACHE.put(hoverName, loreKey, decision);
 		return match;
 	}
 

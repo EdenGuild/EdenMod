@@ -1,0 +1,79 @@
+name: gametest
+
+# Runs the client gametests in a real (software-rendered) client: render-thread performance budgets,
+# baby-mode behaviour and screen layout. See gametest/README.md.
+#
+# build.yml calls this on master, after the build passes and before a release. It is separate from the
+# pull-request checks because it downloads the game assets and takes several minutes. It can also be
+# run by hand from the Actions tab, on any branch.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  gametest:
+    name: client gametests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # Same cache as the build job, plus the game assets (~hundreds of MB) this job downloads.
+      - name: Cache Gradle downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/wrapper/dists
+            ~/.gradle/caches/modules-2
+            ~/.gradle/caches/fabric-loom
+            ~/.gradle/caches/jars-9
+          key: gradle-${{ hashFiles('gradle.properties', 'build.gradle', 'settings.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-
+
+      # Keep the downloaded .deb files between runs, so only the install is repeated and not the download.
+      # apt still needs its package index, so `apt-get update` stays. The key follows the runner image:
+      # a new image means new package versions, and the old files would be useless. This is a plain
+      # actions/cache on purpose, not a third-party action that would run with sudo in this pipeline.
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-${{ env.ImageVersion }}-${{ hashFiles('.github/workflows/gametest.yml') }}
+
+      # A virtual display plus Mesa's software OpenGL, so no GPU is needed. Sandbox as root so apt can
+      # write to the cache directory in the runner's home.
+      - name: Install display and software GL
+        run: |
+          mkdir -p ~/apt-archives/partial
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::archives="$HOME/apt-archives" -o APT::Sandbox::User=root xvfb libgl1-mesa-dri libglx-mesa0 libegl1 libxrandr2 libxcursor1 libxi6 libxxf86vm1 libopenal1
+
+      # Spotless is enforced by the build job; skipping it here keeps this job independent of the
+      # Eclipse formatter download.
+      - name: Run client gametests
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" ./gradlew runClientGameTest --no-daemon -x spotlessApply -x spotlessJava -x spotlessJavaApply
+
+      - name: Upload measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gametest-results
+          path: |
+            build/gametest/results.json
+            build/gametest/client.log
+            build/gametest/screens/
+            build/run/clientGameTest/build/gametest/
+          if-no-files-found: ignore

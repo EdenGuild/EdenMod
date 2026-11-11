@@ -16,7 +16,9 @@ public final class AllyProgressScreen extends EdenReferenceScreen implements Bac
 
 	public interface ProgressListener {
 		void onProgress(String status);
+
 		void onDone();
+
 		void requestCancel();
 	}
 
@@ -29,15 +31,14 @@ public final class AllyProgressScreen extends EdenReferenceScreen implements Bac
 	private volatile boolean done;
 
 	public AllyProgressScreen(String title, ProgressListener listener) {
-		super(Component.literal(title));
+		super(Component.literal(title), null);
 		this.listener = listener;
 	}
 
 	@Override
 	protected void init() {
 		super.init();
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 		cancelButton = this.addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> requestCancel()).bounds(layout.x(110), layout.y(80), layout.w(100), layout.h(20)).build());
 	}
 

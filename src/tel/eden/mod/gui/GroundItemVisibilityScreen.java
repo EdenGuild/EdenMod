@@ -35,7 +35,6 @@ public final class GroundItemVisibilityScreen extends EdenReferenceScreen {
 	private static final int FOOTER_GAP = 10;
 	private static final int FOOTER_BUTTON_WIDTH = (BASE_PANEL_WIDTH - PANEL_PADDING * 2 - FOOTER_GAP) / 2;
 
-	private final Screen parent;
 	private final BridgeConfig config;
 	private final List<RuleRow> rows = new ArrayList<>();
 
@@ -44,16 +43,14 @@ public final class GroundItemVisibilityScreen extends EdenReferenceScreen {
 	private boolean draggingScrollbar;
 
 	public GroundItemVisibilityScreen(Screen parent, BridgeConfig config) {
-		super(Component.literal("Dropped Item Rules"));
-		this.parent = parent;
+		super(Component.literal("Dropped Item Rules"), parent);
 		this.config = config;
 	}
 
 	@Override
 	protected void init() {
 		super.init();
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 		rows.clear();
 
 		this.addRenderableWidget(Button.builder(Component.literal("Add"), button -> onAdd()).bounds(layout.x(PANEL_PADDING), layout.y(FOOTER_Y), layout.w(FOOTER_BUTTON_WIDTH), layout.h(20)).build());
@@ -250,9 +247,8 @@ public final class GroundItemVisibilityScreen extends EdenReferenceScreen {
 	}
 
 	@Override
-	public void onClose() {
+	protected void beforeClose() {
 		config.save();
-		this.minecraft.setScreen(parent);
 	}
 
 	private static final class RuleRow {

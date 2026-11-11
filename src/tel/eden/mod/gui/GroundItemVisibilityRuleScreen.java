@@ -25,15 +25,13 @@ public final class GroundItemVisibilityRuleScreen extends EdenReferenceScreen {
 	private static final int CONTROL_HEIGHT = 20;
 	private static final int DONE_Y = BASE_PANEL_HEIGHT - PANEL_PADDING - CONTROL_HEIGHT;
 
-	private final Screen parent;
 	private final BridgeConfig config;
 	private final BridgeConfig.GroundItemVisibilityRule rule;
 
 	private EdenPanelLayout layout;
 
 	public GroundItemVisibilityRuleScreen(Screen parent, BridgeConfig config, BridgeConfig.GroundItemVisibilityRule rule) {
-		super(Component.literal("Dropped Item Scale Rule"));
-		this.parent = parent;
+		super(Component.literal("Dropped Item Scale Rule"), parent);
 		this.config = config;
 		this.rule = rule;
 	}
@@ -41,8 +39,7 @@ public final class GroundItemVisibilityRuleScreen extends EdenReferenceScreen {
 	@Override
 	protected void init() {
 		super.init();
-		updateReferenceSpace();
-		layout = EdenPanelLayout.centered(virtualWidth, virtualHeight, BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 		rule.sanitize();
 
 		EditBox nameBox = new EditBox(this.font, layout.x(CONTROL_X), layout.y(rowY(0)), layout.w(CONTROL_WIDTH), layout.h(CONTROL_HEIGHT), Component.literal("Name contains"));
@@ -99,10 +96,9 @@ public final class GroundItemVisibilityRuleScreen extends EdenReferenceScreen {
 	}
 
 	@Override
-	public void onClose() {
+	protected void beforeClose() {
 		rule.sanitize();
 		config.save();
-		this.minecraft.setScreen(parent);
 	}
 
 	private final class SizeSlider extends AbstractSliderButton {

@@ -100,6 +100,40 @@ jobs:
           name: edenmod-jar
           path: ${{ steps.jar.outputs.path }}
 
+  # The slow client gametests (render performance budgets, baby-mode behaviour, screen layout). A pull
+  # request gets only the fast checks above; these run once code lands on master, and the release below
+  # waits for them. They start only after the build passes, so minutes are not spent on a broken build.
+  gametest:
+    name: client gametests
+    needs: build
+    if: github.ref == 'refs/heads/master'
+    uses: ./.github/workflows/gametest.yml
+
+  # Nothing is released unless the build AND the gametests passed. It releases whenever master's
+  # mod_version has no GitHub release yet; it does not look at whether this particular commit changed
+  # gradle.properties. So a version bump whose gametests failed is released by the next master commit that
+  # passes, tagged at that later commit.
+  release:
+    name: release
+    needs: [build, gametest]
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the built jar
+        uses: actions/download-artifact@v4
+        with:
+          name: edenmod-jar
+          path: dist
+
+      - name: Locate release jar
+        id: jar
+        run: |
+          jar=$(ls dist/edenmod-*.jar | head -n1)
+          echo "path=$jar" >> "$GITHUB_OUTPUT"
+          echo "Releasing $jar"
+
       # --- Auto-release on a version bump -------------------------------------
       # On master, read mod_version from gradle.properties. If no release with the
       # matching tag (v<version>) exists yet, tag this commit and publish a Release
