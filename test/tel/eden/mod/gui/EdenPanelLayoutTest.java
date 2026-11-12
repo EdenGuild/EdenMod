@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 class EdenPanelLayoutTest {
 	/** Base panel sizes of every screen laid out through {@link EdenReferenceScreen#centeredLayout}. */
-	private static final int[][] BASE_PANELS = {{420, 360}, {420, 456}, {420, 300}, {320, 110}, {360, 170}, {360, 310}, {360, 320}, {350, 330}, {480, 350}};
+	private static final int[][] BASE_PANELS = {{420, 360}, {420, 456}, {420, 300}, {320, 110}, {360, 170}, {360, 310}, {360, 320}, {350, 330}, {680, 496}};
 
 	private static final int[][] WINDOWS = {{854, 480}, {1024, 576}, {1280, 720}, {1366, 768}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
 

@@ -34,22 +34,35 @@ import tel.eden.mod.raid.RaidGambitSafety;
 
 /** Screen displaying Standard Missions and Special Missions for long events. */
 public final class LongEventScreen extends EdenReferenceScreen {
-	private static final int BASE_PANEL_WIDTH = 480;
-	private static final int BASE_PANEL_HEIGHT = 350;
+	private static final int BASE_PANEL_WIDTH = 680;
+	private static final int BASE_PANEL_HEIGHT = 496;
+
+	private static final int TAB_Y = 6;
+	private static final int TAB_H = 18;
+	private static final int TAB0_X = 219;
+	private static final int TAB0_W = 84;
+	private static final int TAB1_X = 311;
+	private static final int TAB1_W = 150;
 
 	private static final String[] STANDARD_SLOTS_3 = {"daily", "special", "repeatable"};
 	private static final String[] STANDARD_SLOTS_4 = {"daily", "special", "repeatable", "repeatable2"};
-	private static final int[] STANDARD_CARD_BASE_X_3 = {16, 168, 320};
-	private static final int STANDARD_CARD_BASE_W_3 = 144;
-	private static final int[] STANDARD_CARD_BASE_X_4 = {12, 128, 244, 360};
-	private static final int STANDARD_CARD_BASE_W_4 = 108;
-	private static final int CARD_BASE_Y = 48;
-	private static final int CARD_BASE_H = 92;
+	private static final int[] STANDARD_CARD_BASE_X_3 = {14, 236, 458};
+	private static final int STANDARD_CARD_BASE_W_3 = 208;
+	private static final int[] STANDARD_CARD_BASE_X_4 = {14, 180, 346, 512};
+	private static final int STANDARD_CARD_BASE_W_4 = 154;
+	private static final int CARD_BASE_Y = 58;
+	private static final int CARD_BASE_H = 132;
 
-	private static final int[] SPECIAL_CARD_BASE_X = {13, 78, 143, 208, 273, 338, 403};
-	private static final int SPECIAL_CARD_BASE_W = 62;
-	private static final int SPECIAL_CARD_BASE_Y = 26;
-	private static final int SPECIAL_CARD_BASE_H = 58;
+	private static final int[] SPECIAL_CARD_BASE_X = {14, 108, 202, 296, 390, 484, 578};
+	private static final int SPECIAL_CARD_BASE_W = 88;
+	private static final int SPECIAL_CARD_BASE_Y = 30;
+	private static final int SPECIAL_CARD_BASE_H = 74;
+	private static final int DETAIL_X = 14;
+	private static final int DETAIL_Y = 114;
+	private static final int DETAIL_W = 652;
+	private static final int DETAIL_H = 330;
+	private static final int SCAVENGER_VISIBLE_ROWS = 4;
+	private static final int MYSTERY_VISIBLE_CLUES = 8;
 	private static final String[] SPECIAL_SLOT_DEFAULTS = {"Scavenger Hunt", "Riddle", "Mob Hunt", "Murder Mystery", "Build Battle", "Doodle Battle", "Raid Challenge"};
 
 	private static final SoundEvent CLICK_SOUND = SoundEvent.createVariableRangeEvent(Identifier.parse("minecraft:ui.button.click"));
@@ -135,12 +148,12 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	@Override
 	protected void init() {
 		super.init();
-		layout = screenFittingLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
-		this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose()).bounds(layout.x(160), layout.y(322), layout.w(160), layout.h(20)).build());
+		this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose()).bounds(layout.x(240), layout.y(462), layout.w(200), layout.h(20)).build());
 
 		String prevGuess = guessEditBox != null ? guessEditBox.getValue() : "";
-		guessEditBox = new EditBox(this.font, layout.x(24), layout.y(278), layout.w(280), layout.h(20), Component.literal("Guess"));
+		guessEditBox = new EditBox(this.font, layout.x(26), layout.y(408), layout.w(436), layout.h(20), Component.literal("Guess"));
 		guessEditBox.setHint(Component.literal("Enter suspect/solution..."));
 		guessEditBox.setMaxLength(64);
 		guessEditBox.setValue(prevGuess);
@@ -148,7 +161,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		guessEditBox.active = false;
 		this.addRenderableWidget(guessEditBox);
 
-		submitGuessBtn = Button.builder(Component.literal("Submit Guess"), b -> submitGuess(false)).bounds(layout.x(312), layout.y(278), layout.w(118), layout.h(20)).build();
+		submitGuessBtn = Button.builder(Component.literal("Submit Guess"), b -> submitGuess(false)).bounds(layout.x(470), layout.y(408), layout.w(138), layout.h(20)).build();
 		submitGuessBtn.visible = false;
 		submitGuessBtn.active = false;
 		this.addRenderableWidget(submitGuessBtn);
@@ -160,18 +173,6 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		}
 
 		refreshSnapshot();
-	}
-
-	private EdenPanelLayout screenFittingLayout(int basePanelWidth, int basePanelHeight) {
-		if (this.width <= 0 || this.height <= 0) {
-			return centeredLayout(basePanelWidth, basePanelHeight);
-		}
-		float scaleX = (this.width * 0.95f) / basePanelWidth;
-		float scaleY = (this.height * 0.93f) / basePanelHeight;
-		uiScale = Math.max(0.25f, Math.min(scaleX, scaleY));
-		virtualWidth = Math.max(1, Math.round(this.width / uiScale));
-		virtualHeight = Math.max(1, Math.round(this.height / uiScale));
-		return EdenPanelLayout.centered(virtualWidth, virtualHeight, basePanelWidth, basePanelHeight);
 	}
 
 	private void submitGuess() {
@@ -334,9 +335,9 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		int cardX = layout.x(standardCardBaseX(slotIndex, totalSlots));
 		int cardY = layout.y(CARD_BASE_Y);
 		int cardW = layout.w(standardCardBaseW(totalSlots));
-		int rerollSize = layout.w(14);
-		int rx = cardX + cardW - rerollSize - layout.w(4);
-		int ry = cardY + layout.h(4);
+		int rerollSize = layout.w(16);
+		int rx = cardX + cardW - rerollSize - layout.w(5);
+		int ry = cardY + layout.h(5);
 		return new ClickBox(rx, ry, rerollSize, rerollSize);
 	}
 
@@ -421,24 +422,24 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		// Header: Pending LE on left, Ends in on right
 		if (state != null && state.active()) {
 			String pendingText = "Pending: " + state.pendingLe() + " LE";
-			g.drawString(this.font, pendingText, layout.x(12), layout.y(10), 0xFFFFD24A);
+			g.drawString(this.font, pendingText, layout.x(14), layout.y(10), 0xFFFFD24A);
 			if (state.endsAtMs() > 0L) {
 				long rem = state.endsAtMs() - nowMs;
 				String endsText = rem > 0L ? "Ends in " + LongEventState.formatCountdown(rem, true) : "Ended";
-				g.drawString(this.font, endsText, layout.x(BASE_PANEL_WIDTH - 12) - this.font.width(endsText), layout.y(10), 0xFFCCCCCC);
+				g.drawString(this.font, endsText, layout.x(BASE_PANEL_WIDTH - 14) - this.font.width(endsText), layout.y(10), 0xFFCCCCCC);
 			}
 		}
 
 		// Top tab switcher (Missions vs ✦ Special Missions ✦)
-		int tab0X = layout.x(140);
-		int tab0Y = layout.y(6);
-		int tab0W = layout.w(70);
-		int tab0H = layout.h(16);
+		int tab0X = layout.x(TAB0_X);
+		int tab0Y = layout.y(TAB_Y);
+		int tab0W = layout.w(TAB0_W);
+		int tab0H = layout.h(TAB_H);
 
-		int tab1X = layout.x(216);
-		int tab1Y = layout.y(6);
-		int tab1W = layout.w(134);
-		int tab1H = layout.h(16);
+		int tab1X = layout.x(TAB1_X);
+		int tab1Y = layout.y(TAB_Y);
+		int tab1W = layout.w(TAB1_W);
+		int tab1H = layout.h(TAB_H);
 
 		ClickBox tab0Box = new ClickBox(tab0X, tab0Y, tab0W, tab0H);
 		ClickBox tab1Box = new ClickBox(tab1X, tab1Y, tab1W, tab1H);
@@ -465,8 +466,8 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		// Help badge [?]
 		int helpW = layout.w(18);
 		int helpH = layout.h(18);
-		int helpX = layout.x(449);
-		int helpY = layout.y(323);
+		int helpX = layout.x(648);
+		int helpY = layout.y(463);
 		helpBadgeBox = new ClickBox(helpX, helpY, helpW, helpH);
 		boolean helpHover = helpBadgeBox.contains(scaledMouseX, scaledMouseY);
 		g.fill(helpX, helpY, helpX + helpW, helpY + helpH, helpHover ? 0x66444444 : 0x44161616);
@@ -476,13 +477,13 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		// Error line banner if present
 		String recentError = mod.recentLongEventError();
 		if (!recentError.isEmpty()) {
-			drawFittedCenteredString(g, recentError, layout.centerX(), layout.y(314), layout.w(300), 0xFFFF5555);
+			drawFittedCenteredString(g, recentError, layout.centerX(), layout.y(449), layout.w(440), 0xFFFF5555);
 		}
 
 		if (seenGeneration == 0 || state == null) {
-			g.drawCenteredString(this.font, "Loading…", layout.centerX(), layout.y(155), 0xFFAAAAAA);
+			g.drawCenteredString(this.font, "Loading…", layout.centerX(), layout.y(225), 0xFFAAAAAA);
 		} else if (!state.active()) {
-			g.drawCenteredString(this.font, "No event is running", layout.centerX(), layout.y(155), 0xFFAAAAAA);
+			g.drawCenteredString(this.font, "No event is running", layout.centerX(), layout.y(225), 0xFFAAAAAA);
 		} else if (activeTab == 0) {
 			// Tab 0: Standard cards (Daily, Super, Repeatable 1, optional Repeatable 2)
 			String[] slotsToRender = currentStandardSlots();
@@ -513,9 +514,9 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				}
 
 				// Slot title + live countdown above card
-				g.drawCenteredString(this.font, slotLabel, cardCenterX, layout.y(25), 0xFFFFD24A);
+				g.drawCenteredString(this.font, slotLabel, cardCenterX, layout.y(34), 0xFFFFD24A);
 				String countdown = LongEventState.slotCountdownText(slotKey, slot != null ? slot.resetAtMs() : 0L, nowMs);
-				drawFittedCenteredString(g, countdown, cardCenterX, layout.y(36), cardW - 4, 0xFFCCCCCC);
+				drawFittedCenteredString(g, countdown, cardCenterX, layout.y(46), cardW - 4, 0xFFCCCCCC);
 
 				boolean completed = slot != null && slot.completed();
 				int borderColor = completed ? 0xFF3A8A3A : 0xFF4A4A4A;
@@ -523,12 +524,12 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				drawOutline(g, cardX, cardY, cardW, cardH, borderColor);
 
 				// Frame + centred tag icon
-				int frameSize = layout.w(42);
+				int frameSize = layout.w(52);
 				int frameX = cardCenterX - frameSize / 2;
-				int frameY = cardY + layout.h(4);
+				int frameY = cardY + layout.h(6);
 				Identifier tagIcon = iconForTag(slot != null ? slot.tag() : "Other");
 				if (tagIcon != null) {
-					int iconSize = layout.w(26);
+					int iconSize = layout.w(32);
 					drawTexture(g, tagIcon, frameX + (frameSize - iconSize) / 2, frameY + (frameSize - iconSize) / 2, iconSize, iconSize);
 				}
 				Identifier frameTex = frameForSlot(slotKey);
@@ -537,7 +538,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				}
 
 				if (slot == null || slot.missionId() == 0) {
-					g.drawCenteredString(this.font, "No mission", cardCenterX, cardY + layout.h(42), 0xFF888888);
+					g.drawCenteredString(this.font, "No mission", cardCenterX, cardY + layout.h(66), 0xFF888888);
 					continue;
 				}
 
@@ -581,15 +582,15 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				}
 				int innerW = cardW - layout.w(12);
 				List<FormattedCharSequence> titleLines = this.font.split(Component.literal(displayTitle), Math.max(20, innerW));
-				int titleY = cardY + layout.h(48);
+				int titleY = cardY + layout.h(66);
 				int maxTitleLines = Math.min(2, titleLines.size());
 				for (int lineIdx = 0; lineIdx < maxTitleLines; lineIdx++) {
 					FormattedCharSequence seq = titleLines.get(lineIdx);
-					g.drawString(this.font, seq, cardCenterX - this.font.width(seq) / 2, titleY + lineIdx * 9, 0xFFFFFFFF);
+					g.drawString(this.font, seq, cardCenterX - this.font.width(seq) / 2, titleY + lineIdx * 10, 0xFFFFFFFF);
 				}
 
 				// Progress & +N LE row
-				int statY = cardY + layout.h(69);
+				int statY = cardY + layout.h(100);
 				int padX = cardX + layout.w(6);
 				int rightX = cardX + cardW - layout.w(6);
 				String rewardStr = "+" + slot.rewardLe() + " LE";
@@ -604,9 +605,9 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				g.drawString(this.font, rewardStr, rightX - rewardW, statY, 0xFFFFD24A);
 
 				// Progress bar
-				int barY = cardY + layout.h(80);
+				int barY = cardY + layout.h(114);
 				int barW = cardW - layout.w(12);
-				int barH = Math.max(3, layout.h(5));
+				int barH = Math.max(4, layout.h(6));
 				float ratio = completed ? 1.0f : Math.clamp(slot.progress() / (float) Math.max(1, slot.target()), 0.0f, 1.0f);
 				drawProgressBar(g, padX, barY, barW, barH, ratio, completed);
 			}
@@ -614,31 +615,31 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			// Master section (up to 3 tracks: Raids, Guild Wars, Missions)
 			List<LongEventState.Master> masters = state.masters();
 			if (!masters.isEmpty()) {
-				g.drawString(this.font, "Event Objectives", layout.x(12), layout.y(148), 0xFFFFD24A);
+				g.drawString(this.font, "Event Objectives", layout.x(14), layout.y(204), 0xFFFFD24A);
 				Identifier masterFrame = FRAME_MASTER;
 				for (int idx = 0; idx < Math.min(3, masters.size()); idx++) {
 					LongEventState.Master master = masters.get(idx);
-					int rowX = layout.x(12);
-					int rowY = layout.y(162 + idx * 36);
-					int rowW = layout.w(456);
-					int rowH = layout.h(32);
+					int rowX = layout.x(14);
+					int rowY = layout.y(222 + idx * 70);
+					int rowW = layout.w(652);
+					int rowH = layout.h(62);
 
 					boolean mDone = master.completed();
 					g.fill(rowX, rowY, rowX + rowW, rowY + rowH, 0x66161616);
 					drawOutline(g, rowX, rowY, rowW, rowH, mDone ? 0xFF3A8A3A : 0xFF4A4A4A);
 
-					int fSize = layout.w(26);
-					int fx = rowX + layout.w(3);
+					int fSize = layout.w(40);
+					int fx = rowX + layout.w(8);
 					int fy = rowY + (rowH - fSize) / 2;
 					Identifier mIcon = iconForMaster(master.kind());
 					if (mIcon != null) {
-						int iSize = layout.w(18);
+						int iSize = layout.w(26);
 						drawTexture(g, mIcon, fx + (fSize - iSize) / 2, fy + (fSize - iSize) / 2, iSize, iSize);
 					}
 					drawTexture(g, masterFrame, fx, fy, fSize, fSize);
 
-					int textLeft = rowX + layout.w(34);
-					int topY = rowY + layout.h(4);
+					int textLeft = rowX + layout.w(56);
+					int topY = rowY + layout.h(12);
 					String displayTitle = switch (master.kind().toLowerCase(Locale.ROOT)) {
 						case "raids" -> "All Raids";
 						case "missions" -> "Mission Completions";
@@ -651,16 +652,16 @@ public final class LongEventScreen extends EdenReferenceScreen {
 					g.drawString(this.font, tierText, afterTitle, topY, 0xFF55FFFF);
 
 					String earnedText = "Earned: " + master.earnedLe() + " LE";
-					g.drawString(this.font, earnedText, rowX + rowW - layout.w(6) - this.font.width(earnedText), topY, 0xFFFFD24A);
+					g.drawString(this.font, earnedText, rowX + rowW - layout.w(10) - this.font.width(earnedText), topY, 0xFFFFD24A);
 
-					int barY = rowY + layout.h(18);
-					int barW = layout.w(230);
-					int barH = Math.max(3, layout.h(5));
+					int barY = rowY + layout.h(34);
+					int barW = layout.w(360);
+					int barH = Math.max(4, layout.h(7));
 					float ratio = mDone ? 1.0f : Math.clamp(master.progress() / (float) Math.max(1, master.target()), 0.0f, 1.0f);
 					drawProgressBar(g, textLeft, barY, barW, barH, ratio, mDone);
 
-					int statusX = textLeft + barW + layout.w(8);
-					int statusY = rowY + layout.h(16);
+					int statusX = textLeft + barW + layout.w(12);
+					int statusY = rowY + layout.h(33);
 					if (mDone) {
 						g.drawString(this.font, "All tiers complete", statusX, statusY, 0xFF55FF55);
 					} else {
@@ -700,14 +701,14 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				int badgeY;
 				int rewardY;
 				if (titleLines.size() <= 1) {
-					drawFittedCenteredString(g, titleLines.isEmpty() ? title : titleLines.get(0), cardCenterX, cardY + layout.h(6), cardW - 4, 0xFFFFFFFF);
-					badgeY = cardY + layout.h(23);
-					rewardY = cardY + layout.h(39);
+					drawFittedCenteredString(g, titleLines.isEmpty() ? title : titleLines.get(0), cardCenterX, cardY + layout.h(10), cardW - 4, 0xFFFFFFFF);
+					badgeY = cardY + layout.h(32);
+					rewardY = cardY + layout.h(52);
 				} else {
-					drawFittedCenteredString(g, titleLines.get(0), cardCenterX, cardY + layout.h(2), cardW - 4, 0xFFFFFFFF);
-					drawFittedCenteredString(g, titleLines.get(1), cardCenterX, cardY + layout.h(12), cardW - 4, 0xFFFFFFFF);
-					badgeY = cardY + layout.h(25);
-					rewardY = cardY + layout.h(41);
+					drawFittedCenteredString(g, titleLines.get(0), cardCenterX, cardY + layout.h(4), cardW - 4, 0xFFFFFFFF);
+					drawFittedCenteredString(g, titleLines.get(1), cardCenterX, cardY + layout.h(16), cardW - 4, 0xFFFFFFFF);
+					badgeY = cardY + layout.h(36);
+					rewardY = cardY + layout.h(54);
 				}
 
 				String badgeText;
@@ -735,11 +736,11 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				drawFittedCenteredString(g, rewardText, cardCenterX, rewardY, cardW - 4, 0xFFFFD24A);
 			}
 
-			// Detail View (y=90 to y=310)
-			int dX = layout.x(13);
-			int dY = layout.y(90);
-			int dW = layout.w(454);
-			int dH = layout.h(220);
+			// Detail View
+			int dX = layout.x(DETAIL_X);
+			int dY = layout.y(DETAIL_Y);
+			int dW = layout.w(DETAIL_W);
+			int dH = layout.h(DETAIL_H);
 			g.fill(dX, dY, dX + dW, dY + dH, 0x66161616);
 			drawOutline(g, dX, dY, dW, dH, 0xFF4A4A4A);
 
@@ -747,20 +748,20 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			if (currentSpecial != null && currentSpecial.unlockAtMs() > 0 && nowMs < currentSpecial.unlockAtMs()) {
 				long rem = currentSpecial.unlockAtMs() - nowMs;
 				String unlockStr = "Unlocks in " + LongEventState.formatCountdown(rem, true);
-				g.drawCenteredString(this.font, "🔒 Mission Locked", dX + dW / 2, dY + layout.h(85), 0xFFAAAAAA);
-				g.drawCenteredString(this.font, unlockStr, dX + dW / 2, dY + layout.h(105), 0xFFFFD24A);
+				g.drawCenteredString(this.font, "🔒 Mission Locked", dX + dW / 2, dY + layout.h(135), 0xFFAAAAAA);
+				g.drawCenteredString(this.font, unlockStr, dX + dW / 2, dY + layout.h(155), 0xFFFFD24A);
 			} else if (currentSpecial != null && !currentSpecial.opened() && currentSpecial.raidRequirement() > 0) {
 				String raidReq = "Complete Raids to Unlock: " + currentSpecial.raidProgress() + " / " + currentSpecial.raidRequirement() + " Raids";
-				g.drawCenteredString(this.font, "⚔ Raid Requirement", dX + dW / 2, dY + layout.h(70), 0xFFFFB833);
-				g.drawCenteredString(this.font, raidReq, dX + dW / 2, dY + layout.h(90), 0xFFFFFFFF);
-				int barW = layout.w(240);
-				int barH = layout.h(8);
+				g.drawCenteredString(this.font, "⚔ Raid Requirement", dX + dW / 2, dY + layout.h(115), 0xFFFFB833);
+				g.drawCenteredString(this.font, raidReq, dX + dW / 2, dY + layout.h(135), 0xFFFFFFFF);
+				int barW = layout.w(320);
+				int barH = layout.h(9);
 				int barX = dX + (dW - barW) / 2;
-				int barY = dY + layout.h(110);
+				int barY = dY + layout.h(155);
 				float ratio = Math.clamp(currentSpecial.raidProgress() / (float) Math.max(1, currentSpecial.raidRequirement()), 0.0f, 1.0f);
 				drawProgressBar(g, barX, barY, barW, barH, ratio, false);
 			} else if (currentSpecial == null || !currentSpecial.opened()) {
-				g.drawCenteredString(this.font, "🔒 Locked", dX + dW / 2, dY + layout.h(100), 0xFFAAAAAA);
+				g.drawCenteredString(this.font, "🔒 Locked", dX + dW / 2, dY + layout.h(155), 0xFFAAAAAA);
 			} else {
 				switch (selectedSpecialSlot) {
 					case 1 -> renderScavengerHuntDetail(g, dX, dY, dW, dH, currentSpecial, nowMs, scaledMouseX, scaledMouseY);
@@ -952,25 +953,25 @@ public final class LongEventScreen extends EdenReferenceScreen {
 
 		List<String> images = getSpecialSlotImages(slot, nowMs);
 		List<LongEventState.ScavengerItem> items = slot.items();
-		int startY = dY + layout.h(38);
-		int rowH = layout.h(52);
-		int gap = layout.h(4);
-		int bodyH = dH - layout.h(48);
+		int startY = dY + layout.h(42);
+		int rowH = layout.h(64);
+		int gap = layout.h(6);
+		int bodyH = dH - layout.h(52);
 
 		if (!images.isEmpty()) {
-			int colGap = layout.w(8);
+			int colGap = layout.w(10);
 			int colW = (dW - layout.w(20) - colGap) / 2;
 			int imgX = dX + layout.w(10);
 			int itemsX = imgX + colW + colGap;
 
 			renderSpecialImageSection(g, imgX, startY, colW, bodyH, images, mouseX, mouseY);
 
-			int maxScavScroll = Math.max(0, items.size() - 3);
+			int maxScavScroll = Math.max(0, items.size() - SCAVENGER_VISIBLE_ROWS);
 			if (scavengerScrollOffset > maxScavScroll) {
 				scavengerScrollOffset = maxScavScroll;
 			}
-			int visibleCount = Math.min(3, items.size() - scavengerScrollOffset);
-			boolean hasScrollbar = items.size() > 3;
+			int visibleCount = Math.min(SCAVENGER_VISIBLE_ROWS, items.size() - scavengerScrollOffset);
+			boolean hasScrollbar = items.size() > SCAVENGER_VISIBLE_ROWS;
 			int itemW = colW - layout.w(hasScrollbar ? 14 : 0);
 
 			for (int i = 0; i < visibleCount; i++) {
@@ -979,15 +980,15 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				renderScavengerItemRow(g, items.get(itemIndex), itemIndex, itemsX, itemY, itemW, rowH, nowMs, "🔒 In ");
 			}
 			if (hasScrollbar) {
-				layout.drawScrollbar(g, itemsX + colW - layout.w(6), startY, layout.w(4), 3 * (rowH + gap) - gap, 3, items.size(), scavengerScrollOffset);
+				layout.drawScrollbar(g, itemsX + colW - layout.w(6), startY, layout.w(4), SCAVENGER_VISIBLE_ROWS * (rowH + gap) - gap, SCAVENGER_VISIBLE_ROWS, items.size(), scavengerScrollOffset);
 			}
 		} else {
-			int maxScavScroll = Math.max(0, items.size() - 3);
+			int maxScavScroll = Math.max(0, items.size() - SCAVENGER_VISIBLE_ROWS);
 			if (scavengerScrollOffset > maxScavScroll) {
 				scavengerScrollOffset = maxScavScroll;
 			}
-			int visibleCount = Math.min(3, items.size() - scavengerScrollOffset);
-			boolean hasScrollbar = items.size() > 3;
+			int visibleCount = Math.min(SCAVENGER_VISIBLE_ROWS, items.size() - scavengerScrollOffset);
+			boolean hasScrollbar = items.size() > SCAVENGER_VISIBLE_ROWS;
 			int itemW = dW - layout.w(hasScrollbar ? 26 : 20);
 
 			for (int i = 0; i < visibleCount; i++) {
@@ -997,7 +998,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				renderScavengerItemRow(g, items.get(itemIndex), itemIndex, itemX, itemY, itemW, rowH, nowMs, "🔒 Unlocks in ");
 			}
 			if (hasScrollbar) {
-				layout.drawScrollbar(g, dX + dW - layout.w(10), startY, layout.w(5), 3 * (rowH + gap) - gap, 3, items.size(), scavengerScrollOffset);
+				layout.drawScrollbar(g, dX + dW - layout.w(10), startY, layout.w(5), SCAVENGER_VISIBLE_ROWS * (rowH + gap) - gap, SCAVENGER_VISIBLE_ROWS, items.size(), scavengerScrollOffset);
 			}
 		}
 	}
@@ -1035,11 +1036,11 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		if (!itUnlocked) {
 			long rem = it.unlockAtMs() > nowMs ? it.unlockAtMs() - nowMs : 0L;
 			String lockedText = rem > 0L ? countdownPrefix + LongEventState.formatCountdown(rem, true) : "🔒 Locked";
-			g.drawString(this.font, lockedText, rowX + layout.w(6), rowY + layout.h(22), 0xFFAAAAAA);
+			g.drawString(this.font, lockedText, rowX + layout.w(6), rowY + layout.h(24), 0xFFAAAAAA);
 		} else {
 			List<String> noteLines = wrapWords(it.note(), rowW - layout.w(12));
-			for (int nl = 0; nl < Math.min(2, noteLines.size()); nl++) {
-				g.drawString(this.font, noteLines.get(nl), rowX + layout.w(6), rowY + layout.h(20 + nl * 10), 0xFFDDDDDD);
+			for (int nl = 0; nl < Math.min(3, noteLines.size()); nl++) {
+				g.drawString(this.font, noteLines.get(nl), rowX + layout.w(6), rowY + layout.h(22 + nl * 11), 0xFFDDDDDD);
 			}
 		}
 	}
@@ -1210,7 +1211,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			}
 		}
 
-		int progY = dY + layout.h(30);
+		int progY = dY + layout.h(34);
 		String clueProg = "Clue Progress: " + slot.clueRaidProgress() + " / " + slot.clueRaidTarget() + " Raids";
 		g.drawString(this.font, clueProg, dX + layout.w(10), progY, 0xFFFFFFFF);
 		if (slot.clueUnlockedToday()) {
@@ -1220,9 +1221,9 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			}
 			g.drawString(this.font, unlockedMsg, dX + layout.w(10) + this.font.width(clueProg) + layout.w(12), progY, 0xFF55FF55);
 		} else {
-			int cBarW = layout.w(110);
-			int cBarH = Math.max(3, layout.h(5));
-			int cBarX = dX + layout.w(10) + this.font.width(clueProg) + layout.w(10);
+			int cBarW = layout.w(160);
+			int cBarH = Math.max(4, layout.h(6));
+			int cBarX = dX + layout.w(10) + this.font.width(clueProg) + layout.w(12);
 			float cRatio = Math.clamp(slot.clueRaidProgress() / (float) Math.max(1, slot.clueRaidTarget()), 0.0f, 1.0f);
 			drawProgressBar(g, cBarX, progY + 1, cBarW, cBarH, cRatio, false);
 		}
@@ -1230,8 +1231,8 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		List<String> images = getSpecialSlotImages(slot, nowMs);
 		List<LongEventState.ClueEntry> clues = slot.clues();
 
-		int cluesStartY = dY + layout.h(44);
-		int listH = layout.h(120);
+		int cluesStartY = dY + layout.h(52);
+		int listH = layout.h(214);
 
 		if (!images.isEmpty()) {
 			int gap = layout.w(8);
@@ -1244,55 +1245,55 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			g.fill(cluesX, cluesStartY, cluesX + colW, cluesStartY + listH, 0x44141414);
 			drawOutline(g, cluesX, cluesStartY, colW, listH, 0xFF383838);
 
-			int headerY = cluesStartY + layout.h(6);
+			int headerY = cluesStartY + layout.h(8);
 			g.drawString(this.font, "Clues (" + clues.size() + ")", cluesX + layout.w(8), headerY, 0xFF55FFFF);
 
-			int listY = cluesStartY + layout.h(18);
+			int listY = cluesStartY + layout.h(24);
 			if (clues.isEmpty()) {
 				g.drawString(this.font, "No clues unlocked yet.", cluesX + layout.w(8), listY, 0xFF888888);
 			} else {
-				int maxClueScroll = Math.max(0, clues.size() - 4);
+				int maxClueScroll = Math.max(0, clues.size() - MYSTERY_VISIBLE_CLUES);
 				if (mysteryClueScrollOffset > maxClueScroll) {
 					mysteryClueScrollOffset = maxClueScroll;
 				}
-				int visibleCount = Math.min(4, clues.size() - mysteryClueScrollOffset);
-				boolean hasScrollbar = clues.size() > 4;
+				int visibleCount = Math.min(MYSTERY_VISIBLE_CLUES, clues.size() - mysteryClueScrollOffset);
+				boolean hasScrollbar = clues.size() > MYSTERY_VISIBLE_CLUES;
 				int availableTextW = colW - layout.w(hasScrollbar ? 18 : 12);
 
 				for (int ci = 0; ci < visibleCount; ci++) {
 					int clueIndex = mysteryClueScrollOffset + ci;
 					LongEventState.ClueEntry ce = clues.get(clueIndex);
-					int rowY = listY + ci * layout.h(15);
+					int rowY = listY + ci * layout.h(20);
 					String prefix = "#" + (clueIndex + 1) + ": ";
 					g.drawString(this.font, prefix, cluesX + layout.w(8), rowY, 0xFFFFD24A);
 					int pWidth = this.font.width(prefix);
 					drawFittedString(g, ce.note(), cluesX + layout.w(8) + pWidth, rowY, availableTextW - pWidth, 0xFFDDDDDD);
-					if (mouseX >= cluesX + layout.w(8) && mouseX < cluesX + colW - layout.w(8) && mouseY >= rowY && mouseY < rowY + layout.h(15)) {
+					if (mouseX >= cluesX + layout.w(8) && mouseX < cluesX + colW - layout.w(8) && mouseY >= rowY && mouseY < rowY + layout.h(20)) {
 						hoveredClueNote = ce.note();
 					}
 				}
 				if (hasScrollbar) {
-					layout.drawScrollbar(g, cluesX + colW - layout.w(7), listY, layout.w(4), 4 * layout.h(15), 4, clues.size(), mysteryClueScrollOffset);
+					layout.drawScrollbar(g, cluesX + colW - layout.w(7), listY, layout.w(4), MYSTERY_VISIBLE_CLUES * layout.h(20), MYSTERY_VISIBLE_CLUES, clues.size(), mysteryClueScrollOffset);
 				}
 			}
 		} else {
 			g.drawString(this.font, "Unlocked Clues (" + clues.size() + "):", dX + layout.w(10), cluesStartY, 0xFF55FFFF);
-			int listY = cluesStartY + layout.h(12);
+			int listY = cluesStartY + layout.h(16);
 			if (clues.isEmpty()) {
 				g.drawString(this.font, "No clues unlocked yet. Complete raids to reveal clues!", dX + layout.w(14), listY, 0xFF888888);
 			} else {
-				int maxClueScroll = Math.max(0, clues.size() - 4);
+				int maxClueScroll = Math.max(0, clues.size() - MYSTERY_VISIBLE_CLUES);
 				if (mysteryClueScrollOffset > maxClueScroll) {
 					mysteryClueScrollOffset = maxClueScroll;
 				}
-				int visibleCount = Math.min(4, clues.size() - mysteryClueScrollOffset);
-				boolean hasScrollbar = clues.size() > 4;
+				int visibleCount = Math.min(MYSTERY_VISIBLE_CLUES, clues.size() - mysteryClueScrollOffset);
+				boolean hasScrollbar = clues.size() > MYSTERY_VISIBLE_CLUES;
 				int availableTextW = dW - layout.w(hasScrollbar ? 85 : 75);
 
 				for (int ci = 0; ci < visibleCount; ci++) {
 					int clueIndex = mysteryClueScrollOffset + ci;
 					LongEventState.ClueEntry ce = clues.get(clueIndex);
-					int rowY = listY + ci * layout.h(15);
+					int rowY = listY + ci * layout.h(20);
 					String prefix = "• Clue #" + (clueIndex + 1) + ": ";
 					g.drawString(this.font, prefix, dX + layout.w(14), rowY, 0xFFFFD24A);
 					int pWidth = this.font.width(prefix);
@@ -1300,23 +1301,23 @@ public final class LongEventScreen extends EdenReferenceScreen {
 					if (!ce.imageUrl().isEmpty()) {
 						renderImageLink(g, ce.imageUrl(), dX + dW - layout.w(hasScrollbar ? 58 : 48), rowY, mouseX, mouseY);
 					}
-					if (mouseX >= dX + layout.w(14) && mouseX < dX + dW - layout.w(hasScrollbar ? 60 : 50) && mouseY >= rowY && mouseY < rowY + layout.h(15)) {
+					if (mouseX >= dX + layout.w(14) && mouseX < dX + dW - layout.w(hasScrollbar ? 60 : 50) && mouseY >= rowY && mouseY < rowY + layout.h(20)) {
 						hoveredClueNote = ce.note();
 					}
 				}
 				if (hasScrollbar) {
-					layout.drawScrollbar(g, dX + dW - layout.w(10), listY, layout.w(5), 4 * layout.h(15), 4, clues.size(), mysteryClueScrollOffset);
+					layout.drawScrollbar(g, dX + dW - layout.w(10), listY, layout.w(5), MYSTERY_VISIBLE_CLUES * layout.h(20), MYSTERY_VISIBLE_CLUES, clues.size(), mysteryClueScrollOffset);
 				}
 			}
 		}
 
-		int statusY = layout.y(264);
+		int statusY = layout.y(390);
 		if (slot.completed()) {
 			g.drawCenteredString(this.font, "Mystery Solved! ✔", dX + dW / 2, statusY, 0xFF55FF55);
 		} else {
 			if (slot.opened()) {
-				int btnX = layout.x(434);
-				int btnY = layout.y(278);
+				int btnX = layout.x(614);
+				int btnY = layout.y(408);
 				int btnW = layout.w(20);
 				int btnH = layout.h(20);
 				mysteryRerollBox = new ClickBox(btnX, btnY, btnW, btnH);
@@ -1669,10 +1670,10 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			double my = scaled.y();
 
 			// Tab switcher click
-			int tab0X = layout.x(140);
-			int tab0Y = layout.y(6);
-			int tab0W = layout.w(70);
-			int tab0H = layout.h(16);
+			int tab0X = layout.x(TAB0_X);
+			int tab0Y = layout.y(TAB_Y);
+			int tab0W = layout.w(TAB0_W);
+			int tab0H = layout.h(TAB_H);
 			ClickBox tab0Box = new ClickBox(tab0X, tab0Y, tab0W, tab0H);
 			if (tab0Box.contains(mx, my)) {
 				if (activeTab != 0) {
@@ -1685,10 +1686,10 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				return true;
 			}
 
-			int tab1X = layout.x(216);
-			int tab1Y = layout.y(6);
-			int tab1W = layout.w(134);
-			int tab1H = layout.h(16);
+			int tab1X = layout.x(TAB1_X);
+			int tab1Y = layout.y(TAB_Y);
+			int tab1W = layout.w(TAB1_W);
+			int tab1H = layout.h(TAB_H);
 			ClickBox tab1Box = new ClickBox(tab1X, tab1Y, tab1W, tab1H);
 			if (tab1Box.contains(mx, my)) {
 				if (activeTab != 1) {
@@ -1841,22 +1842,22 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		double scaledMouseX = mouseX / uiScale;
 		double scaledMouseY = mouseY / uiScale;
 		if (activeTab == 1 && layout != null && state != null && state.active()) {
-			int dX = layout.x(13);
-			int dY = layout.y(90);
-			int dW = layout.w(454);
-			int dH = layout.h(220);
+			int dX = layout.x(DETAIL_X);
+			int dY = layout.y(DETAIL_Y);
+			int dW = layout.w(DETAIL_W);
+			int dH = layout.h(DETAIL_H);
 			if (scaledMouseX >= dX && scaledMouseX < dX + dW && scaledMouseY >= dY && scaledMouseY < dY + dH) {
 				if (selectedSpecialSlot == 1) {
 					LongEventState.SpecialSlot slot1 = state.findSpecialSlot(1);
-					if (slot1 != null && slot1.items().size() > 3) {
-						int maxScroll = slot1.items().size() - 3;
+					if (slot1 != null && slot1.items().size() > SCAVENGER_VISIBLE_ROWS) {
+						int maxScroll = slot1.items().size() - SCAVENGER_VISIBLE_ROWS;
 						scavengerScrollOffset = Math.clamp(scavengerScrollOffset - (int) Math.signum(e), 0, maxScroll);
 						return true;
 					}
 				} else if (selectedSpecialSlot == 4) {
 					LongEventState.SpecialSlot slot4 = state.findSpecialSlot(4);
-					if (slot4 != null && slot4.clues().size() > 4) {
-						int maxScroll = slot4.clues().size() - 4;
+					if (slot4 != null && slot4.clues().size() > MYSTERY_VISIBLE_CLUES) {
+						int maxScroll = slot4.clues().size() - MYSTERY_VISIBLE_CLUES;
 						mysteryClueScrollOffset = Math.clamp(mysteryClueScrollOffset - (int) Math.signum(e), 0, maxScroll);
 						return true;
 					}
