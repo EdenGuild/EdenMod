@@ -133,7 +133,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	@Override
 	protected void init() {
 		super.init();
-		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = screenFittingLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
 		this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose()).bounds(layout.x(160), layout.y(322), layout.w(160), layout.h(20)).build());
 
@@ -158,6 +158,18 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		}
 
 		refreshSnapshot();
+	}
+
+	private EdenPanelLayout screenFittingLayout(int basePanelWidth, int basePanelHeight) {
+		if (this.width <= 0 || this.height <= 0) {
+			return centeredLayout(basePanelWidth, basePanelHeight);
+		}
+		float scaleX = (this.width * 0.95f) / basePanelWidth;
+		float scaleY = (this.height * 0.93f) / basePanelHeight;
+		uiScale = Math.max(0.25f, Math.min(scaleX, scaleY));
+		virtualWidth = Math.max(1, Math.round(this.width / uiScale));
+		virtualHeight = Math.max(1, Math.round(this.height / uiScale));
+		return EdenPanelLayout.centered(virtualWidth, virtualHeight, basePanelWidth, basePanelHeight);
 	}
 
 	private void submitGuess() {
@@ -351,6 +363,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		hoveredTooltipTitle = "Clue Details";
 		helpBadgeBox = null;
 		mysteryRerollBox = null;
+		String hoveredSpecialCardTitle = null;
 
 		imageClickTargets.clear();
 		specialImageNavPrevBox = null;
@@ -671,13 +684,31 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				ClickBox mBox = new ClickBox(cardX, cardY, cardW, cardH);
 				boolean hovered = mBox.contains(scaledMouseX, scaledMouseY);
 
+				String title = (s != null && !s.title().isEmpty()) ? s.title() : SPECIAL_SLOT_DEFAULTS[i];
+				if (hovered) {
+					hoveredSpecialCardTitle = title;
+				}
+
 				int bg = selected ? 0x992B2B2B : (hovered ? 0x66222222 : 0x55161616);
 				int border = selected ? 0xFFFFD24A : (hovered ? 0xFF888888 : ((s != null && s.completed()) ? 0xFF3A8A3A : 0xFF444444));
 				g.fill(cardX, cardY, cardX + cardW, cardY + cardH, bg);
 				drawOutline(g, cardX, cardY, cardW, cardH, border);
 
-				String title = (s != null && !s.title().isEmpty()) ? s.title() : SPECIAL_SLOT_DEFAULTS[i];
-				drawFittedCenteredString(g, title, cardCenterX, cardY + layout.h(4), cardW - 6, 0xFFFFFFFF);
+				List<String> titleLines = wrapWords(title, cardW - 4);
+				int badgeY;
+				int rewardY;
+				if (titleLines.size() <= 1) {
+					drawFittedCenteredString(g, title, cardCenterX, cardY + layout.h(6), cardW - 4, 0xFFFFFFFF);
+					badgeY = cardY + layout.h(23);
+					rewardY = cardY + layout.h(39);
+				} else {
+					String line1 = titleLines.get(0);
+					String line2 = String.join(" ", titleLines.subList(1, titleLines.size()));
+					drawFittedCenteredString(g, line1, cardCenterX, cardY + layout.h(2), cardW - 4, 0xFFFFFFFF);
+					drawFittedCenteredString(g, line2, cardCenterX, cardY + layout.h(12), cardW - 4, 0xFFFFFFFF);
+					badgeY = cardY + layout.h(25);
+					rewardY = cardY + layout.h(41);
+				}
 
 				String badgeText;
 				int badgeColor;
@@ -697,11 +728,11 @@ public final class LongEventScreen extends EdenReferenceScreen {
 					badgeText = "Locked ⏳";
 					badgeColor = 0xFFAAAAAA;
 				}
-				drawFittedCenteredString(g, badgeText, cardCenterX, cardY + layout.h(22), cardW - 6, badgeColor);
+				drawFittedCenteredString(g, badgeText, cardCenterX, badgeY, cardW - 4, badgeColor);
 
 				int reward = s != null ? s.rewardLe() : 0;
 				String rewardText = "+" + reward + " LE";
-				drawFittedCenteredString(g, rewardText, cardCenterX, cardY + layout.h(38), cardW - 6, 0xFFFFD24A);
+				drawFittedCenteredString(g, rewardText, cardCenterX, rewardY, cardW - 4, 0xFFFFD24A);
 			}
 
 			// Detail View (y=90 to y=310)
@@ -772,6 +803,8 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				clueLines.add(Component.literal(l).withStyle(ChatFormatting.WHITE));
 			}
 			g.setComponentTooltipForNextFrame(this.font, clueLines, mouseX, mouseY);
+		} else if (hoveredSpecialCardTitle != null && !hoveredSpecialCardTitle.isEmpty()) {
+			g.setComponentTooltipForNextFrame(this.font, List.of(Component.literal(hoveredSpecialCardTitle).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD)), mouseX, mouseY);
 		}
 	}
 
@@ -920,14 +953,30 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				g.fill(itemsX, itemY, itemsX + itemW, itemY + rowH, 0x44141414);
 				drawOutline(g, itemsX, itemY, itemW, rowH, 0xFF383838);
 
-				String diff = it.difficulty().isEmpty() ? "Item #" + (itemIndex + 1) : it.difficulty();
+				String diff = it.difficulty().isEmpty() ? "easy" : it.difficulty();
 				int diffColor = switch (diff.toLowerCase(Locale.ROOT)) {
 					case "easy" -> 0xFF55FF55;
 					case "medium" -> 0xFFFFD24A;
 					case "hard" -> 0xFFFF5555;
 					default -> 0xFF55FFFF;
 				};
-				g.drawString(this.font, "[" + diff + "]", itemsX + layout.w(6), itemY + layout.h(6), diffColor);
+
+				String diffText = "[" + diff + "]";
+				int diffW = this.font.width(diffText);
+				int diffX = itemsX + itemW - layout.w(6) - diffW;
+				int diffY = itemY + layout.h(6);
+				if (!it.imageUrl().isEmpty()) {
+					Component diffLabel = Component.literal(diffText).withStyle(ChatFormatting.UNDERLINE);
+					ClickBox box = new ClickBox(diffX - 2, diffY - 1, diffW + 4, 10);
+					imageClickTargets.add(new ImageClickTarget(box, it.imageUrl()));
+					g.drawString(this.font, diffLabel, diffX, diffY, diffColor);
+				} else {
+					g.drawString(this.font, diffText, diffX, diffY, diffColor);
+				}
+
+				String itemTitle = it.title().isEmpty() ? "Item #" + (itemIndex + 1) : it.title();
+				int maxTitleW = Math.max(10, diffX - (itemsX + layout.w(6)) - layout.w(4));
+				drawFittedString(g, itemTitle, itemsX + layout.w(6), itemY + layout.h(6), maxTitleW, 0xFFFFFFFF);
 
 				boolean itUnlocked = it.unlocked() && (it.unlockAtMs() <= 0L || nowMs >= it.unlockAtMs());
 				if (!itUnlocked) {
@@ -938,9 +987,6 @@ public final class LongEventScreen extends EdenReferenceScreen {
 					List<String> noteLines = wrapWords(it.note(), itemW - layout.w(12));
 					for (int nl = 0; nl < Math.min(2, noteLines.size()); nl++) {
 						g.drawString(this.font, noteLines.get(nl), itemsX + layout.w(6), itemY + layout.h(20 + nl * 10), 0xFFDDDDDD);
-					}
-					if (!it.imageUrl().isEmpty()) {
-						renderImageLink(g, it.imageUrl(), itemsX + itemW - layout.w(48), itemY + layout.h(6), mouseX, mouseY);
 					}
 				}
 			}
@@ -965,14 +1011,30 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				g.fill(itemX, itemY, itemX + itemW, itemY + rowH, 0x44141414);
 				drawOutline(g, itemX, itemY, itemW, rowH, 0xFF383838);
 
-				String diff = it.difficulty().isEmpty() ? "Item #" + (itemIndex + 1) : it.difficulty();
+				String diff = it.difficulty().isEmpty() ? "easy" : it.difficulty();
 				int diffColor = switch (diff.toLowerCase(Locale.ROOT)) {
 					case "easy" -> 0xFF55FF55;
 					case "medium" -> 0xFFFFD24A;
 					case "hard" -> 0xFFFF5555;
 					default -> 0xFF55FFFF;
 				};
-				g.drawString(this.font, "[" + diff + "]", itemX + layout.w(6), itemY + layout.h(6), diffColor);
+
+				String diffText = "[" + diff + "]";
+				int diffW = this.font.width(diffText);
+				int diffX = itemX + itemW - layout.w(6) - diffW;
+				int diffY = itemY + layout.h(6);
+				if (!it.imageUrl().isEmpty()) {
+					Component diffLabel = Component.literal(diffText).withStyle(ChatFormatting.UNDERLINE);
+					ClickBox box = new ClickBox(diffX - 2, diffY - 1, diffW + 4, 10);
+					imageClickTargets.add(new ImageClickTarget(box, it.imageUrl()));
+					g.drawString(this.font, diffLabel, diffX, diffY, diffColor);
+				} else {
+					g.drawString(this.font, diffText, diffX, diffY, diffColor);
+				}
+
+				String itemTitle = it.title().isEmpty() ? "Item #" + (itemIndex + 1) : it.title();
+				int maxTitleW = Math.max(10, diffX - (itemX + layout.w(6)) - layout.w(4));
+				drawFittedString(g, itemTitle, itemX + layout.w(6), itemY + layout.h(6), maxTitleW, 0xFFFFFFFF);
 
 				boolean itUnlocked = it.unlocked() && (it.unlockAtMs() <= 0L || nowMs >= it.unlockAtMs());
 				if (!itUnlocked) {
@@ -980,12 +1042,9 @@ public final class LongEventScreen extends EdenReferenceScreen {
 					String lockedText = rem > 0L ? "🔒 Unlocks in " + LongEventState.formatCountdown(rem, true) : "🔒 Locked";
 					g.drawString(this.font, lockedText, itemX + layout.w(6), itemY + layout.h(22), 0xFFAAAAAA);
 				} else {
-					List<String> noteLines = wrapWords(it.note(), itemW - layout.w(60));
+					List<String> noteLines = wrapWords(it.note(), itemW - layout.w(12));
 					for (int nl = 0; nl < Math.min(2, noteLines.size()); nl++) {
 						g.drawString(this.font, noteLines.get(nl), itemX + layout.w(6), itemY + layout.h(20 + nl * 10), 0xFFDDDDDD);
-					}
-					if (!it.imageUrl().isEmpty()) {
-						renderImageLink(g, it.imageUrl(), itemX + itemW - layout.w(48), itemY + layout.h(6), mouseX, mouseY);
 					}
 				}
 			}
@@ -1015,6 +1074,8 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			clueImage = slot.imageUrl();
 		}
 
+		boolean showClue = slot.hasClues() && (!clueNote.isEmpty() || !clueImage.isEmpty());
+
 		if (!images.isEmpty()) {
 			int gap = layout.w(8);
 			int colW = (dW - layout.w(20) - gap) / 2;
@@ -1022,85 +1083,91 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			int rightX = imgX + colW + gap;
 			renderSpecialImageSection(g, imgX, bodyY, colW, bodyH, images, mouseX, mouseY);
 
-			int sectionH = (bodyH - layout.h(6)) / 2;
+			int rBoxH = showClue ? (bodyH - layout.h(6)) / 2 : bodyH;
 
 			// Riddle Box
 			int rBoxY = bodyY;
-			g.fill(rightX, rBoxY, rightX + colW, rBoxY + sectionH, 0x44141414);
-			drawOutline(g, rightX, rBoxY, colW, sectionH, 0xFF383838);
+			g.fill(rightX, rBoxY, rightX + colW, rBoxY + rBoxH, 0x44141414);
+			drawOutline(g, rightX, rBoxY, colW, rBoxH, 0xFF383838);
 			g.drawString(this.font, "Riddle:", rightX + layout.w(8), rBoxY + layout.h(6), 0xFFFFD24A);
 
 			if (!slot.note().isEmpty()) {
 				List<String> nLines = wrapWords(slot.note(), colW - layout.w(16));
-				int maxLines = Math.max(1, (sectionH - layout.h(24)) / 10);
+				int maxLines = Math.max(1, (rBoxH - layout.h(24)) / 10);
 				for (int i = 0; i < Math.min(maxLines, nLines.size()); i++) {
 					g.drawString(this.font, nLines.get(i), rightX + layout.w(8), rBoxY + layout.h(20 + i * 10), 0xFFDDDDDD);
 				}
-				if (mouseX >= rightX && mouseX < rightX + colW && mouseY >= rBoxY && mouseY < rBoxY + sectionH) {
+				if (mouseX >= rightX && mouseX < rightX + colW && mouseY >= rBoxY && mouseY < rBoxY + rBoxH) {
 					hoveredClueNote = slot.note();
 					hoveredTooltipTitle = "Riddle";
 				}
 			}
 
-			// Clue Box
-			int cBoxY = rBoxY + sectionH + layout.h(6);
-			g.fill(rightX, cBoxY, rightX + colW, cBoxY + sectionH, 0x44141414);
-			drawOutline(g, rightX, cBoxY, colW, sectionH, 0xFF383838);
-			g.drawString(this.font, "Clue:", rightX + layout.w(8), cBoxY + layout.h(6), 0xFF55FFFF);
+			if (showClue) {
+				// Clue Box
+				int cBoxH = (bodyH - layout.h(6)) / 2;
+				int cBoxY = rBoxY + rBoxH + layout.h(6);
+				g.fill(rightX, cBoxY, rightX + colW, cBoxY + cBoxH, 0x44141414);
+				drawOutline(g, rightX, cBoxY, colW, cBoxH, 0xFF383838);
+				g.drawString(this.font, "Clue:", rightX + layout.w(8), cBoxY + layout.h(6), 0xFF55FFFF);
 
-			if (!clueNote.isEmpty()) {
-				List<String> cLines = wrapWords(clueNote, colW - layout.w(16));
-				int maxLines = Math.max(1, (sectionH - layout.h(24)) / 10);
-				for (int i = 0; i < Math.min(maxLines, cLines.size()); i++) {
-					g.drawString(this.font, cLines.get(i), rightX + layout.w(8), cBoxY + layout.h(20 + i * 10), 0xFFFFFFFF);
-				}
-				if (mouseX >= rightX && mouseX < rightX + colW && mouseY >= cBoxY && mouseY < cBoxY + sectionH) {
-					hoveredClueNote = clueNote;
-					hoveredTooltipTitle = "Clue Details";
+				if (!clueNote.isEmpty()) {
+					List<String> cLines = wrapWords(clueNote, colW - layout.w(16));
+					int maxLines = Math.max(1, (cBoxH - layout.h(24)) / 10);
+					for (int i = 0; i < Math.min(maxLines, cLines.size()); i++) {
+						g.drawString(this.font, cLines.get(i), rightX + layout.w(8), cBoxY + layout.h(20 + i * 10), 0xFFFFFFFF);
+					}
+					if (mouseX >= rightX && mouseX < rightX + colW && mouseY >= cBoxY && mouseY < cBoxY + cBoxH) {
+						hoveredClueNote = clueNote;
+						hoveredTooltipTitle = "Clue Details";
+					}
 				}
 			}
 		} else {
 			int boxX = dX + layout.w(10);
 			int boxW = dW - layout.w(20);
-			int sectionH = (bodyH - layout.h(6)) / 2;
+			int rBoxH = showClue ? (bodyH - layout.h(6)) / 2 : bodyH;
 
 			// Riddle Box
 			int rBoxY = bodyY;
-			g.fill(boxX, rBoxY, boxX + boxW, rBoxY + sectionH, 0x44141414);
-			drawOutline(g, boxX, rBoxY, boxW, sectionH, 0xFF383838);
+			g.fill(boxX, rBoxY, boxX + boxW, rBoxY + rBoxH, 0x44141414);
+			drawOutline(g, boxX, rBoxY, boxW, rBoxH, 0xFF383838);
 			g.drawString(this.font, "Riddle:", boxX + layout.w(8), rBoxY + layout.h(6), 0xFFFFD24A);
 
 			if (!slot.note().isEmpty()) {
 				List<String> nLines = wrapWords(slot.note(), boxW - layout.w(16));
-				int maxLines = Math.max(1, (sectionH - layout.h(24)) / 10);
+				int maxLines = Math.max(1, (rBoxH - layout.h(24)) / 10);
 				for (int i = 0; i < Math.min(maxLines, nLines.size()); i++) {
 					g.drawString(this.font, nLines.get(i), boxX + layout.w(8), rBoxY + layout.h(20 + i * 10), 0xFFDDDDDD);
 				}
-				if (mouseX >= boxX && mouseX < boxX + boxW && mouseY >= rBoxY && mouseY < rBoxY + sectionH) {
+				if (mouseX >= boxX && mouseX < boxX + boxW && mouseY >= rBoxY && mouseY < rBoxY + rBoxH) {
 					hoveredClueNote = slot.note();
 					hoveredTooltipTitle = "Riddle";
 				}
 			}
 
-			// Clue Box
-			int cBoxY = rBoxY + sectionH + layout.h(6);
-			g.fill(boxX, cBoxY, boxX + boxW, cBoxY + sectionH, 0x44141414);
-			drawOutline(g, boxX, cBoxY, boxW, sectionH, 0xFF383838);
-			g.drawString(this.font, "Your Clue:", boxX + layout.w(8), cBoxY + layout.h(6), 0xFF55FFFF);
+			if (showClue) {
+				// Clue Box
+				int cBoxH = (bodyH - layout.h(6)) / 2;
+				int cBoxY = rBoxY + rBoxH + layout.h(6);
+				g.fill(boxX, cBoxY, boxX + boxW, cBoxY + cBoxH, 0x44141414);
+				drawOutline(g, boxX, cBoxY, boxW, cBoxH, 0xFF383838);
+				g.drawString(this.font, "Your Clue:", boxX + layout.w(8), cBoxY + layout.h(6), 0xFF55FFFF);
 
-			if (!clueNote.isEmpty()) {
-				List<String> cLines = wrapWords(clueNote, boxW - layout.w(60));
-				int maxLines = Math.max(1, (sectionH - layout.h(24)) / 10);
-				for (int ci = 0; ci < Math.min(maxLines, cLines.size()); ci++) {
-					g.drawString(this.font, cLines.get(ci), boxX + layout.w(8), cBoxY + layout.h(20 + ci * 10), 0xFFFFFFFF);
+				if (!clueNote.isEmpty()) {
+					List<String> cLines = wrapWords(clueNote, boxW - layout.w(60));
+					int maxLines = Math.max(1, (cBoxH - layout.h(24)) / 10);
+					for (int ci = 0; ci < Math.min(maxLines, cLines.size()); ci++) {
+						g.drawString(this.font, cLines.get(ci), boxX + layout.w(8), cBoxY + layout.h(20 + ci * 10), 0xFFFFFFFF);
+					}
+					if (mouseX >= boxX && mouseX < boxX + boxW && mouseY >= cBoxY && mouseY < cBoxY + cBoxH) {
+						hoveredClueNote = clueNote;
+						hoveredTooltipTitle = "Clue Details";
+					}
 				}
-				if (mouseX >= boxX && mouseX < boxX + boxW && mouseY >= cBoxY && mouseY < cBoxY + sectionH) {
-					hoveredClueNote = clueNote;
-					hoveredTooltipTitle = "Clue Details";
+				if (!clueImage.isEmpty()) {
+					renderImageLink(g, clueImage, boxX + boxW - layout.w(48), cBoxY + layout.h(6), mouseX, mouseY);
 				}
-			}
-			if (!clueImage.isEmpty()) {
-				renderImageLink(g, clueImage, boxX + boxW - layout.w(48), cBoxY + layout.h(6), mouseX, mouseY);
 			}
 		}
 	}
@@ -1489,7 +1556,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			g.drawString(this.font, text, x, y, color);
 			return;
 		}
-		float minScale = 0.8f;
+		float minScale = 0.75f;
 		float s = Math.max(minScale, maxWidth / (float) textW);
 		String toDraw = text;
 		if (maxWidth / (float) textW < minScale) {
@@ -1512,7 +1579,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			g.drawCenteredString(this.font, text, centerX, y, color);
 			return;
 		}
-		float minScale = 0.8f;
+		float minScale = 0.75f;
 		float s = Math.max(minScale, maxWidth / (float) textW);
 		String toDraw = text;
 		if (maxWidth / (float) textW < minScale) {
