@@ -135,7 +135,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 	@Override
 	protected void init() {
 		super.init();
-		layout = screenFittingLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 
 		this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose()).bounds(layout.x(160), layout.y(322), layout.w(160), layout.h(20)).build());
 
@@ -160,18 +160,6 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		}
 
 		refreshSnapshot();
-	}
-
-	private EdenPanelLayout screenFittingLayout(int basePanelWidth, int basePanelHeight) {
-		if (this.width <= 0 || this.height <= 0) {
-			return centeredLayout(basePanelWidth, basePanelHeight);
-		}
-		float scaleX = (this.width * 0.95f) / basePanelWidth;
-		float scaleY = (this.height * 0.93f) / basePanelHeight;
-		uiScale = Math.max(0.25f, Math.min(scaleX, scaleY));
-		virtualWidth = Math.max(1, Math.round(this.width / uiScale));
-		virtualHeight = Math.max(1, Math.round(this.height / uiScale));
-		return EdenPanelLayout.centered(virtualWidth, virtualHeight, basePanelWidth, basePanelHeight);
 	}
 
 	private void submitGuess() {
