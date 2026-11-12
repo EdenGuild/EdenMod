@@ -6,7 +6,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
-abstract class EdenReferenceScreen extends Screen {
+abstract class EdenReferenceScreen extends EdenScreen {
 	protected float uiScale = 1.0f;
 	protected int virtualWidth;
 	protected int virtualHeight;

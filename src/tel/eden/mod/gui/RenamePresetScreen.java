@@ -12,7 +12,7 @@ import tel.eden.mod.war.eco.TerritoryGuideController;
 /**
  * Modal dialog allowing the user to rename a saved territory preset.
  */
-public class RenamePresetScreen extends Screen {
+public class RenamePresetScreen extends EdenScreen {
 	private final Screen parent;
 	private final String oldName;
 	private EditBox nameField;

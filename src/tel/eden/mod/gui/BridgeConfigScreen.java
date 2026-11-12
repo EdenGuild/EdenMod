@@ -17,8 +17,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.config.BridgeConfig;
-import tel.eden.mod.update.UpdateChecker;
-import tel.eden.mod.update.UpdateInfo;
 
 /**
  * Fullscreen bridge config screen.
@@ -35,11 +33,12 @@ import tel.eden.mod.update.UpdateInfo;
  * scrolling clips cleanly. Rows outside the viewport are hidden, so they can't be
  * clicked from the header/footer gaps.
  */
-public final class BridgeConfigScreen extends Screen {
+public final class BridgeConfigScreen extends EdenScreen {
 	private static final Identifier LOGO_TEXTURE = Identifier.parse("edenmod:icon.png");
 	private static final int LOGO_W = 256;
 	private static final int LOGO_H = 256;
 
+	private static final int CONTENT_BACKDROP_MARGIN = 8;
 	private static final int MAX_CONTENT_WIDTH = 420;
 	private static final int ROW_HEIGHT = 24;
 	private static final int LIST_TOP_PADDING = 4;
@@ -413,8 +412,14 @@ public final class BridgeConfigScreen extends Screen {
 	}
 
 	@Override
+	public void renderBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+		super.renderBackground(g, mouseX, mouseY, partialTick);
+		// The settings are rows of small text, so they sit on the same gray panel the other screens use.
+		EdenPanelLayout.drawPanel(g, contentX() - CONTENT_BACKDROP_MARGIN, 0, contentWidth() + CONTENT_BACKDROP_MARGIN * 2, this.height);
+	}
+
+	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
-		this.renderMenuBackground(g);
 		advanceScroll();
 		layoutRows();
 		super.render(g, mouseX, mouseY, delta);
@@ -449,16 +454,6 @@ public final class BridgeConfigScreen extends Screen {
 		g.disableScissor();
 
 		drawScrollbar(g, scrollbarX(), top, SCROLLBAR_W, height);
-
-		String currentVer = UpdateChecker.currentVersion();
-		if (currentVer == null) {
-			currentVer = "Unknown";
-		}
-		UpdateInfo pendingUpdate = EdenModClient.instance().getPendingUpdate();
-		String versionText = "v" + currentVer;
-		String updateText = pendingUpdate != null ? "Update Available: " + pendingUpdate.version() : "Up to date";
-		g.drawString(this.font, versionText, this.width - this.font.width(versionText) - 6, 6, 0xFFAAAAAA);
-		g.drawString(this.font, updateText, this.width - this.font.width(updateText) - 6, 18, pendingUpdate != null ? 0xFF55FF55 : 0xFFAAAAAA);
 
 		if (categoryDropdown != null) {
 			categoryDropdown.renderPopup(g, mouseX, mouseY);

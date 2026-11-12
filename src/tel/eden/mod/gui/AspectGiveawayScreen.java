@@ -333,22 +333,11 @@ public final class AspectGiveawayScreen extends EdenReferenceScreen implements B
 	// -- rendering ----------------------------------------------------------------
 
 	@Override
-	protected void renderMenuBackground(GuiGraphics g) {
-		// Suppressed so the in-game world remains visible through lessened blur during background container automation.
-	}
-
-	@Override
-	protected void renderMenuBackground(GuiGraphics g, int x, int y, int width, int height) {
-		// Suppressed so the in-game world remains visible through lessened blur during background container automation.
-	}
-
-	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
 		int scaledMouseX = scaledMouseX(mouseX);
 		int scaledMouseY = scaledMouseY(mouseY);
 
 		pushReferencePose(g);
-		layout.drawBackground(g, 0x66000000);
 		layout.drawPanel(g);
 		super.render(g, scaledMouseX, scaledMouseY, delta);
 

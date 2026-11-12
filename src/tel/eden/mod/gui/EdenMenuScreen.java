@@ -13,7 +13,7 @@ import org.lwjgl.glfw.GLFW;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.config.BridgeConfig;
 
-public class EdenMenuScreen extends Screen {
+public class EdenMenuScreen extends EdenScreen {
 	private static final int BASE_CONTENT_WIDTH = 200;
 	private static final int BUTTON_HEIGHT = 20;
 	private static final int BUTTON_SPACING = 24;
@@ -94,13 +94,7 @@ public class EdenMenuScreen extends Screen {
 	}
 
 	@Override
-	public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-		this.renderMenuBackground(guiGraphics);
-	}
-
-	@Override
 	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-		this.renderMenuBackground(guiGraphics);
 		super.render(guiGraphics, mouseX, mouseY, partialTick);
 
 		MenuMetrics metrics = menuMetrics();

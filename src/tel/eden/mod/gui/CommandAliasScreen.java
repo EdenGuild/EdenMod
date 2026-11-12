@@ -334,7 +334,6 @@ public final class CommandAliasScreen extends EdenReferenceScreen {
 		int scaledMouseY = scaledMouseY(mouseY);
 
 		pushReferencePose(g);
-		layout.drawBackground(g);
 		layout.drawPanel(g);
 
 		int listLeft = layout.x(LIST_X);

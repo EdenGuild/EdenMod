@@ -185,7 +185,7 @@ public abstract class ChatScreenMixin {
 		if (ChatReplyManager.hasActiveReply()) {
 			String trimmed = message != null ? message.trim() : "";
 			if (trimmed.startsWith("/g ") && trimmed.length() > 3 && !trimmed.substring(3).isBlank()) {
-				ChatReplyManager.markPendingReply();
+				ChatReplyManager.markPendingReply(trimmed.substring(3));
 			} else {
 				ChatReplyManager.clearActiveReply();
 			}

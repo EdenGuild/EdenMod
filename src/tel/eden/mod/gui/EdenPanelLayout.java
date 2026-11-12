@@ -19,17 +19,13 @@ final class EdenPanelLayout {
 	/** Below this the whole screen is too small to read, so we stop shrinking and let it overflow. */
 	private static final float MIN_UI_SCALE = 0.5f;
 
-	private final int screenWidth;
-	private final int screenHeight;
 	private final float scale;
 	private final int panelX;
 	private final int panelY;
 	private final int panelWidth;
 	private final int panelHeight;
 
-	private EdenPanelLayout(int screenWidth, int screenHeight, float scale, int panelX, int panelY, int panelWidth, int panelHeight) {
-		this.screenWidth = screenWidth;
-		this.screenHeight = screenHeight;
+	private EdenPanelLayout(float scale, int panelX, int panelY, int panelWidth, int panelHeight) {
 		this.scale = scale;
 		this.panelX = panelX;
 		this.panelY = panelY;
@@ -46,7 +42,7 @@ final class EdenPanelLayout {
 		int panelHeight = Math.max(1, Math.round(baseHeight * scale));
 		int panelX = (screenWidth - panelWidth) / 2;
 		int panelY = (screenHeight - panelHeight) / 2;
-		return new EdenPanelLayout(screenWidth, screenHeight, scale, panelX, panelY, panelWidth, panelHeight);
+		return new EdenPanelLayout(scale, panelX, panelY, panelWidth, panelHeight);
 	}
 
 	/**
@@ -109,24 +105,21 @@ final class EdenPanelLayout {
 		return panelX + (panelWidth / 2);
 	}
 
-	void drawBackground(GuiGraphics g) {
-		drawBackground(g, 0xC0000000);
-	}
-
-	void drawBackground(GuiGraphics g, int color) {
-		g.fill(0, 0, screenWidth, screenHeight, color);
-	}
-
 	void drawPanel(GuiGraphics g) {
-		g.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, 0xE0282828);
-		g.fill(panelX, panelY, panelX + panelWidth, panelY + 1, 0xFF8E8E8E);
-		g.fill(panelX, panelY + panelHeight - 1, panelX + panelWidth, panelY + panelHeight, 0xFF5C5C5C);
-		g.fill(panelX, panelY, panelX + 1, panelY + panelHeight, 0xFF8E8E8E);
-		g.fill(panelX + panelWidth - 1, panelY, panelX + panelWidth, panelY + panelHeight, 0xFF5C5C5C);
-		g.fill(panelX + 1, panelY + 1, panelX + panelWidth - 1, panelY + 2, 0xFFC6C6C6);
-		g.fill(panelX + 1, panelY + panelHeight - 2, panelX + panelWidth - 1, panelY + panelHeight - 1, 0xFF3E3E3E);
-		g.fill(panelX + 1, panelY + 1, panelX + 2, panelY + panelHeight - 1, 0xFFC6C6C6);
-		g.fill(panelX + panelWidth - 2, panelY + 1, panelX + panelWidth - 1, panelY + panelHeight - 1, 0xFF3E3E3E);
+		drawPanel(g, panelX, panelY, panelWidth, panelHeight);
+	}
+
+	/** The gray beveled panel every EdenMod screen sits on, at any rectangle. */
+	static void drawPanel(GuiGraphics g, int x, int y, int width, int height) {
+		g.fill(x, y, x + width, y + height, 0xE0282828);
+		g.fill(x, y, x + width, y + 1, 0xFF8E8E8E);
+		g.fill(x, y + height - 1, x + width, y + height, 0xFF5C5C5C);
+		g.fill(x, y, x + 1, y + height, 0xFF8E8E8E);
+		g.fill(x + width - 1, y, x + width, y + height, 0xFF5C5C5C);
+		g.fill(x + 1, y + 1, x + width - 1, y + 2, 0xFFC6C6C6);
+		g.fill(x + 1, y + height - 2, x + width - 1, y + height - 1, 0xFF3E3E3E);
+		g.fill(x + 1, y + 1, x + 2, y + height - 1, 0xFFC6C6C6);
+		g.fill(x + width - 2, y + 1, x + width - 1, y + height - 1, 0xFF3E3E3E);
 	}
 
 	void drawScrollbar(GuiGraphics g, int x, int y, int width, int height, int visibleItems, int totalItems, int offset) {

@@ -15,7 +15,7 @@ import tel.eden.mod.hud.HudPanels;
  * resize it. Changes write straight to {@link BridgeConfig#hudPositions} /
  * {@link BridgeConfig#hudScales} and persist on release. Opened from the config screen.
  */
-public final class HudLayoutScreen extends Screen {
+public final class HudLayoutScreen extends EdenScreen {
 	private static final int BOX_BG = 0x804060A0;
 	private static final int BOX_BG_HOVER = 0xA05080C0;
 	private static final int BORDER = 0xFFFFFFFF;

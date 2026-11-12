@@ -401,7 +401,6 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		}
 
 		pushReferencePose(g);
-		layout.drawBackground(g);
 		layout.drawPanel(g);
 
 		// Header: Pending LE on left, Ends in on right

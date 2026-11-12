@@ -12,6 +12,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 import tel.eden.mod.config.BridgeConfig;
+import tel.eden.mod.gui.EdenScreen;
 
 /**
  * Assigns the {@value EmoteWheel#SLOTS} emote-wheel favorites across multiple pages.
@@ -19,7 +20,7 @@ import tel.eden.mod.config.BridgeConfig;
  * all slots on the current page. Each slot is a cycle button over the emotes you've unlocked
  * (kept current by {@link UnlockedEmoteDetector}), plus an empty option.
  */
-public final class EmoteConfigScreen extends Screen {
+public final class EmoteConfigScreen extends EdenScreen {
 	private static final int BUTTON_W = 150;
 	private static final int BUTTON_H = 20;
 	private static final int GAP_X = 10;

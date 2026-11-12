@@ -23,6 +23,7 @@ public final class ChatReplyManager {
 
 	private static ReplyInfo activeReply = null;
 	private static String pendingReplyId = null;
+	private static String pendingReplyText = null;
 	private static long pendingReplyTime = 0L;
 	private static final long PENDING_TIMEOUT_MS = 15_000L;
 
@@ -100,41 +101,68 @@ public final class ChatReplyManager {
 
 	/** Move the active reply context into a pending reply state when chat is submitted. */
 	public static synchronized void markPendingReply() {
+		markPendingReply(null);
+	}
+
+	/**
+	 * As {@link #markPendingReply()}, remembering the text that was sent so the echoed line can be
+	 * recognised by what it says as well as by who it is from.
+	 */
+	public static synchronized void markPendingReply(String sentText) {
 		if (activeReply != null) {
 			pendingReplyId = activeReply.messageId();
+			pendingReplyText = sentText == null ? null : normalize(sentText);
 			pendingReplyTime = System.currentTimeMillis();
 			activeReply = null;
 		}
 	}
 
-	/**
-	 * Consume and return the pending reply message ID if the echoed guild message
-	 * matches the local player and hasn't timed out.
-	 */
+	/** Consume the pending reply for an echoed line from {@code username}; see {@link #consumePendingReply(String, String)}. */
 	public static synchronized String consumePendingReply(String username) {
+		return consumePendingReply(username, null);
+	}
+
+	/**
+	 * Consume and return the pending reply message ID if the echoed guild line is the local player's
+	 * and hasn't timed out. A line counts as ours if it is from our account name, from our nickname, or
+	 * says exactly what we sent: Wynncraft shows a nicknamed player under the nickname, and the parser
+	 * only turns that back into the account name when the line carries a hover.
+	 */
+	public static synchronized String consumePendingReply(String username, String body) {
 		if (pendingReplyId == null) {
 			return null;
 		}
 		if (System.currentTimeMillis() - pendingReplyTime > PENDING_TIMEOUT_MS) {
 			pendingReplyId = null;
+			pendingReplyText = null;
 			return null;
 		}
-		Minecraft mc = Minecraft.getInstance();
-		if (mc != null && mc.getUser() != null) {
-			String myName = mc.getUser().getName();
-			if (username != null && !username.equalsIgnoreCase(myName)) {
-				return null;
-			}
+		if (!isLocalPlayer(username) && !(pendingReplyText != null && body != null && pendingReplyText.equals(normalize(body)))) {
+			return null;
 		}
 		String id = pendingReplyId;
 		pendingReplyId = null;
+		pendingReplyText = null;
 		return id;
+	}
+
+	private static boolean isLocalPlayer(String username) {
+		Minecraft mc = Minecraft.getInstance();
+		if (username == null || mc == null || mc.getUser() == null) {
+			return true;
+		}
+		return username.equalsIgnoreCase(mc.getUser().getName()) || username.equalsIgnoreCase(CharacterInfoNickname.localNickname());
+	}
+
+	private static String normalize(String text) {
+		return text.strip().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
 	}
 
 	/** Reset both active and pending reply states. */
 	public static synchronized void reset() {
 		activeReply = null;
 		pendingReplyId = null;
+		pendingReplyText = null;
 	}
 
 	/** Check if a click hit the close button on the active reply banner. */

@@ -331,7 +331,6 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 		int scaledMouseY = scaledMouseY(mouseY);
 
 		pushReferencePose(g);
-		layout.drawBackground(g);
 		layout.drawPanel(g);
 
 		super.render(g, scaledMouseX, scaledMouseY, delta);

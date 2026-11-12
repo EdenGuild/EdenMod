@@ -361,6 +361,10 @@ public final class ScreensGameTest implements FabricClientGameTest {
 		if (area.uiScale() > 1.0001f) {
 			problems.add(String.format("%s: drawn at %.2fx the GUI scale; it must never exceed 1.0", label, area.uiScale()));
 		}
+		// Every EdenMod screen shares one backdrop, a light blur whatever the player set (vanilla's default is five).
+		if (client.options.getMenuBackgroundBlurriness() > 1) {
+			problems.add(label + ": the background blur is " + client.options.getMenuBackgroundBlurriness() + ", not the shared light blur");
+		}
 		List<AbstractWidget> widgets = new ArrayList<>();
 		for (GuiEventListener child : screen.children()) {
 			if (child instanceof AbstractWidget widget && widget.visible) {

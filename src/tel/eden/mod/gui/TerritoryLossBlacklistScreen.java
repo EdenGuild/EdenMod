@@ -129,7 +129,6 @@ public final class TerritoryLossBlacklistScreen extends EdenReferenceScreen {
 		int scaledMouseY = scaledMouseY(mouseY);
 
 		pushReferencePose(graphics);
-		layout.drawBackground(graphics);
 		layout.drawPanel(graphics);
 
 		int listLeft = layout.x(LIST_X);

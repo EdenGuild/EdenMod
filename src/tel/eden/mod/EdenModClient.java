@@ -750,6 +750,8 @@ public final class EdenModClient implements ClientModInitializer {
 		openEmotePickerKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.edenmod.open_emote_picker", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_MIDDLE, edenCategory));
 		TerritoryMenuKeybind.register(edenCategory);
 		TerritoryOutlineRenderer.register(edenCategory);
+		tel.eden.mod.render.IrisCompat.register();
+		tel.eden.mod.render.Gammabright.register(edenCategory);
 		tel.eden.mod.emote.EmoteWheel.register(edenCategory);
 		tel.eden.mod.raid.tcc.TccLabyrinthTracker.registerKeybind(edenCategory);
 		WarTracker.setReporter(this::relayWarAttended);
@@ -883,6 +885,7 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private void onClientTick(Minecraft client) {
+		tel.eden.mod.render.Gammabright.onTick(client);
 		if (onWynncraft) {
 			TerritoryData.onTick();
 			TerritoryMenuKeybind.onTick(client);
@@ -3123,7 +3126,7 @@ public final class EdenModClient implements ClientModInitializer {
 			// 0-based: a first occurrence is seq 0, which matches what an old mod (no
 			// seq field) defaults to on the backend, so mixed mod versions still dedup.
 			int seq = chatSeq.next(line.username() + "|" + line.message()) - 1;
-			String replyToId = ChatReplyManager.consumePendingReply(line.username());
+			String replyToId = ChatReplyManager.consumePendingReply(line.username(), line.message());
 			current.sendGuildChat(line.username(), line.nickname(), line.message(), seq, replyToId);
 		}
 	}

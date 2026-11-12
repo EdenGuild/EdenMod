@@ -30,8 +30,14 @@ public final class CharacterInfoNickname {
 	public static final int INFO_SLOT = 7;
 	private static final int MAX_NICKNAME_LENGTH = 40;
 	private static int lastSeenContainerId = -1;
+	private static volatile String localNickname;
 
 	private CharacterInfoNickname() {
+	}
+
+	/** The local player's nickname as last read from the Character Info menu, or null if it has not been read this session. */
+	public static String localNickname() {
+		return localNickname;
 	}
 
 	/** The hotbar slot (0-based) whose compass opens the Character Info menu, the same one Wynntils uses. */
@@ -72,6 +78,7 @@ public final class CharacterInfoNickname {
 		}
 		nickname.ifPresentOrElse(nick -> {
 			LOGGER.info("Character info: nickname '{}' belongs to {}", nick, localUsername);
+			localNickname = nick;
 			PlayerNameResolver.recordAlias(nick, localUsername);
 		}, () -> LOGGER.info("Character info: no italic nickname found for {}", localUsername));
 		return nickname;

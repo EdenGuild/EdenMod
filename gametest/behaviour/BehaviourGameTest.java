@@ -1,6 +1,10 @@
 package behaviour;
 
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
+import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
@@ -12,6 +16,7 @@ import net.minecraft.world.phys.AABB;
 import support.Failures;
 import support.Output;
 import support.Worlds;
+import tel.eden.mod.render.Gammabright;
 import tel.eden.mod.util.BabyPlayerEmoteTracker;
 
 /**
@@ -39,6 +44,7 @@ public final class BehaviourGameTest implements FabricClientGameTest {
 
 			cleanWorld(context, server);
 			babyModeIgnoresDisplaysNearAMountedRider(context, server);
+			gammabrightBrightensTheFrame(context, server);
 		}
 		Output.marker("behaviour.ok");
 	}
@@ -90,6 +96,40 @@ public final class BehaviourGameTest implements FabricClientGameTest {
 	private static void check(boolean condition, String message) {
 		if (!condition) {
 			throw new AssertionError(message);
+		}
+	}
+
+	/**
+	 * Gammabright is a post effect injected into the game renderer, so a Minecraft update that moves the
+	 * injection point turns it into a silent no-op. Compare the same night scene with it off and on.
+	 */
+	private static void gammabrightBrightensTheFrame(ClientGameTestContext context, TestServerContext server) {
+		cleanWorld(context, server);
+		server.runCommand("time set midnight");
+		context.waitTicks(20);
+		double off = averageBrightness(context.takeScreenshot("gammabright-off"));
+		Gammabright.setEnabled(true);
+		context.waitTicks(5);
+		double on = averageBrightness(context.takeScreenshot("gammabright-on"));
+		Gammabright.setEnabled(false);
+		if (on < off * 1.3) {
+			throw new AssertionError(String.format("Gammabright barely changed the night scene: average brightness %.1f off, %.1f on", off, on));
+		}
+	}
+
+	private static double averageBrightness(Path screenshot) {
+		try {
+			BufferedImage image = ImageIO.read(screenshot.toFile());
+			long sum = 0;
+			for (int y = 0; y < image.getHeight(); y++) {
+				for (int x = 0; x < image.getWidth(); x++) {
+					int rgb = image.getRGB(x, y);
+					sum += ((rgb >> 16) & 0xFF) + ((rgb >> 8) & 0xFF) + (rgb & 0xFF);
+				}
+			}
+			return sum / (3.0 * image.getWidth() * image.getHeight());
+		} catch (IOException e) {
+			throw new IllegalStateException("Could not read " + screenshot, e);
 		}
 	}
 }

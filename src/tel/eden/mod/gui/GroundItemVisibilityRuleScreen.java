@@ -66,7 +66,6 @@ public final class GroundItemVisibilityRuleScreen extends EdenReferenceScreen {
 		int scaledMouseY = scaledMouseY(mouseY);
 
 		pushReferencePose(graphics);
-		layout.drawBackground(graphics);
 		layout.drawPanel(graphics);
 		graphics.fill(layout.x(PANEL_PADDING), layout.y(FORM_TOP), layout.x(BASE_PANEL_WIDTH - PANEL_PADDING), layout.y(FORM_BOTTOM), 0x22000000);
 		super.render(graphics, scaledMouseX, scaledMouseY, delta);
