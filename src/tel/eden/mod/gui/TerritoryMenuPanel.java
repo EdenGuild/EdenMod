@@ -73,14 +73,6 @@ public final class TerritoryMenuPanel {
 		});
 	}
 
-	private static Field holderField = null;
-	private static boolean holderFieldInit = false;
-	private static Field holderSelectedField = null;
-	private static boolean holderSelectedFieldInit = false;
-
-	private static Field renderAreaWidgetsField = null;
-	private static boolean renderAreaWidgetsFieldInit = false;
-
 	private static Field mapModeField = null;
 	private static Field territoryPoisField = null;
 	private static Field mapButtonsField = null;
@@ -113,18 +105,42 @@ public final class TerritoryMenuPanel {
 	private static Method holderIsSelectionModeMethod = null;
 	private static boolean holderMethodsInit = false;
 
-	private static Object getHolder(Screen screen) {
-		if (!holderFieldInit) {
-			holderFieldInit = true;
-			try {
-				holderField = screen.getClass().getDeclaredField("holder");
-				holderField.setAccessible(true);
-			} catch (Throwable ignored) {
-			}
+	private static final Map<String, Field> FIELD_CACHE = new HashMap<>();
+
+	private static Field findField(Class<?> cls, String name) {
+		if (cls == null) {
+			return null;
 		}
-		if (holderField != null) {
+		String key = cls.getName() + "#" + name;
+		synchronized (FIELD_CACHE) {
+			if (FIELD_CACHE.containsKey(key)) {
+				return FIELD_CACHE.get(key);
+			}
+			Field found = null;
+			Class<?> c = cls;
+			while (c != null && c != Object.class) {
+				try {
+					Field f = c.getDeclaredField(name);
+					f.setAccessible(true);
+					found = f;
+					break;
+				} catch (NoSuchFieldException ignored) {
+				}
+				c = c.getSuperclass();
+			}
+			FIELD_CACHE.put(key, found);
+			return found;
+		}
+	}
+
+	private static Object getHolder(Screen screen) {
+		if (screen == null) {
+			return null;
+		}
+		Field f = findField(screen.getClass(), "holder");
+		if (f != null) {
 			try {
-				return holderField.get(screen);
+				return f.get(screen);
 			} catch (Throwable ignored) {
 			}
 		}
@@ -132,17 +148,13 @@ public final class TerritoryMenuPanel {
 	}
 
 	private static List<?> getRenderAreaWidgets(Screen screen) {
-		if (!renderAreaWidgetsFieldInit) {
-			renderAreaWidgetsFieldInit = true;
-			try {
-				renderAreaWidgetsField = screen.getClass().getDeclaredField("renderAreaWidgets");
-				renderAreaWidgetsField.setAccessible(true);
-			} catch (Throwable ignored) {
-			}
+		if (screen == null) {
+			return null;
 		}
-		if (renderAreaWidgetsField != null) {
+		Field f = findField(screen.getClass(), "renderAreaWidgets");
+		if (f != null) {
 			try {
-				return (List<?>) renderAreaWidgetsField.get(screen);
+				return (List<?>) f.get(screen);
 			} catch (Throwable ignored) {
 			}
 		}
@@ -405,17 +417,10 @@ public final class TerritoryMenuPanel {
 		}
 		try {
 			Set<String> holderSelected = null;
-			if (!holderSelectedFieldInit) {
-				holderSelectedFieldInit = true;
+			Field fSel = findField(holder.getClass(), "selectedTerritories");
+			if (fSel != null) {
 				try {
-					holderSelectedField = holder.getClass().getDeclaredField("selectedTerritories");
-					holderSelectedField.setAccessible(true);
-				} catch (Throwable ignored) {
-				}
-			}
-			if (holderSelectedField != null) {
-				try {
-					holderSelected = (Set<String>) holderSelectedField.get(holder);
+					holderSelected = (Set<String>) fSel.get(holder);
 				} catch (Throwable ignored) {
 				}
 			}
