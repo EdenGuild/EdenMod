@@ -1,6 +1,7 @@
 package tel.eden.mod.gui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.function.ToIntFunction;
@@ -36,5 +37,18 @@ class LongEventScreenTest {
 
 		LongEventState.SpecialSlot withoutClues = new LongEventState.SpecialSlot(2, "riddle", "Riddle", true, false, 0, 0L, 0, 0, 0L, 10, "", "https://example.com/main.png", items, clues, 0, 0, true, 0L, 0L, false, false, "", false);
 		assertEquals(List.of("https://example.com/main.png", "https://example.com/unlocked.png"), LongEventScreen.getSpecialSlotImages(withoutClues, now));
+	}
+
+	@Test
+	void visibleWrappedLineCountFitsShrunkPanelsWithUnscaledPitch() {
+		// Scavenger row at 1366x768 GUI scale 2 (panelScale 0.766) and minimum snap scale (0.75): 3 lines at 10px pitch fit inside the row.
+		for (int[] virt : new int[][]{{683, 384}, {680, 376}}) {
+			EdenPanelLayout layout = EdenPanelLayout.centered(virt[0], virt[1], 680, 496);
+			int rowH = layout.h(64);
+			int noteAvail = rowH - layout.h(21) - layout.h(2);
+			int lines = LongEventScreen.visibleWrappedLineCount(noteAvail, 10, 3);
+			assertEquals(3, lines);
+			assertTrue(layout.h(21) + (lines - 1) * 10 + 9 <= rowH);
+		}
 	}
 }

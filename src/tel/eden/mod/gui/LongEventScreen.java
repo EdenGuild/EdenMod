@@ -924,11 +924,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		drawOutline(g, boxX, boxY, boxW, boxH, 0xFF383838);
 
 		if (note != null && !note.isEmpty()) {
-			List<String> lines = wrapWords(note, boxW - layout.w(16));
-			int maxLines = Math.max(1, (boxH - layout.h(16)) / 11);
-			for (int i = 0; i < Math.min(maxLines, lines.size()); i++) {
-				g.drawString(this.font, lines.get(i), boxX + layout.w(8), boxY + layout.h(8 + i * 11), 0xFFDDDDDD);
-			}
+			renderWrappedNoteLines(g, note, boxX + layout.w(8), boxY + layout.h(8), boxW - layout.w(16), boxH - layout.h(16), 0, 11, 0xFFDDDDDD);
 		}
 	}
 
@@ -1038,10 +1034,8 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			String lockedText = rem > 0L ? countdownPrefix + LongEventState.formatCountdown(rem, true) : "🔒 Locked";
 			g.drawString(this.font, lockedText, rowX + layout.w(6), rowY + layout.h(24), 0xFFAAAAAA);
 		} else {
-			List<String> noteLines = wrapWords(it.note(), rowW - layout.w(12));
-			for (int nl = 0; nl < Math.min(3, noteLines.size()); nl++) {
-				g.drawString(this.font, noteLines.get(nl), rowX + layout.w(6), rowY + layout.h(22 + nl * 11), 0xFFDDDDDD);
-			}
+			int noteStartY = rowY + layout.h(21);
+			renderWrappedNoteLines(g, it.note(), rowX + layout.w(6), noteStartY, rowW - layout.w(12), rowH - layout.h(21) - layout.h(2), 3, 10, 0xFFDDDDDD);
 		}
 	}
 
@@ -1085,11 +1079,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			g.drawString(this.font, "Riddle:", rightX + layout.w(8), rBoxY + layout.h(6), 0xFFFFD24A);
 
 			if (!slot.note().isEmpty()) {
-				List<String> nLines = wrapWords(slot.note(), colW - layout.w(16));
-				int maxLines = Math.max(1, (rBoxH - layout.h(24)) / 10);
-				for (int i = 0; i < Math.min(maxLines, nLines.size()); i++) {
-					g.drawString(this.font, nLines.get(i), rightX + layout.w(8), rBoxY + layout.h(20 + i * 10), 0xFFDDDDDD);
-				}
+				renderWrappedNoteLines(g, slot.note(), rightX + layout.w(8), rBoxY + layout.h(20), colW - layout.w(16), rBoxH - layout.h(24), 0, 10, 0xFFDDDDDD);
 				if (mouseX >= rightX && mouseX < rightX + colW && mouseY >= rBoxY && mouseY < rBoxY + rBoxH) {
 					hoveredClueNote = slot.note();
 					hoveredTooltipTitle = "Riddle";
@@ -1105,11 +1095,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				g.drawString(this.font, "Clue:", rightX + layout.w(8), cBoxY + layout.h(6), 0xFF55FFFF);
 
 				if (!clueNote.isEmpty()) {
-					List<String> cLines = wrapWords(clueNote, colW - layout.w(16));
-					int maxLines = Math.max(1, (cBoxH - layout.h(24)) / 10);
-					for (int i = 0; i < Math.min(maxLines, cLines.size()); i++) {
-						g.drawString(this.font, cLines.get(i), rightX + layout.w(8), cBoxY + layout.h(20 + i * 10), 0xFFFFFFFF);
-					}
+					renderWrappedNoteLines(g, clueNote, rightX + layout.w(8), cBoxY + layout.h(20), colW - layout.w(16), cBoxH - layout.h(24), 0, 10, 0xFFFFFFFF);
 					if (mouseX >= rightX && mouseX < rightX + colW && mouseY >= cBoxY && mouseY < cBoxY + cBoxH) {
 						hoveredClueNote = clueNote;
 						hoveredTooltipTitle = "Clue Details";
@@ -1128,11 +1114,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			g.drawString(this.font, "Riddle:", boxX + layout.w(8), rBoxY + layout.h(6), 0xFFFFD24A);
 
 			if (!slot.note().isEmpty()) {
-				List<String> nLines = wrapWords(slot.note(), boxW - layout.w(16));
-				int maxLines = Math.max(1, (rBoxH - layout.h(24)) / 10);
-				for (int i = 0; i < Math.min(maxLines, nLines.size()); i++) {
-					g.drawString(this.font, nLines.get(i), boxX + layout.w(8), rBoxY + layout.h(20 + i * 10), 0xFFDDDDDD);
-				}
+				renderWrappedNoteLines(g, slot.note(), boxX + layout.w(8), rBoxY + layout.h(20), boxW - layout.w(16), rBoxH - layout.h(24), 0, 10, 0xFFDDDDDD);
 				if (mouseX >= boxX && mouseX < boxX + boxW && mouseY >= rBoxY && mouseY < rBoxY + rBoxH) {
 					hoveredClueNote = slot.note();
 					hoveredTooltipTitle = "Riddle";
@@ -1148,11 +1130,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				g.drawString(this.font, "Your Clue:", boxX + layout.w(8), cBoxY + layout.h(6), 0xFF55FFFF);
 
 				if (!clueNote.isEmpty()) {
-					List<String> cLines = wrapWords(clueNote, boxW - layout.w(60));
-					int maxLines = Math.max(1, (cBoxH - layout.h(24)) / 10);
-					for (int ci = 0; ci < Math.min(maxLines, cLines.size()); ci++) {
-						g.drawString(this.font, cLines.get(ci), boxX + layout.w(8), cBoxY + layout.h(20 + ci * 10), 0xFFFFFFFF);
-					}
+					renderWrappedNoteLines(g, clueNote, boxX + layout.w(8), cBoxY + layout.h(20), boxW - layout.w(60), cBoxH - layout.h(24), 0, 10, 0xFFFFFFFF);
 					if (mouseX >= boxX && mouseX < boxX + boxW && mouseY >= cBoxY && mouseY < cBoxY + cBoxH) {
 						hoveredClueNote = clueNote;
 						hoveredTooltipTitle = "Clue Details";
@@ -1538,6 +1516,23 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			}
 		}
 		return lines;
+	}
+
+	/** Draws wrapped lines using unscaled vertical pitch so shrunk panel layouts never overlap 1.0x glyphs. */
+	private void renderWrappedNoteLines(GuiGraphics g, String text, int x, int startY, int maxWidth, int availableHeight, int lineCap, int lineStep, int color) {
+		if (text == null || text.isEmpty() || maxWidth <= 0) {
+			return;
+		}
+		List<String> lines = wrapWords(text, maxWidth);
+		int count = visibleWrappedLineCount(availableHeight, lineStep, lineCap);
+		for (int i = 0; i < Math.min(count, lines.size()); i++) {
+			g.drawString(this.font, lines.get(i), x, startY + i * lineStep, color);
+		}
+	}
+
+	static int visibleWrappedLineCount(int availableHeight, int lineStep, int lineCap) {
+		int fit = Math.max(1, availableHeight / Math.max(1, lineStep));
+		return lineCap > 0 ? Math.min(lineCap, fit) : fit;
 	}
 
 	private void drawFittedString(GuiGraphics g, String text, int x, int y, int maxWidth, int color) {
