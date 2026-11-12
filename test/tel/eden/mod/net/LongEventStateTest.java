@@ -27,8 +27,8 @@ class LongEventStateTest {
 
 	@Test
 	void slotCountdownTextMatchesSlotRules() {
-		assertEquals("Complete to unlock the next mission", LongEventState.slotCountdownText("repeatable", 12345L, 0L));
-		assertEquals("Complete to unlock the next mission", LongEventState.slotCountdownText("repeatable2", 12345L, 0L));
+		assertEquals("Complete to unlock next!", LongEventState.slotCountdownText("repeatable", 12345L, 0L));
+		assertEquals("Complete to unlock next!", LongEventState.slotCountdownText("repeatable2", 12345L, 0L));
 
 		long now = 1000000L;
 		long resetAt = now + 3600 * 1000L;
@@ -201,7 +201,37 @@ class LongEventStateTest {
 		assertEquals(2, spec.clueRaidProgress());
 		assertEquals(4, spec.clueRaidTarget());
 		assertTrue(spec.clueUnlockedToday());
+		assertTrue(spec.hasClues());
 		assertTrue(spec.canGuessFree());
 		assertEquals("Correct!", spec.lastGuessStatus());
+
+		com.google.gson.JsonObject disabledCluesJson = com.google.gson.JsonParser.parseString("""
+						{
+							"type": "longEventState",
+							"active": true,
+							"slots": [],
+							"masters": [],
+							"specialSlots": [
+								{
+									"slotNum": 2,
+									"kind": "riddle",
+									"hasClues": false
+								}
+							]
+						}
+					""").getAsJsonObject();
+		LongEventState stateNoClues = BridgeWebSocketClient.parseLongEventState(disabledCluesJson);
+		LongEventState.SpecialSlot riddleSlot = stateNoClues.findSpecialSlot(2);
+		assertNotNull(riddleSlot);
+		assertFalse(riddleSlot.hasClues());
+	}
+
+	@Test
+	void scavengerItemUnlockRespectsFlagAndTimestamp() {
+		long now = 10_000L;
+		assertFalse(new LongEventState.ScavengerItem("Cat", "easy", false, 0L, "", "https://example.com/a.png").isUnlockedAt(now));
+		assertFalse(new LongEventState.ScavengerItem("Cat", "easy", true, 20_000L, "", "https://example.com/a.png").isUnlockedAt(now));
+		assertTrue(new LongEventState.ScavengerItem("Cat", "easy", true, 10_000L, "", "https://example.com/a.png").isUnlockedAt(now));
+		assertTrue(new LongEventState.ScavengerItem("Cat", "easy", true, 0L, "", "https://example.com/a.png").isUnlockedAt(now));
 	}
 }

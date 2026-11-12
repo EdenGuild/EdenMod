@@ -41,11 +41,20 @@ public record LongEventState(boolean active, long endsAtMs, int pendingLe, int r
 		}
 	}
 
-	public record ScavengerItem(String difficulty, boolean unlocked, long unlockAtMs, String note, String imageUrl) {
+	public record ScavengerItem(String title, String difficulty, boolean unlocked, long unlockAtMs, String note, String imageUrl) {
+		public ScavengerItem(String difficulty, boolean unlocked, long unlockAtMs, String note, String imageUrl) {
+			this("", difficulty, unlocked, unlockAtMs, note, imageUrl);
+		}
+
 		public ScavengerItem {
+			title = title == null ? "" : title;
 			difficulty = difficulty == null ? "" : difficulty;
 			note = note == null ? "" : note;
 			imageUrl = imageUrl == null ? "" : imageUrl;
+		}
+
+		public boolean isUnlockedAt(long nowMs) {
+			return unlocked && (unlockAtMs <= 0L || nowMs >= unlockAtMs);
 		}
 	}
 
@@ -56,9 +65,12 @@ public record LongEventState(boolean active, long endsAtMs, int pendingLe, int r
 		}
 	}
 
-	public record SpecialSlot(int slotNum, String kind, String title, boolean opened, boolean completed, int completions, long unlockAtMs, int raidProgress, int raidRequirement, long expiresAtMs, int rewardLe, String note, String imageUrl, List<ScavengerItem> items, List<ClueEntry> clues, int clueRaidProgress, int clueRaidTarget, boolean clueUnlockedToday, long nextClueAtMs, long nextGuessAtMs, boolean canGuessFree, boolean canGuessTrivia, String lastGuessStatus) {
+	public record SpecialSlot(int slotNum, String kind, String title, boolean opened, boolean completed, int completions, long unlockAtMs, int raidProgress, int raidRequirement, long expiresAtMs, int rewardLe, String note, String imageUrl, List<ScavengerItem> items, List<ClueEntry> clues, int clueRaidProgress, int clueRaidTarget, boolean clueUnlockedToday, long nextClueAtMs, long nextGuessAtMs, boolean canGuessFree, boolean canGuessTrivia, String lastGuessStatus, boolean hasClues) {
+		public SpecialSlot(int slotNum, String kind, String title, boolean opened, boolean completed, int completions, long unlockAtMs, int raidProgress, int raidRequirement, long expiresAtMs, int rewardLe, String note, String imageUrl, List<ScavengerItem> items, List<ClueEntry> clues, int clueRaidProgress, int clueRaidTarget, boolean clueUnlockedToday, long nextClueAtMs, long nextGuessAtMs, boolean canGuessFree, boolean canGuessTrivia, String lastGuessStatus) {
+			this(slotNum, kind, title, opened, completed, completions, unlockAtMs, raidProgress, raidRequirement, expiresAtMs, rewardLe, note, imageUrl, items, clues, clueRaidProgress, clueRaidTarget, clueUnlockedToday, nextClueAtMs, nextGuessAtMs, canGuessFree, canGuessTrivia, lastGuessStatus, true);
+		}
 		public SpecialSlot(int slotNum, String kind, String title, boolean opened, boolean completed, int completions, long unlockAtMs, int raidProgress, int raidRequirement, long expiresAtMs, int rewardLe, String note, String imageUrl, List<ScavengerItem> items, List<ClueEntry> clues, int clueRaidProgress, int clueRaidTarget, boolean clueUnlockedToday, long nextGuessAtMs, boolean canGuessFree, boolean canGuessTrivia, String lastGuessStatus) {
-			this(slotNum, kind, title, opened, completed, completions, unlockAtMs, raidProgress, raidRequirement, expiresAtMs, rewardLe, note, imageUrl, items, clues, clueRaidProgress, clueRaidTarget, clueUnlockedToday, 0L, nextGuessAtMs, canGuessFree, canGuessTrivia, lastGuessStatus);
+			this(slotNum, kind, title, opened, completed, completions, unlockAtMs, raidProgress, raidRequirement, expiresAtMs, rewardLe, note, imageUrl, items, clues, clueRaidProgress, clueRaidTarget, clueUnlockedToday, 0L, nextGuessAtMs, canGuessFree, canGuessTrivia, lastGuessStatus, true);
 		}
 		public SpecialSlot {
 			kind = kind == null ? "" : kind;
@@ -140,7 +152,7 @@ public record LongEventState(boolean active, long endsAtMs, int pendingLe, int r
 	/** Live subtitle text shown above a slot card. */
 	public static String slotCountdownText(String slotName, long resetAtMs, long nowMs) {
 		if ("repeatable".equalsIgnoreCase(slotName) || "repeatable2".equalsIgnoreCase(slotName)) {
-			return "Complete to unlock the next mission";
+			return "Complete to unlock next!";
 		}
 		boolean specialOrWeekly = "special".equalsIgnoreCase(slotName) || "weekly".equalsIgnoreCase(slotName) || "super".equalsIgnoreCase(slotName);
 		long remaining = resetAtMs > 0L ? Math.max(0L, resetAtMs - nowMs) : 0L;

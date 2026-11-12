@@ -1646,10 +1646,14 @@ public final class BridgeWebSocketClient {
 	}
 
 	private static boolean getBool(JsonObject obj, String key) {
+		return getBool(obj, key, false);
+	}
+
+	private static boolean getBool(JsonObject obj, String key, boolean fallback) {
 		try {
-			return obj.has(key) && !obj.get(key).isJsonNull() && obj.get(key).getAsBoolean();
+			return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsBoolean() : fallback;
 		} catch (RuntimeException e) {
-			return false;
+			return fallback;
 		}
 	}
 
@@ -1842,7 +1846,7 @@ public final class BridgeWebSocketClient {
 						for (var itElem : s.get("items").getAsJsonArray()) {
 							if (itElem.isJsonObject()) {
 								JsonObject it = itElem.getAsJsonObject();
-								items.add(new LongEventState.ScavengerItem(get(it, "difficulty"), getBool(it, "unlocked"), getLong(it, "unlockAtMs", 0L), get(it, "note"), get(it, "imageUrl")));
+								items.add(new LongEventState.ScavengerItem(get(it, "title"), get(it, "difficulty"), getBool(it, "unlocked"), getLong(it, "unlockAtMs", 0L), get(it, "note"), get(it, "imageUrl")));
 							}
 						}
 					}
@@ -1855,7 +1859,7 @@ public final class BridgeWebSocketClient {
 							}
 						}
 					}
-					specialSlots.add(new LongEventState.SpecialSlot(getInt(s, "slotNum", 0), get(s, "kind"), get(s, "title"), getBool(s, "opened"), getBool(s, "completed"), getInt(s, "completions", 0), getLong(s, "unlockAtMs", 0L), getInt(s, "raidProgress", 0), getInt(s, "raidRequirement", 0), getLong(s, "expiresAtMs", 0L), getInt(s, "rewardLe", 0), get(s, "note"), get(s, "imageUrl"), items, clues, getInt(s, "clueRaidProgress", 0), getInt(s, "clueRaidTarget", 0), getBool(s, "clueUnlockedToday"), getLong(s, "nextClueAtMs", 0L), getLong(s, "nextGuessAtMs", 0L), getBool(s, "canGuessFree"), getBool(s, "canGuessTrivia"), get(s, "lastGuessStatus")));
+					specialSlots.add(new LongEventState.SpecialSlot(getInt(s, "slotNum", 0), get(s, "kind"), get(s, "title"), getBool(s, "opened"), getBool(s, "completed"), getInt(s, "completions", 0), getLong(s, "unlockAtMs", 0L), getInt(s, "raidProgress", 0), getInt(s, "raidRequirement", 0), getLong(s, "expiresAtMs", 0L), getInt(s, "rewardLe", 0), get(s, "note"), get(s, "imageUrl"), items, clues, getInt(s, "clueRaidProgress", 0), getInt(s, "clueRaidTarget", 0), getBool(s, "clueUnlockedToday"), getLong(s, "nextClueAtMs", 0L), getLong(s, "nextGuessAtMs", 0L), getBool(s, "canGuessFree"), getBool(s, "canGuessTrivia"), get(s, "lastGuessStatus"), getBool(s, "hasClues", true)));
 				}
 			}
 		}
