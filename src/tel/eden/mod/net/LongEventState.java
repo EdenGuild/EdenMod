@@ -52,6 +52,10 @@ public record LongEventState(boolean active, long endsAtMs, int pendingLe, int r
 			note = note == null ? "" : note;
 			imageUrl = imageUrl == null ? "" : imageUrl;
 		}
+
+		public boolean isUnlockedAt(long nowMs) {
+			return unlocked && (unlockAtMs <= 0L || nowMs >= unlockAtMs);
+		}
 	}
 
 	public record ClueEntry(String note, String imageUrl) {

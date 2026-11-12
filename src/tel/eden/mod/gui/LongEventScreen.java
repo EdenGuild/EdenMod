@@ -2,12 +2,14 @@ package tel.eden.mod.gui;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.ToIntFunction;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -694,18 +696,16 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				g.fill(cardX, cardY, cardX + cardW, cardY + cardH, bg);
 				drawOutline(g, cardX, cardY, cardW, cardH, border);
 
-				List<String> titleLines = wrapWords(title, cardW - 4);
+				List<String> titleLines = splitCardTitle(title, cardW - 4, this.font::width);
 				int badgeY;
 				int rewardY;
 				if (titleLines.size() <= 1) {
-					drawFittedCenteredString(g, title, cardCenterX, cardY + layout.h(6), cardW - 4, 0xFFFFFFFF);
+					drawFittedCenteredString(g, titleLines.isEmpty() ? title : titleLines.get(0), cardCenterX, cardY + layout.h(6), cardW - 4, 0xFFFFFFFF);
 					badgeY = cardY + layout.h(23);
 					rewardY = cardY + layout.h(39);
 				} else {
-					String line1 = titleLines.get(0);
-					String line2 = String.join(" ", titleLines.subList(1, titleLines.size()));
-					drawFittedCenteredString(g, line1, cardCenterX, cardY + layout.h(2), cardW - 4, 0xFFFFFFFF);
-					drawFittedCenteredString(g, line2, cardCenterX, cardY + layout.h(12), cardW - 4, 0xFFFFFFFF);
+					drawFittedCenteredString(g, titleLines.get(0), cardCenterX, cardY + layout.h(2), cardW - 4, 0xFFFFFFFF);
+					drawFittedCenteredString(g, titleLines.get(1), cardCenterX, cardY + layout.h(12), cardW - 4, 0xFFFFFFFF);
 					badgeY = cardY + layout.h(25);
 					rewardY = cardY + layout.h(41);
 				}
@@ -808,24 +808,26 @@ public final class LongEventScreen extends EdenReferenceScreen {
 		}
 	}
 
-	private List<String> getSpecialSlotImages(LongEventState.SpecialSlot slot) {
+	static List<String> getSpecialSlotImages(LongEventState.SpecialSlot slot, long nowMs) {
 		if (slot == null) {
 			return List.of();
 		}
 		Set<String> set = new LinkedHashSet<>();
 		addSplitUrls(set, slot.imageUrl());
-		for (LongEventState.ClueEntry ce : slot.clues()) {
-			addSplitUrls(set, ce.imageUrl());
+		if (slot.hasClues()) {
+			for (LongEventState.ClueEntry ce : slot.clues()) {
+				addSplitUrls(set, ce.imageUrl());
+			}
 		}
 		for (LongEventState.ScavengerItem it : slot.items()) {
-			if (it.unlocked()) {
+			if (it.isUnlockedAt(nowMs)) {
 				addSplitUrls(set, it.imageUrl());
 			}
 		}
 		return new ArrayList<>(set);
 	}
 
-	private void addSplitUrls(Set<String> set, String raw) {
+	private static void addSplitUrls(Set<String> set, String raw) {
 		if (raw == null || raw.isBlank()) {
 			return;
 		}
@@ -835,6 +837,32 @@ public final class LongEventScreen extends EdenReferenceScreen {
 				set.add(trimmed);
 			}
 		}
+	}
+
+	static List<String> splitCardTitle(String title, int maxWidth, ToIntFunction<String> widthFn) {
+		if (title == null || title.isBlank()) {
+			return List.of();
+		}
+		String[] words = title.trim().split("\\s+");
+		String normalized = String.join(" ", words);
+		// Keep single-word titles on one line so drawFittedCenteredString scales smoothly instead of chopping mid-word.
+		if (words.length <= 1 || maxWidth <= 0 || widthFn.applyAsInt(normalized) <= maxWidth) {
+			return List.of(normalized);
+		}
+		String bestLeft = "";
+		String bestRight = "";
+		int bestMax = Integer.MAX_VALUE;
+		for (int split = 1; split < words.length; split++) {
+			String left = String.join(" ", Arrays.copyOfRange(words, 0, split));
+			String right = String.join(" ", Arrays.copyOfRange(words, split, words.length));
+			int widest = Math.max(widthFn.applyAsInt(left), widthFn.applyAsInt(right));
+			if (widest < bestMax) {
+				bestMax = widest;
+				bestLeft = left;
+				bestRight = right;
+			}
+		}
+		return List.of(bestLeft, bestRight);
 	}
 
 	private void renderSpecialImageSection(GuiGraphics g, int boxX, int boxY, int boxW, int boxH, List<String> images, int mouseX, int mouseY) {
@@ -922,7 +950,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			}
 		}
 
-		List<String> images = getSpecialSlotImages(slot);
+		List<String> images = getSpecialSlotImages(slot, nowMs);
 		List<LongEventState.ScavengerItem> items = slot.items();
 		int startY = dY + layout.h(38);
 		int rowH = layout.h(52);
@@ -947,48 +975,8 @@ public final class LongEventScreen extends EdenReferenceScreen {
 
 			for (int i = 0; i < visibleCount; i++) {
 				int itemIndex = scavengerScrollOffset + i;
-				LongEventState.ScavengerItem it = items.get(itemIndex);
 				int itemY = startY + i * (rowH + gap);
-
-				g.fill(itemsX, itemY, itemsX + itemW, itemY + rowH, 0x44141414);
-				drawOutline(g, itemsX, itemY, itemW, rowH, 0xFF383838);
-
-				String diff = it.difficulty().isEmpty() ? "easy" : it.difficulty();
-				int diffColor = switch (diff.toLowerCase(Locale.ROOT)) {
-					case "easy" -> 0xFF55FF55;
-					case "medium" -> 0xFFFFD24A;
-					case "hard" -> 0xFFFF5555;
-					default -> 0xFF55FFFF;
-				};
-
-				String diffText = "[" + diff + "]";
-				int diffW = this.font.width(diffText);
-				int diffX = itemsX + itemW - layout.w(6) - diffW;
-				int diffY = itemY + layout.h(6);
-				if (!it.imageUrl().isEmpty()) {
-					Component diffLabel = Component.literal(diffText).withStyle(ChatFormatting.UNDERLINE);
-					ClickBox box = new ClickBox(diffX - 2, diffY - 1, diffW + 4, 10);
-					imageClickTargets.add(new ImageClickTarget(box, it.imageUrl()));
-					g.drawString(this.font, diffLabel, diffX, diffY, diffColor);
-				} else {
-					g.drawString(this.font, diffText, diffX, diffY, diffColor);
-				}
-
-				String itemTitle = it.title().isEmpty() ? "Item #" + (itemIndex + 1) : it.title();
-				int maxTitleW = Math.max(10, diffX - (itemsX + layout.w(6)) - layout.w(4));
-				drawFittedString(g, itemTitle, itemsX + layout.w(6), itemY + layout.h(6), maxTitleW, 0xFFFFFFFF);
-
-				boolean itUnlocked = it.unlocked() && (it.unlockAtMs() <= 0L || nowMs >= it.unlockAtMs());
-				if (!itUnlocked) {
-					long rem = it.unlockAtMs() > nowMs ? it.unlockAtMs() - nowMs : 0L;
-					String lockedText = rem > 0L ? "🔒 In " + LongEventState.formatCountdown(rem, true) : "🔒 Locked";
-					g.drawString(this.font, lockedText, itemsX + layout.w(6), itemY + layout.h(22), 0xFFAAAAAA);
-				} else {
-					List<String> noteLines = wrapWords(it.note(), itemW - layout.w(12));
-					for (int nl = 0; nl < Math.min(2, noteLines.size()); nl++) {
-						g.drawString(this.font, noteLines.get(nl), itemsX + layout.w(6), itemY + layout.h(20 + nl * 10), 0xFFDDDDDD);
-					}
-				}
+				renderScavengerItemRow(g, items.get(itemIndex), itemIndex, itemsX, itemY, itemW, rowH, nowMs, "🔒 In ");
 			}
 			if (hasScrollbar) {
 				layout.drawScrollbar(g, itemsX + colW - layout.w(6), startY, layout.w(4), 3 * (rowH + gap) - gap, 3, items.size(), scavengerScrollOffset);
@@ -1004,52 +992,54 @@ public final class LongEventScreen extends EdenReferenceScreen {
 
 			for (int i = 0; i < visibleCount; i++) {
 				int itemIndex = scavengerScrollOffset + i;
-				LongEventState.ScavengerItem it = items.get(itemIndex);
 				int itemY = startY + i * (rowH + gap);
 				int itemX = dX + layout.w(10);
-
-				g.fill(itemX, itemY, itemX + itemW, itemY + rowH, 0x44141414);
-				drawOutline(g, itemX, itemY, itemW, rowH, 0xFF383838);
-
-				String diff = it.difficulty().isEmpty() ? "easy" : it.difficulty();
-				int diffColor = switch (diff.toLowerCase(Locale.ROOT)) {
-					case "easy" -> 0xFF55FF55;
-					case "medium" -> 0xFFFFD24A;
-					case "hard" -> 0xFFFF5555;
-					default -> 0xFF55FFFF;
-				};
-
-				String diffText = "[" + diff + "]";
-				int diffW = this.font.width(diffText);
-				int diffX = itemX + itemW - layout.w(6) - diffW;
-				int diffY = itemY + layout.h(6);
-				if (!it.imageUrl().isEmpty()) {
-					Component diffLabel = Component.literal(diffText).withStyle(ChatFormatting.UNDERLINE);
-					ClickBox box = new ClickBox(diffX - 2, diffY - 1, diffW + 4, 10);
-					imageClickTargets.add(new ImageClickTarget(box, it.imageUrl()));
-					g.drawString(this.font, diffLabel, diffX, diffY, diffColor);
-				} else {
-					g.drawString(this.font, diffText, diffX, diffY, diffColor);
-				}
-
-				String itemTitle = it.title().isEmpty() ? "Item #" + (itemIndex + 1) : it.title();
-				int maxTitleW = Math.max(10, diffX - (itemX + layout.w(6)) - layout.w(4));
-				drawFittedString(g, itemTitle, itemX + layout.w(6), itemY + layout.h(6), maxTitleW, 0xFFFFFFFF);
-
-				boolean itUnlocked = it.unlocked() && (it.unlockAtMs() <= 0L || nowMs >= it.unlockAtMs());
-				if (!itUnlocked) {
-					long rem = it.unlockAtMs() > nowMs ? it.unlockAtMs() - nowMs : 0L;
-					String lockedText = rem > 0L ? "🔒 Unlocks in " + LongEventState.formatCountdown(rem, true) : "🔒 Locked";
-					g.drawString(this.font, lockedText, itemX + layout.w(6), itemY + layout.h(22), 0xFFAAAAAA);
-				} else {
-					List<String> noteLines = wrapWords(it.note(), itemW - layout.w(12));
-					for (int nl = 0; nl < Math.min(2, noteLines.size()); nl++) {
-						g.drawString(this.font, noteLines.get(nl), itemX + layout.w(6), itemY + layout.h(20 + nl * 10), 0xFFDDDDDD);
-					}
-				}
+				renderScavengerItemRow(g, items.get(itemIndex), itemIndex, itemX, itemY, itemW, rowH, nowMs, "🔒 Unlocks in ");
 			}
 			if (hasScrollbar) {
 				layout.drawScrollbar(g, dX + dW - layout.w(10), startY, layout.w(5), 3 * (rowH + gap) - gap, 3, items.size(), scavengerScrollOffset);
+			}
+		}
+	}
+
+	private void renderScavengerItemRow(GuiGraphics g, LongEventState.ScavengerItem it, int itemIndex, int rowX, int rowY, int rowW, int rowH, long nowMs, String countdownPrefix) {
+		g.fill(rowX, rowY, rowX + rowW, rowY + rowH, 0x44141414);
+		drawOutline(g, rowX, rowY, rowW, rowH, 0xFF383838);
+
+		String diff = it.difficulty().isEmpty() ? "easy" : it.difficulty();
+		int diffColor = switch (diff.toLowerCase(Locale.ROOT)) {
+			case "easy" -> 0xFF55FF55;
+			case "medium" -> 0xFFFFD24A;
+			case "hard" -> 0xFFFF5555;
+			default -> 0xFF55FFFF;
+		};
+
+		boolean itUnlocked = it.isUnlockedAt(nowMs);
+		String diffText = "[" + diff + "]";
+		int diffW = this.font.width(diffText);
+		int diffX = rowX + rowW - layout.w(6) - diffW;
+		int diffY = rowY + layout.h(6);
+		if (itUnlocked && !it.imageUrl().isEmpty()) {
+			Component diffLabel = Component.literal(diffText).withStyle(ChatFormatting.UNDERLINE);
+			ClickBox box = new ClickBox(diffX - 2, diffY - 1, diffW + 4, 10);
+			imageClickTargets.add(new ImageClickTarget(box, it.imageUrl()));
+			g.drawString(this.font, diffLabel, diffX, diffY, diffColor);
+		} else {
+			g.drawString(this.font, diffText, diffX, diffY, diffColor);
+		}
+
+		String itemTitle = it.title().isEmpty() ? "Item #" + (itemIndex + 1) : it.title();
+		int maxTitleW = Math.max(10, diffX - (rowX + layout.w(6)) - layout.w(4));
+		drawFittedString(g, itemTitle, rowX + layout.w(6), rowY + layout.h(6), maxTitleW, 0xFFFFFFFF);
+
+		if (!itUnlocked) {
+			long rem = it.unlockAtMs() > nowMs ? it.unlockAtMs() - nowMs : 0L;
+			String lockedText = rem > 0L ? countdownPrefix + LongEventState.formatCountdown(rem, true) : "🔒 Locked";
+			g.drawString(this.font, lockedText, rowX + layout.w(6), rowY + layout.h(22), 0xFFAAAAAA);
+		} else {
+			List<String> noteLines = wrapWords(it.note(), rowW - layout.w(12));
+			for (int nl = 0; nl < Math.min(2, noteLines.size()); nl++) {
+				g.drawString(this.font, noteLines.get(nl), rowX + layout.w(6), rowY + layout.h(20 + nl * 10), 0xFFDDDDDD);
 			}
 		}
 	}
@@ -1060,21 +1050,23 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			g.drawString(this.font, "Solved ✔", dX + dW - layout.w(10) - this.font.width("Solved ✔"), dY + layout.h(8), 0xFF55FF55);
 		}
 
-		List<String> images = getSpecialSlotImages(slot);
+		List<String> images = getSpecialSlotImages(slot, nowMs);
 		int bodyY = dY + layout.h(24);
 		int bodyH = dH - layout.h(34);
 
 		String clueNote = "";
 		String clueImage = "";
-		if (!slot.clues().isEmpty()) {
-			LongEventState.ClueEntry ce = slot.clues().get(0);
-			clueNote = ce.note();
-			clueImage = ce.imageUrl();
-		} else if (!slot.imageUrl().isEmpty() && images.isEmpty()) {
-			clueImage = slot.imageUrl();
+		if (slot.hasClues()) {
+			if (!slot.clues().isEmpty()) {
+				LongEventState.ClueEntry ce = slot.clues().get(0);
+				clueNote = ce.note();
+				clueImage = ce.imageUrl();
+			} else if (!slot.imageUrl().isEmpty() && images.isEmpty()) {
+				clueImage = slot.imageUrl();
+			}
 		}
 
-		boolean showClue = slot.hasClues() && (!clueNote.isEmpty() || !clueImage.isEmpty());
+		boolean showClue = slot.hasClues();
 
 		if (!images.isEmpty()) {
 			int gap = layout.w(8);
@@ -1183,7 +1175,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			g.drawString(this.font, "Completed ✔", dX + layout.w(10), dY + layout.h(24), 0xFF55FF55);
 		}
 
-		List<String> images = getSpecialSlotImages(slot);
+		List<String> images = getSpecialSlotImages(slot, nowMs);
 		int bodyY = dY + layout.h(38);
 		int bodyH = dH - layout.h(48);
 		if (!images.isEmpty()) {
@@ -1235,7 +1227,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			drawProgressBar(g, cBarX, progY + 1, cBarW, cBarH, cRatio, false);
 		}
 
-		List<String> images = getSpecialSlotImages(slot);
+		List<String> images = getSpecialSlotImages(slot, nowMs);
 		List<LongEventState.ClueEntry> clues = slot.clues();
 
 		int cluesStartY = dY + layout.h(44);
@@ -1381,7 +1373,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			g.drawString(this.font, "Completed ✔", dX + layout.w(10), dY + layout.h(24), 0xFF55FF55);
 		}
 
-		List<String> images = getSpecialSlotImages(slot);
+		List<String> images = getSpecialSlotImages(slot, nowMs);
 		int bodyY = dY + layout.h(38);
 		int bodyH = dH - layout.h(48);
 		if (!images.isEmpty()) {
@@ -1712,7 +1704,7 @@ public final class LongEventScreen extends EdenReferenceScreen {
 			// Special Mission image carousel navigation buttons
 			if (activeTab == 1 && state != null && state.active()) {
 				LongEventState.SpecialSlot currentSpecial = state.findSpecialSlot(selectedSpecialSlot);
-				List<String> images = getSpecialSlotImages(currentSpecial);
+				List<String> images = getSpecialSlotImages(currentSpecial, System.currentTimeMillis());
 				if (images.size() > 1) {
 					if (specialImageNavPrevBox != null && specialImageNavPrevBox.contains(mx, my)) {
 						currentSpecialImageIndex = (currentSpecialImageIndex - 1 + images.size()) % images.size();

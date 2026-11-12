@@ -225,4 +225,13 @@ class LongEventStateTest {
 		assertNotNull(riddleSlot);
 		assertFalse(riddleSlot.hasClues());
 	}
+
+	@Test
+	void scavengerItemUnlockRespectsFlagAndTimestamp() {
+		long now = 10_000L;
+		assertFalse(new LongEventState.ScavengerItem("Cat", "easy", false, 0L, "", "https://example.com/a.png").isUnlockedAt(now));
+		assertFalse(new LongEventState.ScavengerItem("Cat", "easy", true, 20_000L, "", "https://example.com/a.png").isUnlockedAt(now));
+		assertTrue(new LongEventState.ScavengerItem("Cat", "easy", true, 10_000L, "", "https://example.com/a.png").isUnlockedAt(now));
+		assertTrue(new LongEventState.ScavengerItem("Cat", "easy", true, 0L, "", "https://example.com/a.png").isUnlockedAt(now));
+	}
 }
