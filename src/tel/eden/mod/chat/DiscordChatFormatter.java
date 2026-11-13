@@ -231,9 +231,14 @@ public final class DiscordChatFormatter {
 		return withGuildPrefix(body);
 	}
 
-	/** A traveler-chat line: its own aqua pill so it never reads as guild or Discord chat. */
+	// Traveler chat's own color, lavender, so it never reads as guild (aqua) or Discord (green) chat.
+	private static final int TRAVELER_RGB = 0xB388FF;
+
+	/** A traveler-chat line; links, images, GIFs, stickers and emotes render as in bridge chat. */
 	public static Component travelerChat(String author, String content) {
-		return pill("traveler", author + ": " + content, 0x55FFFF);
+		Style color = Style.EMPTY.withColor(TRAVELER_RGB);
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel("traveler")).withStyle(color.withFont(PILL_FONT))).append(Component.literal(" " + author + ": ").withStyle(color)).append(linkify(content, null, color));
+		return withGuildPrefix(body);
 	}
 
 	/**
@@ -293,13 +298,17 @@ public final class DiscordChatFormatter {
 	}
 
 	private static MutableComponent linkify(String content, Style replyStyle) {
+		return linkify(content, replyStyle, Style.EMPTY.withColor(ChatFormatting.GREEN));
+	}
+
+	private static MutableComponent linkify(String content, Style replyStyle, Style textStyle) {
 		MutableComponent out = Component.empty();
 		Matcher matcher = TOKEN_PATTERN.matcher(content);
 		int last = 0;
 		// Click event for the text body (without hover popup so reading isn't obstructed)
 		ClickEvent textClick = replyStyle != null ? replyStyle.getClickEvent() : null;
 		java.util.function.Consumer<String> appendText = text -> {
-			MutableComponent comp = Component.literal(text).withStyle(ChatFormatting.GREEN);
+			MutableComponent comp = Component.literal(text).withStyle(textStyle);
 			if (textClick != null) {
 				comp.setStyle(comp.getStyle().withClickEvent(textClick));
 			}
