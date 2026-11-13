@@ -18,6 +18,8 @@ public class EdenMenuScreen extends EdenScreen {
 	private static final int BUTTON_HEIGHT = 20;
 	private static final int BUTTON_SPACING = 24;
 	private static final int BUTTON_COUNT = 8;
+	// Event and Payouts are guild-only.
+	private static final int TRAVELER_HIDDEN_BUTTONS = 2;
 	private static final int LOGO_WIDTH = 128;
 	private static final int LOGO_GAP = 20;
 	private static final int CONTENT_MARGIN = 12;
@@ -46,26 +48,30 @@ public class EdenMenuScreen extends EdenScreen {
 	protected void init() {
 		super.init();
 		int baseLogoHeight = LOGO_WIDTH * LOGO_H / LOGO_W;
-		int baseStackHeight = BUTTON_HEIGHT + BUTTON_SPACING * (BUTTON_COUNT - 1);
+		int baseStackHeight = BUTTON_HEIGHT + BUTTON_SPACING * (buttonCount() - 1);
 		int baseTotalHeight = baseLogoHeight + LOGO_GAP + baseStackHeight;
 		layout = EdenPanelLayout.centered(this.width, this.height, BASE_CONTENT_WIDTH + (CONTENT_MARGIN * 2), baseTotalHeight + (MIN_TOP_SAFE_MARGIN * 2));
 		MenuMetrics metrics = menuMetrics();
+		boolean traveler = isTraveler();
+		int slot = 0;
 
 		this.addRenderableWidget(Button.builder(Component.literal("Config"), button -> {
 			this.minecraft.setScreen(BridgeConfigScreen.create(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY, metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
 
-		this.addRenderableWidget(Button.builder(Component.literal("Event"), button -> {
-			EdenModClient mod = EdenModClient.instance();
-			if (mod != null && mod.socket() != null && mod.socket().isConnected()) {
-				mod.socket().sendLongEventStateRequest();
-			}
-			this.minecraft.setScreen(new LongEventScreen(this, mod));
-		}).bounds(metrics.buttonX, metrics.startY + metrics.buttonPitch, metrics.buttonWidth, metrics.buttonHeight).build());
+		if (!traveler) {
+			this.addRenderableWidget(Button.builder(Component.literal("Event"), button -> {
+				EdenModClient mod = EdenModClient.instance();
+				if (mod != null && mod.socket() != null && mod.socket().isConnected()) {
+					mod.socket().sendLongEventStateRequest();
+				}
+				this.minecraft.setScreen(new LongEventScreen(this, mod));
+			}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
+		}
 
 		this.addRenderableWidget(Button.builder(Component.literal("Create Party"), button -> {
 			this.minecraft.setScreen(new PartyCreateScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 2), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Manage Party"), button -> {
 			tel.eden.mod.net.PartyInfo myParty = EdenModClient.instance() != null ? EdenModClient.instance().activeParty() : null;
@@ -74,23 +80,25 @@ public class EdenMenuScreen extends EdenScreen {
 			} else if (this.minecraft.player != null) {
 				this.minecraft.player.displayClientMessage(Component.literal("You are not in an active party!").withStyle(net.minecraft.ChatFormatting.RED), false);
 			}
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 3), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Party List"), button -> {
 			this.minecraft.setScreen(new PartyListScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 4), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
 
-		this.addRenderableWidget(Button.builder(Component.literal("Payouts"), button -> {
-			this.minecraft.setScreen(new PayoutScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 5), metrics.buttonWidth, metrics.buttonHeight).build());
+		if (!traveler) {
+			this.addRenderableWidget(Button.builder(Component.literal("Payouts"), button -> {
+				this.minecraft.setScreen(new PayoutScreen(this, EdenModClient.instance()));
+			}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
+		}
 
 		this.addRenderableWidget(Button.builder(Component.literal("Command Aliases"), button -> {
 			this.minecraft.setScreen(new CommandAliasScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 6), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
 
 		this.addRenderableWidget(Button.builder(Component.literal("Command Keybinds"), button -> {
 			this.minecraft.setScreen(new CommandKeybindScreen(this, EdenModClient.instance()));
-		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * 7), metrics.buttonWidth, metrics.buttonHeight).build());
+		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
 	}
 
 	@Override
@@ -193,6 +201,15 @@ public class EdenMenuScreen extends EdenScreen {
 		};
 	}
 
+	private static boolean isTraveler() {
+		EdenModClient mod = EdenModClient.instance();
+		return mod != null && mod.isTraveler();
+	}
+
+	private static int buttonCount() {
+		return isTraveler() ? BUTTON_COUNT - TRAVELER_HIDDEN_BUTTONS : BUTTON_COUNT;
+	}
+
 	private int bottomSafeMargin() {
 		return Math.max(MIN_BOTTOM_SAFE_MARGIN, this.height / 6);
 	}
@@ -202,7 +219,7 @@ public class EdenMenuScreen extends EdenScreen {
 	}
 
 	private MenuMetrics menuMetrics() {
-		int stackHeight = BUTTON_HEIGHT + BUTTON_SPACING * (BUTTON_COUNT - 1);
+		int stackHeight = BUTTON_HEIGHT + BUTTON_SPACING * (buttonCount() - 1);
 		int topPadding = topSafeMargin();
 		int bottomPadding = bottomSafeMargin();
 		int availableWidth = Math.max(1, this.width - (CONTENT_MARGIN * 2));

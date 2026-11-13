@@ -9,6 +9,27 @@ import org.junit.jupiter.api.Test;
 
 class BridgeConfigTest {
 	@Test
+	void presetsNeedSuiteAndAKnownOrUnknownMember() {
+		BridgeConfig config = new Gson().fromJson("{\"enabled\":true}", BridgeConfig.class);
+		// Older configs have no wasMember: presets stay on until the first authOk says otherwise.
+		assertTrue(config.presetsEnabled());
+		config.wasMember = false;
+		assertFalse(config.presetsEnabled());
+		config.wasMember = true;
+		assertTrue(config.presetsEnabled());
+		config.territoryMenuSuite = false;
+		assertFalse(config.presetsEnabled());
+	}
+
+	@Test
+	void travelerChatDefaultsOnAndGamesDefaultPerStanding() {
+		BridgeConfig config = new BridgeConfig();
+		assertTrue(config.travelerChat);
+		assertFalse(config.memberAllGames);
+		assertTrue(config.travelerGames);
+	}
+
+	@Test
 	void defaultsDiscordBridgeMessagesToTrue() {
 		BridgeConfig config = new BridgeConfig();
 		assertTrue(config.discordBridgeMessages);

@@ -112,15 +112,40 @@ public final class BridgeConfigScreen extends EdenScreen {
 		}, popupSettings));
 
 		// --- One line per setting; the list handles layout + smooth scrolling. ---
+		// Travelers keep local features only: guild-bound rows are not built at all.
+		boolean traveler = mod.isTraveler();
 		// General
 		addToggleRow(Category.GENERAL, "Bridge", () -> config.enabled, v -> config.enabled = v, "Enabled", "Disabled", true);
-		addToggleRow(Category.GENERAL, "Discord Bridge Messages", () -> config.discordBridgeMessages, v -> config.discordBridgeMessages = v, "On", "Off", true);
-		addCycleRow(Category.GENERAL, "Login/logout messages", () -> config.loginLogoutMode.label(), () -> config.loginLogoutMode = nextLoginLogoutMode(config.loginLogoutMode), () -> config.loginLogoutMode = BridgeConfig.LoginLogoutMode.ALL);
+		if (!traveler) {
+			addToggleRow(Category.GENERAL, "Discord Bridge Messages", () -> config.discordBridgeMessages, v -> config.discordBridgeMessages = v, "On", "Off", true);
+		}
+		if (!traveler) {
+			addCycleRow(Category.GENERAL, "Login/logout messages", () -> config.loginLogoutMode.label(), () -> config.loginLogoutMode = nextLoginLogoutMode(config.loginLogoutMode), () -> config.loginLogoutMode = BridgeConfig.LoginLogoutMode.ALL);
+		}
 		addToggleRow(Category.GENERAL, "Mail sound", () -> config.mailSound, v -> config.mailSound = v, "On", "Off", true);
 		addToggleRow(Category.GENERAL, "Party feed", () -> config.partyAnnounce, v -> config.partyAnnounce = v, "On", "Off", true);
-		addToggleRow(Category.GENERAL, "Event announcements", () -> config.eventAnnouncements, v -> config.eventAnnouncements = v, "On", "Off", true);
+		addToggleRow(Category.GENERAL, "Traveler chat", () -> config.travelerChat, v -> {
+			config.travelerChat = v;
+			EdenModClient.syncTravelerPrefs(config);
+		}, "On", "Off", true);
+		if (traveler) {
+			addToggleRow(Category.GENERAL, "Games shown", () -> config.travelerGames, v -> {
+				config.travelerGames = v;
+				EdenModClient.syncTravelerPrefs(config);
+			}, "All", "Off", true);
+		} else {
+			addToggleRow(Category.GENERAL, "Games shown", () -> config.memberAllGames, v -> {
+				config.memberAllGames = v;
+				EdenModClient.syncTravelerPrefs(config);
+			}, "All", "Guild only", false);
+		}
+		if (!traveler) {
+			addToggleRow(Category.GENERAL, "Event announcements", () -> config.eventAnnouncements, v -> config.eventAnnouncements = v, "On", "Off", true);
+		}
 		addToggleRow(Category.GENERAL, "Auto /stream on join", () -> config.autoStream, v -> config.autoStream = v, "On", "Off", false);
-		addToggleRow(Category.GENERAL, "Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);
+		if (!traveler) {
+			addToggleRow(Category.GENERAL, "Click shouts to reply", () -> config.shoutsClickable, v -> config.shoutsClickable = v, "On", "Off", true);
+		}
 		addToggleRow(Category.GENERAL, "Click-to-congratulate", () -> config.clickToCongratulate, v -> config.clickToCongratulate = v, "On", "Off", false);
 		EditBox congratsBox = new EditBox(this.font, 0, 0, CONTROL_W, 20, Component.literal("Congrats message"));
 		congratsBox.setMaxLength(80);
@@ -163,7 +188,9 @@ public final class BridgeConfigScreen extends EdenScreen {
 		addSliderRow(Category.WAR, "Max attack-timer rows", rowsSlider, rowsSlider::syncFromConfig, () -> config.warAttackTimerMaxRows = 14);
 		addToggleRow(Category.WAR, "Green beacon at soonest war", () -> config.warGreenBeacon, v -> config.warGreenBeacon = v, "On", "Off", true);
 		addToggleRow(Category.WAR, "War info overlay (DPS/EHP)", () -> config.warDpsHud, v -> config.warDpsHud = v, "On", "Off", true);
-		addToggleRow(Category.WAR, "Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
+		if (!traveler) {
+			addToggleRow(Category.WAR, "Weekly war count HUD", () -> config.warWeeklyCountHud, v -> config.warWeeklyCountHud = v, "On", "Off", false);
+		}
 		addToggleRow(Category.WAR, "War start bell (25s)", () -> config.warBattleStartBell, v -> config.warBattleStartBell = v, "On", "Off", false);
 		IntConfigSlider timerBellSlider = new IntConfigSlider(CONTROL_W, 20, 0, 120, 5, () -> config.warAttackTimerBellSeconds, v -> config.warAttackTimerBellSeconds = v, v -> Component.literal(v == 0 ? "Off" : v + "s"));
 		addSliderRow(Category.WAR, "Attack timer bell (in territory)", timerBellSlider, timerBellSlider::syncFromConfig, () -> config.warAttackTimerBellSeconds = 0);
@@ -171,30 +198,32 @@ public final class BridgeConfigScreen extends EdenScreen {
 		addToggleRow(Category.WAR, "Territory loss sound", () -> config.territoryLossSound, v -> config.territoryLossSound = v, "On", "Off", false);
 		addToggleRow(Category.WAR, "Territory loss blacklist", () -> config.territoryLossBlacklistEnabled, v -> config.territoryLossBlacklistEnabled = v, "On", "Off", true);
 		addButtonRow(Category.WAR, "Territory blacklist", () -> Component.literal("Edit (" + config.territoryLossBlacklist.size() + ")"), () -> this.minecraft.setScreen(new TerritoryLossBlacklistScreen(this, config)), () -> config.territoryLossBlacklist = new ArrayList<>(BridgeConfig.DEFAULT_TERRITORY_LOSS_BLACKLIST));
-		addToggleRow(Category.WAR, "Radiance tracker", () -> config.radianceTracker, v -> {
-			config.radianceTracker = v;
-			EdenModClient.syncRadianceGroup(config);
-		}, "On", "Off", false);
-		addCycleRow(Category.WAR, "Radiance aspect", () -> radianceAspectLabel(config.radianceSelfTier), () -> config.radianceSelfTier = (config.radianceSelfTier + 1) % 4, () -> config.radianceSelfTier = 0);
-		DoubleConfigSlider graceSlider = new DoubleConfigSlider(CONTROL_W, 20, 0.0, 3.0, 0.25, () -> config.radianceAdvanceNoticeSeconds, v -> config.radianceAdvanceNoticeSeconds = v, v -> Component.literal(formatGraceSeconds(v)));
-		addSliderRow(Category.WAR, "Radiance grace", graceSlider, graceSlider::syncFromConfig, () -> config.radianceAdvanceNoticeSeconds = 1.25);
-		addToggleRow(Category.WAR, "Radiance require war", () -> config.radianceRequireWar, v -> config.radianceRequireWar = v, "On", "Off", true);
-		addToggleRow(Category.WAR, "Radiance audio ping", () -> config.radiancePing, v -> config.radiancePing = v, "On", "Off", true);
-		EditBox radianceKeyBox = new EditBox(this.font, 0, 0, CONTROL_W, 20, Component.literal("Radiance group key"));
-		radianceKeyBox.setMaxLength(64);
-		radianceKeyBox.setValue(config.radianceGroupKey);
-		radianceKeyBox.setResponder(value -> config.radianceGroupKey = value.trim());
-		addRow(Category.WAR, "Radiance group key", radianceKeyBox, () -> {
-			if (!radianceKeyBox.isFocused() && !radianceKeyBox.getValue().equals(config.radianceGroupKey)) {
-				radianceKeyBox.setValue(config.radianceGroupKey);
-			}
-		}, () -> {
-			config.radianceGroupKey = "";
-			radianceKeyBox.setValue("");
-			config.save();
-			EdenModClient.syncRadianceGroup(config);
-		});
-		addToggleRow(Category.WAR, "Territory preset helper", () -> config.territoryMenuSuite, v -> config.territoryMenuSuite = v, "On", "Off", true);
+		if (!traveler) {
+			addToggleRow(Category.WAR, "Radiance tracker", () -> config.radianceTracker, v -> {
+				config.radianceTracker = v;
+				EdenModClient.syncRadianceGroup(config);
+			}, "On", "Off", false);
+			addCycleRow(Category.WAR, "Radiance aspect", () -> radianceAspectLabel(config.radianceSelfTier), () -> config.radianceSelfTier = (config.radianceSelfTier + 1) % 4, () -> config.radianceSelfTier = 0);
+			DoubleConfigSlider graceSlider = new DoubleConfigSlider(CONTROL_W, 20, 0.0, 3.0, 0.25, () -> config.radianceAdvanceNoticeSeconds, v -> config.radianceAdvanceNoticeSeconds = v, v -> Component.literal(formatGraceSeconds(v)));
+			addSliderRow(Category.WAR, "Radiance grace", graceSlider, graceSlider::syncFromConfig, () -> config.radianceAdvanceNoticeSeconds = 1.25);
+			addToggleRow(Category.WAR, "Radiance require war", () -> config.radianceRequireWar, v -> config.radianceRequireWar = v, "On", "Off", true);
+			addToggleRow(Category.WAR, "Radiance audio ping", () -> config.radiancePing, v -> config.radiancePing = v, "On", "Off", true);
+			EditBox radianceKeyBox = new EditBox(this.font, 0, 0, CONTROL_W, 20, Component.literal("Radiance group key"));
+			radianceKeyBox.setMaxLength(64);
+			radianceKeyBox.setValue(config.radianceGroupKey);
+			radianceKeyBox.setResponder(value -> config.radianceGroupKey = value.trim());
+			addRow(Category.WAR, "Radiance group key", radianceKeyBox, () -> {
+				if (!radianceKeyBox.isFocused() && !radianceKeyBox.getValue().equals(config.radianceGroupKey)) {
+					radianceKeyBox.setValue(config.radianceGroupKey);
+				}
+			}, () -> {
+				config.radianceGroupKey = "";
+				radianceKeyBox.setValue("");
+				config.save();
+				EdenModClient.syncRadianceGroup(config);
+			});
+			addToggleRow(Category.WAR, "Territory preset helper", () -> config.territoryMenuSuite, v -> config.territoryMenuSuite = v, "On", "Off", true);
+		}
 
 		// Visuals & QoL
 		if (config.isSecretUnlocked(BridgeConfig.SECRET_BABY_PLAYERS)) {
@@ -313,6 +342,7 @@ public final class BridgeConfigScreen extends EdenScreen {
 		return switch (mod.bridgeStatus()) {
 			case FULL -> Component.literal(name == null || name.isEmpty() ? "Linked" : "Linked as " + name).withStyle(style -> style.withColor(0x55FF55));
 			case NOT_MEMBER -> Component.literal("Linked, but not in the Eden guild").withStyle(style -> style.withColor(0xFFAA00));
+			case TRAVELER -> Component.literal(name == null || name.isEmpty() ? "Linked as a Traveler" : "Linked as " + name + " (Traveler)").withStyle(style -> style.withColor(0x55FFFF));
 			case NOT_LINKED -> Component.literal("Not linked").withStyle(style -> style.withColor(0xFFAA00));
 			case UNKNOWN -> Component.literal("Join Wynncraft to check status").withStyle(style -> style.withColor(0xAAAAAA));
 		};
@@ -550,6 +580,7 @@ public final class BridgeConfigScreen extends EdenScreen {
 	public void onClose() {
 		config.save();
 		EdenModClient.syncRadianceGroup(config);
+		EdenModClient.syncTravelerPrefs(config);
 		this.minecraft.setScreen(parent);
 	}
 

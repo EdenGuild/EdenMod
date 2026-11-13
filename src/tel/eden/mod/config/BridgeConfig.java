@@ -83,6 +83,15 @@ public final class BridgeConfig {
 	/** Play a short chime when Eden mail arrives. On by default. */
 	public boolean mailSound = true;
 
+	/** Show traveler chat (non-guild players and members talking together). On by default. */
+	public boolean travelerChat = true;
+
+	/** Members: also show traveler games ("all") instead of guild games only. Off by default. */
+	public boolean memberAllGames = false;
+
+	/** Travelers: show game lines at all ("all") or none ("off"). On by default. */
+	public boolean travelerGames = true;
+
 	/**
 	 * Whether open/full raid parties are auto-announced in chat with a clickable
 	 * {@code [JOIN #id]} feed. When false, parties are only shown on demand via
@@ -242,6 +251,17 @@ public final class BridgeConfig {
 	// ---- Territory Preset Helper (Wynntils Add-on) ----
 	/** Master toggle for the Territory Preset Helper Wynntils add-on. On by default. */
 	public boolean territoryMenuSuite = true;
+
+	/**
+	 * Last standing the backend reported: true = guild member. Null (older configs) counts as a
+	 * member so presets do not vanish for members before their first connect after updating.
+	 */
+	public Boolean wasMember = null;
+
+	/** Preset UI is for guild members only; wasMember is refreshed on every authOk, so it also covers an outage. */
+	public boolean presetsEnabled() {
+		return territoryMenuSuite && (wasMember == null || wasMember);
+	}
 
 	/** Active territory preset encoded Base64 or JSON string, or empty. */
 	public String territoryActivePreset = "";

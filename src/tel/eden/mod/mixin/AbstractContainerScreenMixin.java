@@ -303,7 +303,7 @@ public abstract class AbstractContainerScreenMixin {
 
 			edenmod$skipBtnVisible = false;
 			BridgeConfig config = EdenModClient.instance().config();
-			if (config != null && config.territoryMenuSuite && mc != null && mc.font != null) {
+			if (config != null && config.presetsEnabled() && mc != null && mc.font != null) {
 				String title = edenmod$title();
 				AbstractContainerMenu menu = getMenu();
 				if (!edenmod$checkAllowedEcoContainer(title, menu)) {
@@ -574,7 +574,7 @@ public abstract class AbstractContainerScreenMixin {
 	@Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
 	private void edenmod$onMouseClicked(MouseButtonEvent event, boolean bl, CallbackInfoReturnable<Boolean> cir) {
 		BridgeConfig config = EdenModClient.instance().config();
-		if (config != null && config.territoryMenuSuite) {
+		if (config != null && config.presetsEnabled()) {
 			String title = edenmod$title();
 			AbstractContainerMenu menu = getMenu();
 			if (edenmod$checkAllowedEcoContainer(title, menu)) {

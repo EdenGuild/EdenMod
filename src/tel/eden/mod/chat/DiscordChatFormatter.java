@@ -231,6 +231,22 @@ public final class DiscordChatFormatter {
 		return withGuildPrefix(body);
 	}
 
+	// Traveler chat's own color, lavender, so it never reads as guild (aqua) or Discord (green) chat.
+	private static final int TRAVELER_RGB = 0xB388FF;
+
+	// Invisible line markers a Wynntils chat-tab regex can match: one zero-width
+	// non-joiner on every line this mod draws, two on traveler chat so it can be
+	// routed to (or kept out of) its own tab.
+	private static final String LINE_MARKER = "\u200C";
+	private static final String TRAVELER_MARKER = "\u200C\u200C";
+
+	/** A traveler-chat line; links, images, GIFs, stickers and emotes render as in bridge chat. */
+	public static Component travelerChat(String author, String content) {
+		Style color = Style.EMPTY.withColor(TRAVELER_RGB);
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel("traveler")).withStyle(color.withFont(PILL_FONT))).append(Component.literal(" " + author + ": ").withStyle(color)).append(linkify(content, null, color));
+		return withGuildPrefix(body, TRAVELER_MARKER);
+	}
+
 	/**
 	 * Build a gold-pill bridge line (Quick Reactions, {@code /eden cf}/{@code diceroll}):
 	 * a gold pill labelled {@code label}, then the {@code content} in gold. Mirrors
@@ -288,13 +304,17 @@ public final class DiscordChatFormatter {
 	}
 
 	private static MutableComponent linkify(String content, Style replyStyle) {
+		return linkify(content, replyStyle, Style.EMPTY.withColor(ChatFormatting.GREEN));
+	}
+
+	private static MutableComponent linkify(String content, Style replyStyle, Style textStyle) {
 		MutableComponent out = Component.empty();
 		Matcher matcher = TOKEN_PATTERN.matcher(content);
 		int last = 0;
 		// Click event for the text body (without hover popup so reading isn't obstructed)
 		ClickEvent textClick = replyStyle != null ? replyStyle.getClickEvent() : null;
 		java.util.function.Consumer<String> appendText = text -> {
-			MutableComponent comp = Component.literal(text).withStyle(ChatFormatting.GREEN);
+			MutableComponent comp = Component.literal(text).withStyle(textStyle);
 			if (textClick != null) {
 				comp.setStyle(comp.getStyle().withClickEvent(textClick));
 			}
@@ -407,8 +427,12 @@ public final class DiscordChatFormatter {
 
 	/** Wrap the body to chat width, prefixing line 1 with the shield and the rest with bars. */
 	private static Component withGuildPrefix(Component body) {
-		Component shield = prefix(SHIELD);
-		Component continuation = prefix(CONTINUATION);
+		return withGuildPrefix(body, LINE_MARKER);
+	}
+
+	private static Component withGuildPrefix(Component body, String marker) {
+		Component shield = prefix(SHIELD, marker);
+		Component continuation = prefix(CONTINUATION, marker);
 		Minecraft mc = Minecraft.getInstance();
 		Font font = mc.font;
 		int reserve = font.width(continuation);
@@ -440,8 +464,12 @@ public final class DiscordChatFormatter {
 	}
 
 	private static Component prefix(int[] glyphs) {
+		return prefix(glyphs, LINE_MARKER);
+	}
+
+	private static Component prefix(int[] glyphs, String marker) {
 		StringBuilder out = new StringBuilder();
-		out.append('\u200C');
+		out.append(marker);
 		for (int glyph : glyphs) {
 			out.appendCodePoint(glyph);
 		}
