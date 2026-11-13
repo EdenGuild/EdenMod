@@ -25,7 +25,7 @@ class BridgeConfigTest {
 	void travelerChatDefaultsOnAndGamesDefaultPerStanding() {
 		BridgeConfig config = new BridgeConfig();
 		assertTrue(config.travelerChat);
-		assertFalse(config.memberAllGames);
+		assertEquals(BridgeConfig.MemberGames.GUILD, config.memberGames);
 		assertTrue(config.travelerGames);
 	}
 

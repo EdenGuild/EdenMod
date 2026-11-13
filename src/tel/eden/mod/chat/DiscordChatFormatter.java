@@ -225,7 +225,7 @@ public final class DiscordChatFormatter {
 		body.append(authorComp);
 
 		if (replyTo != null && !replyTo.isEmpty()) {
-			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt)).append(Component.literal(": ").withStyle(ChatFormatting.GREEN));
+			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt, Style.EMPTY.withColor(ChatFormatting.GREEN))).append(Component.literal(": ").withStyle(ChatFormatting.GREEN));
 		}
 		body.append(linkify(content, replyStyle));
 		return withGuildPrefix(body);
@@ -241,9 +241,19 @@ public final class DiscordChatFormatter {
 	private static final String TRAVELER_MARKER = "\u200C\u200C";
 
 	/** A traveler-chat line; links, images, GIFs, stickers and emotes render as in bridge chat. */
-	public static Component travelerChat(String author, String content) {
+	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId) {
+		boolean hasId = messageId != null && !messageId.isEmpty();
+		if (hasId) {
+			ChatReplyManager.recordTravelerMessage(messageId, author, content);
+		}
 		Style color = Style.EMPTY.withColor(TRAVELER_RGB);
-		MutableComponent body = Component.empty().append(Component.literal(pillLabel("traveler")).withStyle(color.withFont(PILL_FONT))).append(Component.literal(" " + author + ": ").withStyle(color)).append(linkify(content, null, color));
+		Style click = hasId ? color.withClickEvent(new ClickEvent.RunCommand("/eden treply " + messageId)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to reply to @" + author).withStyle(ChatFormatting.GRAY))) : color;
+		boolean reply = replyTo != null && !replyTo.isEmpty();
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel("traveler")).withStyle(click.withFont(PILL_FONT))).append(Component.literal(reply ? " " + author : " " + author + ": ").withStyle(click));
+		if (reply) {
+			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt, color)).append(Component.literal(": ").withStyle(color));
+		}
+		body.append(linkify(content, hasId ? click : null, color));
 		return withGuildPrefix(body, TRAVELER_MARKER);
 	}
 
@@ -281,8 +291,8 @@ public final class DiscordChatFormatter {
 	}
 
 	/** The "replyTo (excerpt)" segment: name in green, inline quote gray, full quote on hover. */
-	private static MutableComponent replyTarget(String replyTo, String replyExcerpt) {
-		MutableComponent segment = Component.literal(replyTo).withStyle(ChatFormatting.GREEN);
+	private static MutableComponent replyTarget(String replyTo, String replyExcerpt, Style nameStyle) {
+		MutableComponent segment = Component.literal(replyTo).withStyle(nameStyle);
 		String quote = replyExcerpt == null ? "" : ChatText.normalizeWhitespace(replyExcerpt);
 		if (!quote.isEmpty()) {
 			String shown = quote.length() > EXCERPT_MAX ? quote.substring(0, EXCERPT_MAX).strip() + "…" : quote;

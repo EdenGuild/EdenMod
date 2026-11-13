@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import tel.eden.mod.EdenLogger;
 import tel.eden.mod.chat.PlayerNameResolver;
+import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.guild.GuildLogEvent;
 import tel.eden.mod.guild.GuildManageSnapshot;
 
@@ -219,7 +220,7 @@ public final class BridgeWebSocketClient {
 		void onAuthStatus(boolean linked, boolean member, boolean traveler, String guildRank, String discordRank);
 
 		/** A traveler-chat line from the game or Discord side. */
-		default void onTravelerChat(String author, String content, String source, String color) {
+		default void onTravelerChat(String author, String content, String source, String color, String replyTo, String replyExcerpt, String messageId) {
 		}
 	}
 
@@ -676,9 +677,9 @@ public final class BridgeWebSocketClient {
 	}
 
 	/** Send a traveler-chat line (members and travelers). */
-	public boolean sendTravelerChat(String content) {
+	public boolean sendTravelerChat(String content, String replyToMessageId) {
 		WebSocket current = socket;
-		return current != null && enqueueSend(current, travelerChatPayload(content));
+		return current != null && enqueueSend(current, travelerChatPayload(content, replyToMessageId));
 	}
 
 	/** Tell the backend whether to deliver traveler chat and which game lines to show ("guild", "all" or "off"). */
@@ -687,18 +688,21 @@ public final class BridgeWebSocketClient {
 		return current != null && enqueueSend(current, travelerPrefsPayload(chat, games));
 	}
 
-	/** The {@code games} value for travelerPrefs: members choose guild/all, travelers all/off. */
-	public static String gamesPref(boolean traveler, boolean memberAllGames, boolean travelerGames) {
+	/** The {@code games} value for travelerPrefs: members choose guild/all/off, travelers all/off. */
+	public static String gamesPref(boolean traveler, BridgeConfig.MemberGames memberGames, boolean travelerGames) {
 		if (traveler) {
 			return travelerGames ? "all" : "off";
 		}
-		return memberAllGames ? "all" : "guild";
+		return memberGames.name().toLowerCase(java.util.Locale.ROOT);
 	}
 
-	static JsonObject travelerChatPayload(String content) {
+	static JsonObject travelerChatPayload(String content, String replyToMessageId) {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "travelerChat");
 		obj.addProperty("content", content);
+		if (replyToMessageId != null && !replyToMessageId.isEmpty()) {
+			obj.addProperty("replyToMessageId", replyToMessageId);
+		}
 		return obj;
 	}
 
@@ -1516,7 +1520,7 @@ public final class BridgeWebSocketClient {
 			}
 			switch (get(obj, "type")) {
 				case "discordMessage" -> sink.onDiscordMessage(get(obj, "author"), get(obj, "content"), get(obj, "replyTo"), get(obj, "replyExcerpt"), get(obj, "color"), get(obj, "messageId"));
-				case "travelerChat" -> sink.onTravelerChat(cap(get(obj, "author"), 64), cap(get(obj, "content"), 512), get(obj, "source"), get(obj, "color"));
+				case "travelerChat" -> sink.onTravelerChat(cap(get(obj, "author"), 64), cap(get(obj, "content"), 512), get(obj, "source"), get(obj, "color"), cap(get(obj, "replyTo"), 64), cap(get(obj, "replyExcerpt"), 256), get(obj, "messageId").matches("[0-9]{1,20}") ? get(obj, "messageId") : "");
 				case "loginNotice" -> sink.onLoginNotice(get(obj, "username"), get(obj, "color"));
 				case "logoutNotice" -> sink.onLogoutNotice(get(obj, "username"), get(obj, "color"));
 				case "onlineList" -> sink.onOnlineList(getStringArray(obj, "users"), get(obj, "color"));

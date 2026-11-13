@@ -86,8 +86,12 @@ public final class BridgeConfig {
 	/** Show traveler chat (non-guild players and members talking together). On by default. */
 	public boolean travelerChat = true;
 
-	/** Members: also show traveler games ("all") instead of guild games only. Off by default. */
-	public boolean memberAllGames = false;
+	public enum MemberGames {
+		GUILD, ALL, OFF
+	}
+
+	/** Members: which game lines to show: guild games only (default), all, or none. */
+	public MemberGames memberGames = MemberGames.GUILD;
 
 	/** Travelers: show game lines at all ("all") or none ("off"). On by default. */
 	public boolean travelerGames = true;
@@ -496,6 +500,9 @@ public final class BridgeConfig {
 		}
 		if (config.loginLogoutMode == null) {
 			config.loginLogoutMode = LoginLogoutMode.ALL;
+		}
+		if (config.memberGames == null) {
+			config.memberGames = MemberGames.GUILD;
 		}
 	}
 

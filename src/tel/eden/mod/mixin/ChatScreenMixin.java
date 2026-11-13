@@ -166,9 +166,9 @@ public abstract class ChatScreenMixin {
 			if (input != null) {
 				String val = input.getValue();
 				if (val.isEmpty()) {
-					input.setValue("/g ");
+					input.setValue(ChatReplyManager.activeReplyPrefix());
 				} else if (!val.startsWith("/")) {
-					input.setValue("/g " + val);
+					input.setValue(ChatReplyManager.activeReplyPrefix() + val);
 				}
 			}
 		});
@@ -184,7 +184,12 @@ public abstract class ChatScreenMixin {
 	private void edenmod$captureReplyOnSend(String message, boolean addToHistory, CallbackInfo ci) {
 		if (ChatReplyManager.hasActiveReply()) {
 			String trimmed = message != null ? message.trim() : "";
-			if (trimmed.startsWith("/g ") && trimmed.length() > 3 && !trimmed.substring(3).isBlank()) {
+			if (ChatReplyManager.isActiveReplyTraveler()) {
+				// The command takes the reply (takeTravelerReply); anything else drops it.
+				if (!trimmed.startsWith("/e ") && !trimmed.startsWith("/eden tc ")) {
+					ChatReplyManager.clearActiveReply();
+				}
+			} else if (trimmed.startsWith("/g ") && trimmed.length() > 3 && !trimmed.substring(3).isBlank()) {
 				ChatReplyManager.markPendingReply(trimmed.substring(3));
 			} else {
 				ChatReplyManager.clearActiveReply();

@@ -13,6 +13,7 @@ import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
+import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.net.OutboundPolicy.Standing;
 
 class OutboundPolicyTest {
@@ -85,9 +86,11 @@ class OutboundPolicyTest {
 
 	@Test
 	void travelerPayloads() {
-		JsonObject chat = BridgeWebSocketClient.travelerChatPayload("hello");
+		JsonObject chat = BridgeWebSocketClient.travelerChatPayload("hello", "");
 		assertEquals("travelerChat", chat.get("type").getAsString());
 		assertEquals("hello", chat.get("content").getAsString());
+		assertFalse(chat.has("replyToMessageId"));
+		assertEquals("123", BridgeWebSocketClient.travelerChatPayload("hello", "123").get("replyToMessageId").getAsString());
 
 		JsonObject prefs = BridgeWebSocketClient.travelerPrefsPayload(false, "guild");
 		assertEquals("travelerPrefs", prefs.get("type").getAsString());
@@ -97,10 +100,11 @@ class OutboundPolicyTest {
 
 	@Test
 	void gamesPrefPerStanding() {
-		assertEquals("guild", BridgeWebSocketClient.gamesPref(false, false, true));
-		assertEquals("all", BridgeWebSocketClient.gamesPref(false, true, false));
-		assertEquals("all", BridgeWebSocketClient.gamesPref(true, false, true));
-		assertEquals("off", BridgeWebSocketClient.gamesPref(true, true, false));
+		assertEquals("guild", BridgeWebSocketClient.gamesPref(false, BridgeConfig.MemberGames.GUILD, true));
+		assertEquals("all", BridgeWebSocketClient.gamesPref(false, BridgeConfig.MemberGames.ALL, false));
+		assertEquals("off", BridgeWebSocketClient.gamesPref(false, BridgeConfig.MemberGames.OFF, true));
+		assertEquals("all", BridgeWebSocketClient.gamesPref(true, BridgeConfig.MemberGames.GUILD, true));
+		assertEquals("off", BridgeWebSocketClient.gamesPref(true, BridgeConfig.MemberGames.ALL, false));
 	}
 
 	private static Set<String> union() {

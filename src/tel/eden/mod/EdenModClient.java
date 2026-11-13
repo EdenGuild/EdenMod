@@ -841,7 +841,7 @@ public final class EdenModClient implements ClientModInitializer {
 			})).then(ClientCommandManager.literal("tc").then(ClientCommandManager.argument("message", StringArgumentType.greedyString()).executes(ctx -> sendTravelerChat(ctx.getSource(), StringArgumentType.getString(ctx, "message"))))).then(ClientCommandManager.literal("emojis").executes(ctx -> {
 				showEmojis(ctx.getSource());
 				return 1;
-			})).then(buildPartyCommand()).then(buildAnnihilationCommand()).then(buildCommandCommand()).then(ClientCommandManager.literal("reply").requires(guildOnly).then(ClientCommandManager.argument("messageId", StringArgumentType.word()).executes(ctx -> handleReplyCommand(StringArgumentType.getString(ctx, "messageId"))))).then(ClientCommandManager.literal("update").executes(ctx -> {
+			})).then(buildPartyCommand()).then(buildAnnihilationCommand()).then(buildCommandCommand()).then(ClientCommandManager.literal("reply").requires(guildOnly).then(ClientCommandManager.argument("messageId", StringArgumentType.word()).executes(ctx -> handleReplyCommand(StringArgumentType.getString(ctx, "messageId"))))).then(ClientCommandManager.literal("treply").then(ClientCommandManager.argument("messageId", StringArgumentType.word()).executes(ctx -> handleTravelerReplyCommand(StringArgumentType.getString(ctx, "messageId"))))).then(ClientCommandManager.literal("update").executes(ctx -> {
 				updatePrompt(ctx.getSource());
 				return 1;
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
@@ -1067,11 +1067,11 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onTravelerChat(String author, String content, String source, String color) {
+				public void onTravelerChat(String author, String content, String source, String color, String replyTo, String replyExcerpt, String messageId) {
 					if (!config.travelerChat) {
 						return;
 					}
-					displayColored(color, () -> DiscordChatFormatter.travelerChat(author, content));
+					displayColored(color, () -> DiscordChatFormatter.travelerChat(author, content, replyTo, replyExcerpt, messageId));
 				}
 
 				@Override
@@ -2377,7 +2377,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 	private int sendTravelerChat(FabricClientCommandSource source, String message) {
 		BridgeWebSocketClient current = socket;
-		if (current == null || !current.sendTravelerChat(message)) {
+		if (current == null || !current.sendTravelerChat(message, ChatReplyManager.takeTravelerReply())) {
 			source.sendFeedback(notConnected());
 			return 0;
 		}
@@ -2710,6 +2710,19 @@ public final class EdenModClient implements ClientModInitializer {
 		return 1;
 	}
 
+	private int handleTravelerReplyCommand(String messageId) {
+		ChatReplyManager.setActiveTravelerReply(messageId);
+		Minecraft mc = Minecraft.getInstance();
+		mc.execute(() -> {
+			if (!(mc.screen instanceof net.minecraft.client.gui.screens.ChatScreen)) {
+				mc.setScreen(new net.minecraft.client.gui.screens.ChatScreen("/e ", false));
+			} else {
+				ChatReplyManager.ensureGuildPrefix();
+			}
+		});
+		return 1;
+	}
+
 	private record HelpEntry(String command, String description) {
 	}
 
@@ -2909,7 +2922,7 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 		BridgeWebSocketClient current = instance.socket;
 		if (current != null) {
-			current.sendTravelerPrefs(config.travelerChat, BridgeWebSocketClient.gamesPref(instance.isTraveler(), config.memberAllGames, config.travelerGames));
+			current.sendTravelerPrefs(config.travelerChat, BridgeWebSocketClient.gamesPref(instance.isTraveler(), config.memberGames, config.travelerGames));
 		}
 	}
 

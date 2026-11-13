@@ -119,26 +119,30 @@ public final class BridgeConfigScreen extends EdenScreen {
 		if (!traveler) {
 			addToggleRow(Category.GENERAL, "Discord Bridge Messages", () -> config.discordBridgeMessages, v -> config.discordBridgeMessages = v, "On", "Off", true);
 		}
-		if (!traveler) {
-			addCycleRow(Category.GENERAL, "Login/logout messages", () -> config.loginLogoutMode.label(), () -> config.loginLogoutMode = nextLoginLogoutMode(config.loginLogoutMode), () -> config.loginLogoutMode = BridgeConfig.LoginLogoutMode.ALL);
-		}
-		addToggleRow(Category.GENERAL, "Mail sound", () -> config.mailSound, v -> config.mailSound = v, "On", "Off", true);
-		addToggleRow(Category.GENERAL, "Party feed", () -> config.partyAnnounce, v -> config.partyAnnounce = v, "On", "Off", true);
 		addToggleRow(Category.GENERAL, "Traveler chat", () -> config.travelerChat, v -> {
 			config.travelerChat = v;
 			EdenModClient.syncTravelerPrefs(config);
 		}, "On", "Off", true);
+		if (!traveler) {
+			addCycleRow(Category.GENERAL, "Login/logout messages", () -> config.loginLogoutMode.label(), () -> config.loginLogoutMode = nextLoginLogoutMode(config.loginLogoutMode), () -> config.loginLogoutMode = BridgeConfig.LoginLogoutMode.ALL);
+		}
 		if (traveler) {
 			addToggleRow(Category.GENERAL, "Games shown", () -> config.travelerGames, v -> {
 				config.travelerGames = v;
 				EdenModClient.syncTravelerPrefs(config);
 			}, "All", "Off", true);
 		} else {
-			addToggleRow(Category.GENERAL, "Games shown", () -> config.memberAllGames, v -> {
-				config.memberAllGames = v;
+			addCycleRow(Category.GENERAL, "Games shown", () -> MEMBER_GAMES_LABELS[config.memberGames.ordinal()], () -> {
+				BridgeConfig.MemberGames[] values = BridgeConfig.MemberGames.values();
+				config.memberGames = values[(config.memberGames.ordinal() + 1) % values.length];
 				EdenModClient.syncTravelerPrefs(config);
-			}, "All", "Guild only", false);
+			}, () -> {
+				config.memberGames = BridgeConfig.MemberGames.GUILD;
+				EdenModClient.syncTravelerPrefs(config);
+			});
 		}
+		addToggleRow(Category.GENERAL, "Mail sound", () -> config.mailSound, v -> config.mailSound = v, "On", "Off", true);
+		addToggleRow(Category.GENERAL, "Party feed", () -> config.partyAnnounce, v -> config.partyAnnounce = v, "On", "Off", true);
 		if (!traveler) {
 			addToggleRow(Category.GENERAL, "Event announcements", () -> config.eventAnnouncements, v -> config.eventAnnouncements = v, "On", "Off", true);
 		}
@@ -312,6 +316,8 @@ public final class BridgeConfigScreen extends EdenScreen {
 		linkButton.active = false;
 		mod.startLinkFlow(() -> this.minecraft.execute(() -> this.minecraft.setScreen(BridgeConfigScreen.create(parent, mod))));
 	}
+
+	private static final String[] MEMBER_GAMES_LABELS = {"Guild only", "All", "Off"};
 
 	private BridgeConfig.LoginLogoutMode nextLoginLogoutMode(BridgeConfig.LoginLogoutMode current) {
 		BridgeConfig.LoginLogoutMode safe = current != null ? current : BridgeConfig.LoginLogoutMode.ALL;

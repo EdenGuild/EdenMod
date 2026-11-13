@@ -10,7 +10,7 @@ import net.minecraft.client.gui.GuiGraphics;
  * Manages active and pending Discord reply state for the in-game chat UI and bridge.
  */
 public final class ChatReplyManager {
-	public record ReplyInfo(String messageId, String author, String excerpt) {
+	public record ReplyInfo(String messageId, String author, String excerpt, boolean traveler) {
 	}
 
 	private static final int MAX_CACHE_SIZE = 100;
@@ -59,6 +59,15 @@ public final class ChatReplyManager {
 
 	/** Record a received Discord message so it can be replied to by ID. */
 	public static synchronized void recordDiscordMessage(String messageId, String author, String content) {
+		record(messageId, author, content, false);
+	}
+
+	/** Record a received traveler-chat message so it can be replied to by ID. */
+	public static synchronized void recordTravelerMessage(String messageId, String author, String content) {
+		record(messageId, author, content, true);
+	}
+
+	private static void record(String messageId, String author, String content, boolean traveler) {
 		if (messageId == null || messageId.isEmpty() || author == null) {
 			return;
 		}
@@ -66,7 +75,7 @@ public final class ChatReplyManager {
 		if (excerpt.length() > 60) {
 			excerpt = excerpt.substring(0, 57).strip() + "...";
 		}
-		RECENT_MESSAGES.put(messageId, new ReplyInfo(messageId, author, excerpt));
+		RECENT_MESSAGES.put(messageId, new ReplyInfo(messageId, author, excerpt, traveler));
 	}
 
 	/** Retrieve cached message metadata by Discord message ID. */
@@ -76,12 +85,37 @@ public final class ChatReplyManager {
 
 	/** Set active reply context looking up cached metadata. */
 	public static synchronized void setActiveReply(String messageId) {
+		setActiveReply(messageId, false);
+	}
+
+	/** As {@link #setActiveReply(String)} for a traveler-chat message; an unknown id is still a traveler reply. */
+	public static synchronized void setActiveTravelerReply(String messageId) {
+		setActiveReply(messageId, true);
+	}
+
+	private static void setActiveReply(String messageId, boolean traveler) {
 		ReplyInfo info = RECENT_MESSAGES.get(messageId);
-		if (info != null) {
-			activeReply = info;
-		} else {
-			activeReply = new ReplyInfo(messageId, "Discord", "");
+		activeReply = info != null ? new ReplyInfo(messageId, info.author(), info.excerpt(), traveler) : new ReplyInfo(messageId, "Discord", "", traveler);
+	}
+
+	/** Whether the active reply targets a traveler-chat message. */
+	public static synchronized boolean isActiveReplyTraveler() {
+		return activeReply != null && activeReply.traveler();
+	}
+
+	/** Chat prefix that routes a message to the active reply's channel: /e for traveler chat, /g otherwise. */
+	public static synchronized String activeReplyPrefix() {
+		return isActiveReplyTraveler() ? "/e " : "/g ";
+	}
+
+	/** If the active reply is a traveler one, return its message ID and clear it; otherwise null, state untouched. */
+	public static synchronized String takeTravelerReply() {
+		if (!isActiveReplyTraveler()) {
+			return null;
 		}
+		String id = activeReply.messageId();
+		activeReply = null;
+		return id;
 	}
 
 	/** Currently active reply context in the chat UI. */
