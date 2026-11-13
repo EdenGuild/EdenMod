@@ -44,7 +44,7 @@ public final class BridgeWebSocketClient {
 	 * it (the last one, "guildLogSync", was retired once the server-side code
 	 * that checked for it was removed).
 	 */
-	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of("mail", "longEvent");
+	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of("mail", "longEvent", "traveler", "travelerChat");
 
 	/** Callbacks for inbound bridge events (delivered off the game thread). */
 	public interface MessageSink {
@@ -216,7 +216,11 @@ public final class BridgeWebSocketClient {
 		 * {@code guildRank} (e.g. "Chief") and {@code discordRank} (e.g. "Senate") are
 		 * empty strings when not applicable.
 		 */
-		void onAuthStatus(boolean linked, boolean member, String guildRank, String discordRank);
+		void onAuthStatus(boolean linked, boolean member, boolean traveler, String guildRank, String discordRank);
+
+		/** A traveler-chat line from the game or Discord side. */
+		default void onTravelerChat(String author, String content, String source, String color) {
+		}
 	}
 
 	/**
@@ -245,6 +249,8 @@ public final class BridgeWebSocketClient {
 
 	private volatile WebSocket socket;
 	private volatile boolean authenticated = false;
+	// Set from authOk and reset with `authenticated`; gates every outbound frame (OutboundPolicy).
+	private volatile OutboundPolicy.Standing standing = OutboundPolicy.Standing.UNKNOWN;
 	// Tail of the serialized outbound send queue — see enqueueSend().
 	private CompletableFuture<?> sendChain = CompletableFuture.completedFuture(null);
 	private volatile boolean running;
@@ -296,6 +302,7 @@ public final class BridgeWebSocketClient {
 		WebSocket current = socket;
 		socket = null;
 		authenticated = false;
+		standing = OutboundPolicy.Standing.UNKNOWN;
 		if (current != null) {
 			current.sendClose(WebSocket.NORMAL_CLOSURE, "client closing");
 		}
@@ -317,8 +324,13 @@ public final class BridgeWebSocketClient {
 	 * Chaining instead of blocking keeps every caller non-blocking; {@code handle}
 	 * swallows a prior failure so one bad send can't wedge every send after it.
 	 */
-	private synchronized void enqueueSend(WebSocket ws, String text) {
+	private synchronized boolean enqueueSend(WebSocket ws, JsonObject obj) {
+		if (!OutboundPolicy.allowed(standing, get(obj, "type"))) {
+			return false;
+		}
+		String text = obj.toString();
 		sendChain = sendChain.handle((v, ex) -> null).thenCompose(ignored -> ws.sendText(text, true));
+		return true;
 	}
 
 	/** Send one captured guild-chat line to the backend. */
@@ -343,7 +355,7 @@ public final class BridgeWebSocketClient {
 		if (replyToMessageId != null && !replyToMessageId.isEmpty()) {
 			obj.addProperty("replyToMessageId", replyToMessageId);
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/**
@@ -372,8 +384,7 @@ public final class BridgeWebSocketClient {
 		}
 		obj.add("guilds", names);
 		obj.add("tags", tags);
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/** Report one typed root Guild Manage snapshot — season/weekly/territory status, surfaced on "Eden Standings". */
@@ -409,7 +420,7 @@ public final class BridgeWebSocketClient {
 		if (snapshot.srPerHour() != null) {
 			obj.addProperty("srPerHour", snapshot.srPerHour());
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/**
@@ -446,7 +457,7 @@ public final class BridgeWebSocketClient {
 		if (seasonalRating != null) {
 			obj.addProperty("seasonalRating", seasonalRating);
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Send one parsed guild rank change to the backend. */
@@ -461,7 +472,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("oldRank", oldRank);
 		obj.addProperty("newRank", newRank);
 		obj.addProperty("setter", setter);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Tell the backend this player just started a bridge session (for login notices). */
@@ -505,8 +516,7 @@ public final class BridgeWebSocketClient {
 			return false;
 		}
 		JsonObject obj = rewardOptOutPayload(rewardKind, blocked);
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/** Ask the backend for the member list + aspect stock for the giveaway screen (Chiefs only). */
@@ -535,8 +545,7 @@ public final class BridgeWebSocketClient {
 		if (manual) {
 			obj.addProperty("source", "manual");
 		}
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/**
@@ -567,8 +576,7 @@ public final class BridgeWebSocketClient {
 		}
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", type);
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/** Open a new party in-game for the given label (raid name, Annihilation, or Festival). */
@@ -600,7 +608,7 @@ public final class BridgeWebSocketClient {
 			}
 			obj.add("members", arr);
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	public void sendPartyOpen(String raid, int maxSize, String note, int filled, boolean ally, String world) {
@@ -620,7 +628,7 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "partyJoin");
 		obj.addProperty("id", id);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	public void sendPartyAllyToggle(boolean ally) {
@@ -638,7 +646,7 @@ public final class BridgeWebSocketClient {
 		if (id != null) {
 			obj.addProperty("id", id);
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Ask the backend for the list of open raid parties. */
@@ -664,7 +672,42 @@ public final class BridgeWebSocketClient {
 		if (ign != null && !ign.isEmpty()) {
 			obj.addProperty("ign", ign);
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
+	}
+
+	/** Send a traveler-chat line (members and travelers). */
+	public boolean sendTravelerChat(String content) {
+		WebSocket current = socket;
+		return current != null && enqueueSend(current, travelerChatPayload(content));
+	}
+
+	/** Tell the backend whether to deliver traveler chat and which game lines to show ("guild", "all" or "off"). */
+	public boolean sendTravelerPrefs(boolean chat, String games) {
+		WebSocket current = socket;
+		return current != null && enqueueSend(current, travelerPrefsPayload(chat, games));
+	}
+
+	/** The {@code games} value for travelerPrefs: members choose guild/all, travelers all/off. */
+	public static String gamesPref(boolean traveler, boolean memberAllGames, boolean travelerGames) {
+		if (traveler) {
+			return travelerGames ? "all" : "off";
+		}
+		return memberAllGames ? "all" : "guild";
+	}
+
+	static JsonObject travelerChatPayload(String content) {
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "travelerChat");
+		obj.addProperty("content", content);
+		return obj;
+	}
+
+	static JsonObject travelerPrefsPayload(boolean chat, String games) {
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "travelerPrefs");
+		obj.addProperty("chat", chat);
+		obj.addProperty("games", games);
+		return obj;
 	}
 
 	/** Ask the backend to flip a coin and announce who flipped it + the result. */
@@ -743,7 +786,7 @@ public final class BridgeWebSocketClient {
 		if (current == null || payload == null) {
 			return;
 		}
-		enqueueSend(current, payload.toString());
+		enqueueSend(current, payload);
 	}
 
 	/** The raid party as a JSON array with blank names dropped, or null when no name is left. */
@@ -779,8 +822,7 @@ public final class BridgeWebSocketClient {
 			array.add(member);
 		}
 		obj.add("members", array);
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/**
@@ -795,8 +837,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "territoryDefended");
 		obj.addProperty("territory", territory);
 		obj.addProperty("attacker", attacker);
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/**
@@ -815,8 +856,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "warDefense");
 		obj.addProperty("territory", territory);
 		obj.addProperty("defense", defense);
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/**
@@ -832,8 +872,7 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "radianceGroup");
 		obj.addProperty("groupKey", groupKey != null ? groupKey.trim() : "");
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/**
@@ -851,8 +890,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("groupKey", groupKey.trim());
 		obj.addProperty("tier", tier);
 		obj.addProperty("remainingMs", remainingMs);
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/**
@@ -865,8 +903,7 @@ public final class BridgeWebSocketClient {
 		if (current == null) {
 			return false;
 		}
-		enqueueSend(current, witnessKillPayload(partyMembers).toString());
-		return true;
+		return enqueueSend(current, witnessKillPayload(partyMembers));
 	}
 
 	/**
@@ -883,8 +920,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "mailSend");
 		obj.addProperty("to", to);
 		obj.addProperty("content", content);
-		enqueueSend(current, obj.toString());
-		return true;
+		return enqueueSend(current, obj);
 	}
 
 	/** Tell the bot these mails were shown, so it stops re-sending them. */
@@ -893,7 +929,7 @@ public final class BridgeWebSocketClient {
 		if (current == null || ids.isEmpty()) {
 			return;
 		}
-		enqueueSend(current, mailAckPayload(ids).toString());
+		enqueueSend(current, mailAckPayload(ids));
 	}
 
 	static JsonObject mailAckPayload(java.util.List<Long> ids) {
@@ -938,7 +974,7 @@ public final class BridgeWebSocketClient {
 		if (remaining != null) {
 			obj.addProperty("remaining", remaining);
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/**
@@ -956,7 +992,7 @@ public final class BridgeWebSocketClient {
 			obj.addProperty("territory", territory.trim());
 		}
 		obj.addProperty("inside", inside);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/**
@@ -975,7 +1011,7 @@ public final class BridgeWebSocketClient {
 		if (remaining != null) {
 			obj.addProperty("remaining", remaining);
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/**
@@ -995,7 +1031,7 @@ public final class BridgeWebSocketClient {
 		if (captured) {
 			obj.addProperty("captured", true);
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Ask for the guild's per-member war counts over the last {@code days} days. */
@@ -1007,7 +1043,7 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "warCountsRequest");
 		obj.addProperty("days", days);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Ask for the guild's current allies ordered by inactivity (same as Discord). */
@@ -1018,7 +1054,7 @@ public final class BridgeWebSocketClient {
 		}
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "allyActivityRequest");
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Ask the backend for this player's current long-event mission state. */
@@ -1043,7 +1079,7 @@ public final class BridgeWebSocketClient {
 		if (buy) {
 			obj.addProperty("buy", true);
 		}
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Ask the backend for this player's pending event LE. */
@@ -1061,7 +1097,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("type", "longEventMysteryGuess");
 		obj.addProperty("guess", guess.trim());
 		obj.addProperty("useTrivia", useTrivia);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/**
@@ -1076,7 +1112,7 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "presence");
 		obj.addProperty("active", active);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	private void sendType(String type) {
@@ -1086,7 +1122,7 @@ public final class BridgeWebSocketClient {
 		}
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", type);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Send one parsed guild-bank deposit/withdrawal to the backend. */
@@ -1108,7 +1144,7 @@ public final class BridgeWebSocketClient {
 		}
 		obj.addProperty("accessTier", accessTier);
 		obj.addProperty("seq", seq);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Report an in-game Annihilation warning (seconds until it begins). */
@@ -1120,7 +1156,7 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "annihilation");
 		obj.addProperty("secondsUntil", secondsUntil);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Mirror a guild flavour announcement (weekly objective/boost) into bridge chat. */
@@ -1132,7 +1168,7 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "guildAnnounce");
 		obj.addProperty("message", message);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Send one parsed guild-management/alliance event to the backend. */
@@ -1146,7 +1182,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("kind", kind);
 		obj.addProperty("actor", actor);
 		obj.addProperty("subject", subject);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Send one parsed guild reward handout to the backend. */
@@ -1161,7 +1197,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("reward", reward);
 		obj.addProperty("receiver", receiver);
 		obj.addProperty("seq", seq);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Send a rendered shared-item card (base64 PNG) to be relayed as the sender. */
@@ -1178,7 +1214,7 @@ public final class BridgeWebSocketClient {
 		}
 		obj.addProperty("image", imageBase64);
 		obj.addProperty("signature", signature);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/**
@@ -1305,7 +1341,7 @@ public final class BridgeWebSocketClient {
 			obj.addProperty("fullScan", true);
 		}
 		obj.add("events", encoded);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Report that the running jar failed its boot-time Sigstore attestation check. */
@@ -1317,7 +1353,7 @@ public final class BridgeWebSocketClient {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "attestationFailure");
 		obj.addProperty("sha", sha);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	/** Relay the guild's current reward storage (aspects/tomes/emeralds) for the live counter. */
@@ -1331,7 +1367,7 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("aspects", aspects);
 		obj.addProperty("tomes", tomes);
 		obj.addProperty("emeralds", emeralds);
-		enqueueSend(current, obj.toString());
+		enqueueSend(current, obj);
 	}
 
 	private void connect() {
@@ -1386,6 +1422,7 @@ public final class BridgeWebSocketClient {
 		}
 		socket = null;
 		authenticated = false;
+		standing = OutboundPolicy.Standing.UNKNOWN;
 		if (!running || reconnectScheduled) {
 			return;
 		}
@@ -1413,6 +1450,7 @@ public final class BridgeWebSocketClient {
 			current = socket;
 			socket = null;
 			authenticated = false;
+			standing = OutboundPolicy.Standing.UNKNOWN;
 			scheduler.shutdownNow();
 		}
 		if (current != null) {
@@ -1434,6 +1472,7 @@ public final class BridgeWebSocketClient {
 					pendingAuthUsername = null;
 					socket = webSocket;
 					authenticated = false;
+					standing = OutboundPolicy.Standing.UNKNOWN;
 				}
 			}
 			if (!accepted) {
@@ -1472,8 +1511,12 @@ public final class BridgeWebSocketClient {
 	private void handlePayload(String payload) {
 		try {
 			JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
+			if (!OutboundPolicy.inboundAllowed(standing, get(obj, "type"))) {
+				return;
+			}
 			switch (get(obj, "type")) {
 				case "discordMessage" -> sink.onDiscordMessage(get(obj, "author"), get(obj, "content"), get(obj, "replyTo"), get(obj, "replyExcerpt"), get(obj, "color"), get(obj, "messageId"));
+				case "travelerChat" -> sink.onTravelerChat(cap(get(obj, "author"), 64), cap(get(obj, "content"), 512), get(obj, "source"), get(obj, "color"));
 				case "loginNotice" -> sink.onLoginNotice(get(obj, "username"), get(obj, "color"));
 				case "logoutNotice" -> sink.onLogoutNotice(get(obj, "username"), get(obj, "color"));
 				case "onlineList" -> sink.onOnlineList(getStringArray(obj, "users"), get(obj, "color"));
@@ -1522,13 +1565,15 @@ public final class BridgeWebSocketClient {
 					// on full access or prompts the player otherwise.
 					boolean linked = getBool(obj, "linked");
 					boolean member = getBool(obj, "member");
+					boolean traveler = getBool(obj, "traveler");
+					standing = OutboundPolicy.Standing.of(linked, member, traveler);
 					String guildRank = cap(get(obj, "guildRank"), 64);
 					String discordRank = cap(get(obj, "discordRank"), 64);
 					LOGGER.info("Bridge session verified as {} (linked={} member={})", pendingAuthUsername != null ? pendingAuthUsername : "?", linked, member);
 					sessionVerifyRetries = 0;
 					backoffSeconds = 1;
 					try {
-						sink.onAuthStatus(linked, member, guildRank, discordRank);
+						sink.onAuthStatus(linked, member, traveler, guildRank, discordRank);
 					} catch (RuntimeException e) {
 						LOGGER.warn("onAuthStatus callback failed", e);
 					}
@@ -1599,7 +1644,7 @@ public final class BridgeWebSocketClient {
 					supported.add(feature);
 				}
 				obj.add("supported", supported);
-				enqueueSend(current, obj.toString());
+				enqueueSend(current, obj);
 			} catch (Exception e) {
 				LOGGER.warn("Mojang session join failed: {}", e.toString());
 			}

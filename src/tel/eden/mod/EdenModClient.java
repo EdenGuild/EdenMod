@@ -220,7 +220,9 @@ public final class EdenModClient implements ClientModInitializer {
 		/** Verified but not linked — the player is prompted to link. */
 		NOT_LINKED,
 		/** Linked but not a guild member — the bridge stays inactive. */
-		NOT_MEMBER
+		NOT_MEMBER,
+		/** Linked, not in the guild, holds a traveler role — a restricted feature set. */
+		TRAVELER
 	}
 
 	private volatile BridgeStatus bridgeStatus = BridgeStatus.UNKNOWN;
@@ -233,6 +235,17 @@ public final class EdenModClient implements ClientModInitializer {
 	public BridgeStatus bridgeStatus() {
 		return bridgeStatus;
 	}
+
+	public boolean isTraveler() {
+		return bridgeStatus == BridgeStatus.TRAVELER;
+	}
+
+	public boolean isFullMember() {
+		return bridgeStatus == BridgeStatus.FULL;
+	}
+
+	/** Guild-only commands are hidden from travelers; an unverified player keeps them, as before. */
+	private final java.util.function.Predicate<FabricClientCommandSource> guildOnly = source -> !isTraveler();
 
 	/** In-game guild rank last reported by the backend, or empty if unknown. */
 	public String liveGuildRank() {
@@ -813,28 +826,28 @@ public final class EdenModClient implements ClientModInitializer {
 				Minecraft mc = Minecraft.getInstance();
 				mc.execute(() -> mc.setScreen(BridgeConfigScreen.create(mc.screen, EdenModClient.instance())));
 				return 1;
-			})).then(ClientCommandManager.literal("online").executes(ctx -> {
+			})).then(ClientCommandManager.literal("online").requires(guildOnly).executes(ctx -> {
 				requestOnline(ctx.getSource());
 				return 1;
-			})).then(ClientCommandManager.literal("mail").then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).then(ClientCommandManager.argument("message", StringArgumentType.greedyString()).executes(ctx -> sendMail(ctx.getSource(), StringArgumentType.getString(ctx, "player"), StringArgumentType.getString(ctx, "message")))))).then(ClientCommandManager.literal("aspects").then(ClientCommandManager.literal("pending").executes(ctx -> {
+			})).then(ClientCommandManager.literal("mail").then(ClientCommandManager.argument("player", StringArgumentType.word()).suggests(this::suggestMembers).then(ClientCommandManager.argument("message", StringArgumentType.greedyString()).executes(ctx -> sendMail(ctx.getSource(), StringArgumentType.getString(ctx, "player"), StringArgumentType.getString(ctx, "message")))))).then(ClientCommandManager.literal("aspects").requires(guildOnly).then(ClientCommandManager.literal("pending").executes(ctx -> {
 				requestAspectsPending(ctx.getSource());
 				return 1;
-			})).then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("aspects", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("aspects", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("aspects", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("emeralds").then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("emeralds", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("emeralds", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("emeralds", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("warpay").executes(ctx -> queryRewardStatus()).then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("warpay", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("warpay", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("warpay", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("rewards").executes(ctx -> queryRewardStatus()).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("cf").executes(ctx -> {
+			})).then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("aspects", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("aspects", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("aspects", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("emeralds").requires(guildOnly).then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("emeralds", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("emeralds", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("emeralds", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("warpay").requires(guildOnly).executes(ctx -> queryRewardStatus()).then(ClientCommandManager.literal("optout").executes(ctx -> toggleRewardOptOut("warpay", true)).then(ClientCommandManager.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool()).executes(ctx -> toggleRewardOptOut("warpay", com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "enabled"))))).then(ClientCommandManager.literal("optin").executes(ctx -> toggleRewardOptOut("warpay", false))).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("rewards").requires(guildOnly).executes(ctx -> queryRewardStatus()).then(ClientCommandManager.literal("status").executes(ctx -> queryRewardStatus()))).then(ClientCommandManager.literal("cf").executes(ctx -> {
 				requestCoinflip(ctx.getSource());
 				return 1;
 			})).then(ClientCommandManager.literal("diceroll").executes(ctx -> {
 				requestDiceroll(ctx.getSource());
 				return 1;
-			})).then(ClientCommandManager.literal("emojis").executes(ctx -> {
+			})).then(ClientCommandManager.literal("tc").then(ClientCommandManager.argument("message", StringArgumentType.greedyString()).executes(ctx -> sendTravelerChat(ctx.getSource(), StringArgumentType.getString(ctx, "message"))))).then(ClientCommandManager.literal("emojis").executes(ctx -> {
 				showEmojis(ctx.getSource());
 				return 1;
-			})).then(buildPartyCommand()).then(buildAnnihilationCommand()).then(buildCommandCommand()).then(ClientCommandManager.literal("reply").then(ClientCommandManager.argument("messageId", StringArgumentType.word()).executes(ctx -> handleReplyCommand(StringArgumentType.getString(ctx, "messageId"))))).then(ClientCommandManager.literal("update").executes(ctx -> {
+			})).then(buildPartyCommand()).then(buildAnnihilationCommand()).then(buildCommandCommand()).then(ClientCommandManager.literal("reply").requires(guildOnly).then(ClientCommandManager.argument("messageId", StringArgumentType.word()).executes(ctx -> handleReplyCommand(StringArgumentType.getString(ctx, "messageId"))))).then(ClientCommandManager.literal("update").executes(ctx -> {
 				updatePrompt(ctx.getSource());
 				return 1;
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(buildEventCommand()).then(ClientCommandManager.literal("logscan").executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").executes(ctx -> {
+			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(buildEventCommand()).then(ClientCommandManager.literal("logscan").requires(guildOnly).executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").requires(guildOnly).then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").requires(guildOnly).executes(ctx -> {
 				requestWarCounts(ctx.getSource(), 7);
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
@@ -861,6 +874,7 @@ public final class EdenModClient implements ClientModInitializer {
 				showHelp(ctx.getSource());
 				return 1;
 			})));
+			dispatcher.register(ClientCommandManager.literal("e").then(ClientCommandManager.argument("message", StringArgumentType.greedyString()).executes(ctx -> sendTravelerChat(ctx.getSource(), StringArgumentType.getString(ctx, "message")))));
 		});
 
 		Thread bootVerify = new Thread(() -> {
@@ -1050,6 +1064,14 @@ public final class EdenModClient implements ClientModInitializer {
 						return;
 					}
 					displayColored(color, () -> DiscordChatFormatter.format(author, content, replyTo, replyExcerpt, messageId));
+				}
+
+				@Override
+				public void onTravelerChat(String author, String content, String source, String color) {
+					if (!config.travelerChat) {
+						return;
+					}
+					displayColored(color, () -> DiscordChatFormatter.travelerChat(author, content));
 				}
 
 				@Override
@@ -1447,8 +1469,8 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onAuthStatus(boolean linked, boolean member, String guildRank, String discordRank) {
-					handleAuthStatus(linked, member, guildRank, discordRank);
+				public void onAuthStatus(boolean linked, boolean member, boolean traveler, String guildRank, String discordRank) {
+					handleAuthStatus(linked, member, traveler, guildRank, discordRank);
 				}
 			}, EdenModClient::authenticateSession);
 			socket.start();
@@ -1698,7 +1720,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/** Build {@code /eden gift <member> <aspect|emerald|tome> <amount>} (Chiefs only). */
 	private LiteralArgumentBuilder<FabricClientCommandSource> buildGiftCommand() {
-		return ClientCommandManager.literal("gift").then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).then(giftTypeArg("aspect", GuildRewards.RewardType.ASPECT)).then(giftTypeArg("emerald", GuildRewards.RewardType.EMERALD)).then(giftTypeArg("tome", GuildRewards.RewardType.TOME)));
+		return ClientCommandManager.literal("gift").requires(guildOnly).then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).then(giftTypeArg("aspect", GuildRewards.RewardType.ASPECT)).then(giftTypeArg("emerald", GuildRewards.RewardType.EMERALD)).then(giftTypeArg("tome", GuildRewards.RewardType.TOME)));
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> giftTypeArg(String literal, GuildRewards.RewardType type) {
@@ -1707,7 +1729,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/** Build {@code /eden deduct <aspects|emeralds> <member> <amount>} (Chiefs only). */
 	private LiteralArgumentBuilder<FabricClientCommandSource> buildDeductCommand() {
-		return ClientCommandManager.literal("deduct").then(deductKindArg("aspects")).then(deductKindArg("emeralds"));
+		return ClientCommandManager.literal("deduct").requires(guildOnly).then(deductKindArg("aspects")).then(deductKindArg("emeralds"));
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> deductKindArg(String kind) {
@@ -1736,7 +1758,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/** Build {@code /eden ally (view | add <name> | remove <name>)}. */
 	private LiteralArgumentBuilder<FabricClientCommandSource> buildAllyCommand() {
-		return ClientCommandManager.literal("ally").executes(ctx -> {
+		return ClientCommandManager.literal("ally").requires(guildOnly).executes(ctx -> {
 			requestAllyView(ctx.getSource());
 			return 1;
 		}).then(ClientCommandManager.literal("view").executes(ctx -> {
@@ -1776,7 +1798,7 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> buildEventCommand() {
-		return ClientCommandManager.literal("event").executes(ctx -> openLongEventGui(ctx.getSource())).then(ClientCommandManager.literal("rewards").executes(ctx -> {
+		return ClientCommandManager.literal("event").requires(guildOnly).executes(ctx -> openLongEventGui(ctx.getSource())).then(ClientCommandManager.literal("rewards").executes(ctx -> {
 			requestEventRewards(ctx.getSource());
 			return 1;
 		}));
@@ -2323,7 +2345,7 @@ public final class EdenModClient implements ClientModInitializer {
 			source.sendFeedback(notConnected());
 			return 0;
 		}
-		current.sendPartyOpen(raid, maxSize, note, filled);
+		current.sendPartyOpen(raid, maxSize, note, filled, isTraveler(), "");
 		return 1;
 	}
 
@@ -2352,6 +2374,15 @@ public final class EdenModClient implements ClientModInitializer {
 	private static final long SHOUT_PREVIEW_WINDOW_MS = 5_000L;
 	// The pill label the bridge games (cf/diceroll/8ball) ride on; hidden by config toggle.
 	private static final String GAMES_PILL_LABEL = "eden";
+
+	private int sendTravelerChat(FabricClientCommandSource source, String message) {
+		BridgeWebSocketClient current = socket;
+		if (current == null || !current.sendTravelerChat(message)) {
+			source.sendFeedback(notConnected());
+			return 0;
+		}
+		return 1;
+	}
 
 	private static Component notConnected() {
 		return Component.literal("Not connected to the Eden bridge.").withStyle(net.minecraft.ChatFormatting.RED);
@@ -2682,7 +2713,9 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden event", "open the event missions screen"), new HelpEntry("/eden event rewards", "check your pending event LE"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds/warpay and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden warpay optout [true|false]", "opt out of or into receiving warpay"), new HelpEntry("/eden help", "this help screen"));
+	private static final java.util.Set<String> GUILD_ONLY_COMMANDS = java.util.Set.of("online", "wars", "event", "aspects", "emeralds", "warpay", "rewards", "gift", "dump", "deduct", "ally", "reply", "logscan");
+
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden tc <message>", "chat with travelers and members (alias /e)"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden event", "open the event missions screen"), new HelpEntry("/eden event rewards", "check your pending event LE"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds/warpay and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden warpay optout [true|false]", "opt out of or into receiving warpay"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -2721,6 +2754,9 @@ public final class EdenModClient implements ClientModInitializer {
 	private void showHelp(FabricClientCommandSource source) {
 		MutableComponent help = Component.literal("EdenMod — in-game commands:").withStyle(net.minecraft.ChatFormatting.GREEN);
 		for (HelpEntry entry : HELP_ENTRIES) {
+			if (isTraveler() && GUILD_ONLY_COMMANDS.contains(entry.command().split(" ")[1])) {
+				continue;
+			}
 			help.append(helpLine(entry.command(), entry.description()));
 		}
 		help.append(Component.literal("\nPress ").withStyle(ChatFormatting.DARK_GRAY)).append(openConfigButton()).append(Component.literal(" to open the bridge config screen.").withStyle(ChatFormatting.DARK_GRAY));
@@ -2791,8 +2827,14 @@ public final class EdenModClient implements ClientModInitializer {
 	 * begins the session; otherwise the socket stays open with no guild access and the
 	 * player is prompted once per standing change. Runs off the game thread.
 	 */
-	private void handleAuthStatus(boolean linked, boolean member, String guildRank, String discordRank) {
+	private void handleAuthStatus(boolean linked, boolean member, boolean traveler, String guildRank, String discordRank) {
 		BridgeStatus previous = bridgeStatus;
+		if (config.wasMember == null || config.wasMember != member) {
+			config.wasMember = member;
+			// Saved on the game thread: serializing here could race with config edits and
+			// throw before the standing below is applied.
+			Minecraft.getInstance().execute(config::save);
+		}
 		if (linked && member) {
 			bridgeStatus = BridgeStatus.FULL;
 			liveGuildRank = guildRank;
@@ -2803,6 +2845,12 @@ public final class EdenModClient implements ClientModInitializer {
 			if (previous != BridgeStatus.NOT_LINKED) {
 				display(() -> DiscordChatFormatter.linkReminder(openConfigButton()));
 			}
+		} else if (traveler) {
+			bridgeStatus = BridgeStatus.TRAVELER;
+			if (previous != BridgeStatus.TRAVELER) {
+				display(() -> DiscordChatFormatter.systemLine("Connected as an Eden Traveler — guild features are hidden.", ChatFormatting.GREEN));
+			}
+			onTravelerConnected();
 		} else {
 			bridgeStatus = BridgeStatus.NOT_MEMBER;
 			if (previous != BridgeStatus.NOT_MEMBER) {
@@ -2838,8 +2886,31 @@ public final class EdenModClient implements ClientModInitializer {
 				current.sendPresence(inGameWorld); // send whatever state we already detected
 			}
 		}
+		syncTravelerPrefs(config);
 		syncRadianceGroup(config);
 		queryRewardStatus(true);
+	}
+
+	/** A traveler gets presence and its chat/games preferences only — nothing guild-related. */
+	private void onTravelerConnected() {
+		if (loginPending) {
+			loginPending = false;
+			BridgeWebSocketClient current = socket;
+			if (current != null) {
+				current.sendPresence(inGameWorld);
+			}
+		}
+		syncTravelerPrefs(config);
+	}
+
+	public static void syncTravelerPrefs(BridgeConfig config) {
+		if (config == null || instance == null) {
+			return;
+		}
+		BridgeWebSocketClient current = instance.socket;
+		if (current != null) {
+			current.sendTravelerPrefs(config.travelerChat, BridgeWebSocketClient.gamesPref(instance.isTraveler(), config.memberAllGames, config.travelerGames));
+		}
 	}
 
 	public static void syncRadianceGroup(BridgeConfig config) {

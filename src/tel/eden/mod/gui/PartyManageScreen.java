@@ -139,9 +139,11 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		this.addRenderableWidget(btnPlayersPlus);
 
 		// Open to Allies toggle button
-		btnOpenToAllies = Button.builder(Component.literal(party.ally() ? "§a[✔] Open to Allies" : "§7[ ] Open to Allies"), b -> onToggleAlly()).bounds(rightColX, layout.y(152), layout.w(160), layout.h(18)).build();
-		btnOpenToAllies.active = isHost;
-		this.addRenderableWidget(btnOpenToAllies);
+		if (mod == null || !mod.isTraveler()) {
+			btnOpenToAllies = Button.builder(Component.literal(party.ally() ? "§a[✔] Open to Allies" : "§7[ ] Open to Allies"), b -> onToggleAlly()).bounds(rightColX, layout.y(152), layout.w(160), layout.h(18)).build();
+			btnOpenToAllies.active = isHost;
+			this.addRenderableWidget(btnOpenToAllies);
+		}
 
 		// Note field
 		noteField = new EditBox(this.font, rightColX, layout.y(186), layout.w(160), layout.h(18), Component.literal("Party Note"));

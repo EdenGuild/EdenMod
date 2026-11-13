@@ -231,6 +231,11 @@ public final class DiscordChatFormatter {
 		return withGuildPrefix(body);
 	}
 
+	/** A traveler-chat line: its own aqua pill so it never reads as guild or Discord chat. */
+	public static Component travelerChat(String author, String content) {
+		return pill("traveler", author + ": " + content, 0x55FFFF);
+	}
+
 	/**
 	 * Build a gold-pill bridge line (Quick Reactions, {@code /eden cf}/{@code diceroll}):
 	 * a gold pill labelled {@code label}, then the {@code content} in gold. Mirrors
