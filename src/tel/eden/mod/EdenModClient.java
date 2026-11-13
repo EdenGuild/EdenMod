@@ -2875,16 +2875,7 @@ public final class EdenModClient implements ClientModInitializer {
 	/** On full access, begin this session: hand back deducts and announce login once. */
 	private void onBridgeConnected() {
 		handBackOutstandingDeducts("were not confirmed deducted before the bridge dropped");
-		if (!attestationFailureReported) {
-			String failedSha = updateInstaller.bootAttestationFailureSha();
-			if (failedSha != null) {
-				attestationFailureReported = true;
-				BridgeWebSocketClient current = socket;
-				if (current != null) {
-					current.sendAttestationFailure(failedSha);
-				}
-			}
-		}
+		reportAttestationFailure();
 		if (loginPending) {
 			loginPending = false;
 			BridgeWebSocketClient current = socket;
@@ -2904,8 +2895,24 @@ public final class EdenModClient implements ClientModInitializer {
 		queryRewardStatus(true);
 	}
 
+	/** Report a failed boot attestation to the bridge, once per session, on the first connect with a standing. */
+	private void reportAttestationFailure() {
+		if (attestationFailureReported) {
+			return;
+		}
+		String failedSha = updateInstaller.bootAttestationFailureSha();
+		if (failedSha != null) {
+			attestationFailureReported = true;
+			BridgeWebSocketClient current = socket;
+			if (current != null) {
+				current.sendAttestationFailure(failedSha);
+			}
+		}
+	}
+
 	/** A traveler gets presence and its chat/games preferences only — nothing guild-related. */
 	private void onTravelerConnected() {
+		reportAttestationFailure();
 		if (loginPending) {
 			loginPending = false;
 			BridgeWebSocketClient current = socket;
