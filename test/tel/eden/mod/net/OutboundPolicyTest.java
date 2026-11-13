@@ -43,10 +43,12 @@ class OutboundPolicyTest {
 
 	@Test
 	void unverifiedAndIneligibleStandingsOnlyMayAuthenticate() {
-		for (Standing standing : new Standing[]{Standing.UNKNOWN, Standing.NOT_LINKED, Standing.NOT_MEMBER}) {
-			for (String type : union()) {
-				assertEquals("authResponse".equals(type), OutboundPolicy.allowed(standing, type), standing + " " + type);
-			}
+		for (String type : union()) {
+			assertEquals("authResponse".equals(type), OutboundPolicy.allowed(Standing.UNKNOWN, type), "UNKNOWN " + type);
+			// Once verified, a player without access may also report a failed jar check.
+			boolean observer = "authResponse".equals(type) || "attestationFailure".equals(type);
+			assertEquals(observer, OutboundPolicy.allowed(Standing.NOT_LINKED, type), "NOT_LINKED " + type);
+			assertEquals(observer, OutboundPolicy.allowed(Standing.NOT_MEMBER, type), "NOT_MEMBER " + type);
 		}
 	}
 

@@ -2858,6 +2858,7 @@ public final class EdenModClient implements ClientModInitializer {
 			if (previous != BridgeStatus.NOT_LINKED) {
 				display(() -> DiscordChatFormatter.linkReminder(openConfigButton()));
 			}
+			reportAttestationFailure();
 		} else if (traveler) {
 			bridgeStatus = BridgeStatus.TRAVELER;
 			if (previous != BridgeStatus.TRAVELER) {
@@ -2869,6 +2870,7 @@ public final class EdenModClient implements ClientModInitializer {
 			if (previous != BridgeStatus.NOT_MEMBER) {
 				display(() -> DiscordChatFormatter.systemLine("You're not in the Eden guild — the bridge is inactive.", ChatFormatting.YELLOW));
 			}
+			reportAttestationFailure();
 		}
 	}
 

@@ -38,7 +38,8 @@ public final class OutboundPolicy {
 		return switch (standing) {
 			case FULL -> true;
 			case TRAVELER -> TRAVELER_TYPES.contains(type);
-			default -> "authResponse".equals(type);
+			case NOT_LINKED, NOT_MEMBER -> "authResponse".equals(type) || "attestationFailure".equals(type);
+			case UNKNOWN -> "authResponse".equals(type);
 		};
 	}
 }
