@@ -28,6 +28,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 
 	private int filledSlots;
 	private int maxSize;
+	private boolean openToAllies;
 	private EditBox noteField;
 	private EditBox addPlayerField;
 
@@ -51,6 +52,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		this.party = party;
 		this.filledSlots = filledCount(party);
 		this.maxSize = party.max();
+		this.openToAllies = party.ally();
 	}
 
 	private static int filledCount(PartyInfo party) {
@@ -75,12 +77,16 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 						// Keep the host's unsent size edits; take the server's values for the rest.
 						boolean maxEdited = this.maxSize != party.max();
 						boolean filledEdited = this.filledSlots != filledCount(party);
+						boolean allyEdited = this.openToAllies != party.ally();
 						this.party = p;
 						if (!maxEdited) {
 							this.maxSize = p.max();
 						}
 						if (!filledEdited) {
 							this.filledSlots = filledCount(p);
+						}
+						if (!allyEdited) {
+							this.openToAllies = p.ally();
 						}
 
 						String curNote = noteField != null ? noteField.getValue() : null;
@@ -139,7 +145,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		this.addRenderableWidget(btnPlayersPlus);
 
 		// Open to Allies toggle button
-		btnOpenToAllies = Button.builder(Component.literal(party.ally() ? "§a[✔] Open to Allies" : "§7[ ] Open to Allies"), b -> onToggleAlly()).bounds(rightColX, layout.y(152), layout.w(160), layout.h(18)).build();
+		btnOpenToAllies = Button.builder(Component.literal(openToAllies ? "§a[✔] Open to Allies" : "§7[ ] Open to Allies"), b -> onToggleAlly()).bounds(rightColX, layout.y(152), layout.w(160), layout.h(18)).build();
 		btnOpenToAllies.active = isHost;
 		this.addRenderableWidget(btnOpenToAllies);
 
@@ -224,10 +230,8 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 	}
 
 	private void onToggleAlly() {
-		var ws = mod != null ? mod.socket() : null;
-		if (ws != null) {
-			ws.sendPartyAllyToggle(!party.ally());
-		}
+		openToAllies = !openToAllies;
+		updateWidgetStates();
 	}
 
 	private void onAddPlayer() {
@@ -286,7 +290,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		btnMaxPlus.active = isHost && party.isCustomSize() && maxSize < 10;
 		if (btnOpenToAllies != null) {
 			btnOpenToAllies.active = isHost;
-			btnOpenToAllies.setMessage(Component.literal(party.ally() ? "§a[✔] Open to Allies" : "§7[ ] Open to Allies"));
+			btnOpenToAllies.setMessage(Component.literal(openToAllies ? "§a[✔] Open to Allies" : "§7[ ] Open to Allies"));
 		}
 		if (btnAddPlayer != null) {
 			btnAddPlayer.active = isHost && occupancy < maxSize;
@@ -305,7 +309,7 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 		super.render(g, scaledMouseX, scaledMouseY, delta);
 
 		g.drawCenteredString(this.font, this.title, layout.centerX(), layout.y(12), 0xFFFFFFFF);
-		String scopeTag = party.ally() ? "§b[Ally] " : "§6[Guild] ";
+		String scopeTag = openToAllies ? "§b[Ally] " : "§6[Guild] ";
 		g.drawCenteredString(this.font, scopeTag + "Party (" + (realMembers() + filledSlots) + "/" + maxSize + ")", layout.x(87), layout.y(20), 0xFF55FF55);
 
 		int yPos = layout.y(38);
@@ -386,6 +390,9 @@ public final class PartyManageScreen extends EdenReferenceScreen {
 			}
 			if (maxChanged && shrinking) {
 				ws.sendPartyManage("max", null, this.maxSize, null);
+			}
+			if (this.openToAllies != party.ally()) {
+				ws.sendPartyAllyToggle(this.openToAllies);
 			}
 			if (noteField != null && !noteField.getValue().equals(party.note())) {
 				ws.sendPartyManage("note", noteField.getValue(), 0, null);
