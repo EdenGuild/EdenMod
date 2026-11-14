@@ -44,6 +44,7 @@ import tel.eden.mod.gui.GroundItemVisibilityRuleScreen;
 import tel.eden.mod.gui.GroundItemVisibilityScreen;
 import tel.eden.mod.gui.HudLayoutScreen;
 import tel.eden.mod.gui.PartyManageScreen;
+import tel.eden.mod.gui.ProgressScreenGuard;
 import tel.eden.mod.gui.RenamePresetScreen;
 import tel.eden.mod.gui.TerritoryLossBlacklistScreen;
 import tel.eden.mod.net.PartyInfo;
@@ -141,7 +142,11 @@ public final class ScreensGameTest implements FabricClientGameTest {
 					context.waitTicks(5);
 					problems.addAll(context.computeOnClient(client -> inspect(client, spec, label)));
 					Output.keepScreenshot(context.takeScreenshot(spec.name() + "-" + setup.label()));
-					context.runOnClient(client -> client.setScreen(null));
+					// The progress screens hold themselves up for a run that never happens here.
+					context.runOnClient(client -> {
+						ProgressScreenGuard.releaseAll();
+						client.setScreen(null);
+					});
 				}
 			}
 			problems.addAll(checkEscape(context, specs));
@@ -186,7 +191,10 @@ public final class ScreensGameTest implements FabricClientGameTest {
 			} else if (!shouldStay && now != opened[0]) {
 				problems.add(spec.name() + ": Escape did not return to the screen it was opened from (now showing " + describe(now) + ")");
 			}
-			context.runOnClient(client -> client.setScreen(null));
+			context.runOnClient(client -> {
+				ProgressScreenGuard.releaseAll();
+				client.setScreen(null);
+			});
 		}
 		for (String missing : wanted) {
 			problems.add(missing + " is named in the Escape checks of ScreensGameTest but no such screen is tested; update the names");

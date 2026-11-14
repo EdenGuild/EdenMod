@@ -9,6 +9,9 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
+import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
@@ -16,6 +19,8 @@ import net.minecraft.world.phys.AABB;
 import support.Failures;
 import support.Output;
 import support.Worlds;
+import tel.eden.mod.gui.GiftProgressScreen;
+import tel.eden.mod.gui.ProgressScreenGuard;
 import tel.eden.mod.render.Gammabright;
 import tel.eden.mod.util.BabyPlayerEmoteTracker;
 
@@ -45,6 +50,7 @@ public final class BehaviourGameTest implements FabricClientGameTest {
 			cleanWorld(context, server);
 			babyModeIgnoresDisplaysNearAMountedRider(context, server);
 			gammabrightBrightensTheFrame(context, server);
+			progressScreenSurvivesScreenSwitches(context, server);
 		}
 		Output.marker("behaviour.ok");
 	}
@@ -130,6 +136,38 @@ public final class BehaviourGameTest implements FabricClientGameTest {
 			return sum / (3.0 * image.getWidth() * image.getHeight());
 		} catch (IOException e) {
 			throw new IllegalStateException("Could not read " + screenshot, e);
+		}
+	}
+
+	/**
+	 * A gift or payout holds the player behind its progress screen. Wynncraft opening a menu, a teleporter or a
+	 * closing container must not take it down while the run is still going, or the player is free to move and
+	 * even to open other menus mid-run.
+	 */
+	private static void progressScreenSurvivesScreenSwitches(ClientGameTestContext context, TestServerContext server) {
+		cleanWorld(context, server);
+		GiftProgressScreen[] shown = new GiftProgressScreen[1];
+		context.runOnClient(client -> {
+			shown[0] = new GiftProgressScreen("Test Gift", () -> {
+			});
+			client.setScreen(shown[0]);
+		});
+		GiftProgressScreen progress = shown[0];
+		context.waitTicks(3);
+		context.runOnClient(client -> client.setScreen(null));
+		context.runOnClient(client -> client.setScreen(new ChatScreen("", false)));
+		context.runOnClient(client -> client.setScreen(new InventoryScreen(client.player)));
+		context.waitTicks(3);
+		Screen during = context.computeOnClient(client -> client.screen);
+		context.runOnClient(client -> progress.onDone());
+		context.waitTicks(3);
+		Screen after = context.computeOnClient(client -> client.screen);
+		ProgressScreenGuard.releaseAll();
+		if (during != progress) {
+			throw new AssertionError("The progress screen was replaced mid-run by " + (during == null ? "no screen" : during.getClass().getSimpleName()));
+		}
+		if (after != null) {
+			throw new AssertionError("The progress screen did not close when its run finished; now showing " + after.getClass().getSimpleName());
 		}
 	}
 }

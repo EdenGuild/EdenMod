@@ -40,6 +40,10 @@ public final class AllyProgressScreen extends EdenReferenceScreen implements Bac
 		super.init();
 		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 		cancelButton = this.addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> requestCancel()).bounds(layout.x(110), layout.y(80), layout.w(100), layout.h(20)).build());
+		cancelButton.active = !cancelling;
+		if (!done) {
+			ProgressScreenGuard.hold(this);
+		}
 	}
 
 	private void requestCancel() {
@@ -59,6 +63,7 @@ public final class AllyProgressScreen extends EdenReferenceScreen implements Bac
 
 	public void markDone() {
 		done = true;
+		ProgressScreenGuard.release(this);
 		Minecraft mc = Minecraft.getInstance();
 		mc.execute(() -> {
 			if (mc.screen == this) {
