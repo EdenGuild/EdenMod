@@ -233,6 +233,8 @@ public final class DiscordChatFormatter {
 
 	// Traveler chat's own color, lavender, so it never reads as guild (aqua) or Discord (green) chat.
 	private static final int TRAVELER_RGB = 0xB388FF;
+	// The message text is a lighter shade than the tag and name so the name stands out.
+	private static final int TRAVELER_TEXT_RGB = 0xD8C2FF;
 
 	// Invisible line markers a Wynntils chat-tab regex can match: one zero-width
 	// non-joiner on every line this mod draws, two on traveler chat so it can be
@@ -253,7 +255,7 @@ public final class DiscordChatFormatter {
 		if (reply) {
 			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt, color)).append(Component.literal(": ").withStyle(color));
 		}
-		body.append(linkify(content, hasId ? click : null, color));
+		body.append(linkify(content, hasId ? click : null, Style.EMPTY.withColor(TRAVELER_TEXT_RGB)));
 		return withGuildPrefix(body, TRAVELER_MARKER);
 	}
 
