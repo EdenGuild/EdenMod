@@ -45,7 +45,7 @@ public final class BridgeWebSocketClient {
 	 * it (the last one, "guildLogSync", was retired once the server-side code
 	 * that checked for it was removed).
 	 */
-	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of("mail", "longEvent", "traveler", "travelerChat");
+	private static final java.util.Set<String> SUPPORTED_FEATURES = java.util.Set.of("traveler");
 
 	/** Callbacks for inbound bridge events (delivered off the game thread). */
 	public interface MessageSink {
