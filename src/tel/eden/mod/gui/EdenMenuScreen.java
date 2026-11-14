@@ -59,7 +59,7 @@ public class EdenMenuScreen extends EdenScreen {
 			this.minecraft.setScreen(BridgeConfigScreen.create(this, EdenModClient.instance()));
 		}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
 
-		if (!traveler) {
+		if (isMember()) {
 			this.addRenderableWidget(Button.builder(Component.literal("Event"), button -> {
 				EdenModClient mod = EdenModClient.instance();
 				if (mod != null && mod.socket() != null && mod.socket().isConnected()) {
@@ -206,8 +206,15 @@ public class EdenMenuScreen extends EdenScreen {
 		return mod != null && mod.isTraveler();
 	}
 
+	private static boolean isMember() {
+		EdenModClient mod = EdenModClient.instance();
+		return mod != null && mod.isFullMember();
+	}
+
 	private static int buttonCount() {
-		return isTraveler() ? BUTTON_COUNT - TRAVELER_HIDDEN_BUTTONS : BUTTON_COUNT;
+		int count = isTraveler() ? BUTTON_COUNT - TRAVELER_HIDDEN_BUTTONS : BUTTON_COUNT;
+		// Event is member-only; a traveler already has it counted in TRAVELER_HIDDEN_BUTTONS.
+		return !isTraveler() && !isMember() ? count - 1 : count;
 	}
 
 	private int bottomSafeMargin() {
