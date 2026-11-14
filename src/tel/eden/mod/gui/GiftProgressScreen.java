@@ -36,6 +36,7 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 	private volatile int completed;
 	private volatile int total;
 	private volatile boolean cancelling;
+	private volatile boolean cancelUnavailable;
 	private volatile boolean done;
 
 	public GiftProgressScreen(String title, GuildRewards guildRewards) {
@@ -59,6 +60,12 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
 		if (cancelAction != null) {
 			cancelButton = this.addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> requestCancel()).bounds(layout.x(110), layout.y(80), layout.w(100), layout.h(20)).build());
+			// The screen can be shown again mid-run, after something else took its place.
+			cancelButton.active = !cancelling && !cancelUnavailable;
+			cancelButton.visible = !cancelUnavailable;
+		}
+		if (!done) {
+			ProgressScreenGuard.hold(this);
 		}
 	}
 
@@ -84,6 +91,7 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 	public void onCancelUnavailable() {
 		// Past the point of no return the run's own status is what is worth showing, not "Cancelling...".
 		cancelling = false;
+		cancelUnavailable = true;
 		Minecraft.getInstance().execute(() -> {
 			if (cancelButton != null) {
 				cancelButton.visible = false;
@@ -95,6 +103,7 @@ public final class GiftProgressScreen extends EdenReferenceScreen implements Gui
 	@Override
 	public void onDone() {
 		done = true;
+		ProgressScreenGuard.release(this);
 		Minecraft mc = Minecraft.getInstance();
 		mc.execute(() -> {
 			if (mc.screen == this) {

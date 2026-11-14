@@ -759,7 +759,7 @@ public final class GuildRewards {
 				}
 				progress("Opening guild manage menu...", 0, 0);
 				if (!openRewardsMenu()) {
-					chat("Couldn't open the guild manage menu — try again (this can happen when your connection is slow).", ChatFormatting.RED);
+					chat(MENU_OPEN_FAILED, ChatFormatting.RED);
 					return;
 				}
 				try {
@@ -780,10 +780,12 @@ public final class GuildRewards {
 					if (confirmed < result.amount()) {
 						int shortTotal = realUnitsFor(type, confirmed);
 						int totalAttempted = realUnitsFor(type, result.amount());
-						// A dump hands out surplus, not a tracked pending balance, so there's
-						// nothing "pending" to settle by hand — just flag it wasn't all confirmed.
-						String note = dump ? "double check they actually received the rest." : "their pending total needs settling by hand.";
-						chat("Only " + shortTotal + " of " + totalAttempted + " " + type.label + " to " + name + " were actually confirmed — " + note, ChatFormatting.YELLOW);
+						// The Guild Log reconciliation has already run, so a gap here is a gift that did not
+						// go through, not one we merely failed to see. Only what arrived was deducted, so
+						// the rest of a payout simply stays pending; a dump has no pending balance at all.
+						int missing = totalAttempted - shortTotal;
+						String note = "the Guild Log shows the other " + missing + " never went through" + (dump ? "." : ", so they stay pending.");
+						chat("Only " + shortTotal + " of " + totalAttempted + " " + type.label + " to " + name + " arrived — " + note, ChatFormatting.YELLOW);
 					}
 				}
 			} finally {
@@ -1133,6 +1135,8 @@ public final class GuildRewards {
 		return Component.literal(command).withStyle(Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.CopyToClipboard(command)).withHoverEvent(new HoverEvent.ShowText(Component.literal(hover))));
 	}
 
+	private static final String MENU_OPEN_FAILED = "Couldn't open the guild manage menu — the server didn't open it. Try again (this happens in a teleporter or on a slow connection).";
+
 	/**
 	 * Open {@code /gu man} and step into member management. True only if the member
 	 * submenu itself is confirmed open — not just that some container is (the top-level
@@ -1153,6 +1157,7 @@ public final class GuildRewards {
 		boolean opened = waitUntil(() -> Boolean.TRUE.equals(onClient(() -> backgroundSession.isOpen() && backgroundSession.isSettled())), MENU_OPEN_TIMEOUT_MS);
 		LOGGER.info("Gift: openRewardsMenu — containerOpen={} after {}ms", opened, System.currentTimeMillis() - t0);
 		if (!opened) {
+			abandonRewardsSession();
 			return false;
 		}
 		onClientRun(() -> {
@@ -1163,7 +1168,23 @@ public final class GuildRewards {
 		long t1 = System.currentTimeMillis();
 		boolean ready = waitUntil(this::isRewardsMenuOpen, MENU_OPEN_TIMEOUT_MS);
 		LOGGER.info("Gift: openRewardsMenu — isRewardsMenuOpen={} after {}ms", ready, System.currentTimeMillis() - t1);
+		if (!ready) {
+			abandonRewardsSession();
+		}
 		return ready;
+	}
+
+	/**
+	 * Let go of a menu session that did not get as far as the member list. Callers give up when
+	 * {@link #openRewardsMenu} fails, so nothing else would close it, and the half-open session
+	 * then made every attempt for the next while fail the same way.
+	 */
+	private void abandonRewardsSession() {
+		onClientRun(() -> {
+			if (backgroundSession.isOwnedBy("guild rewards")) {
+				backgroundSession.close();
+			}
+		});
 	}
 
 	/**
@@ -1281,7 +1302,7 @@ public final class GuildRewards {
 					return;
 				}
 				if (!openRewardsMenu()) {
-					chat("Couldn't open the guild manage menu — try again (this can happen when your connection is slow).", ChatFormatting.RED);
+					chat(MENU_OPEN_FAILED, ChatFormatting.RED);
 					return;
 				}
 				// The whole batch shares this one menu session.
@@ -1300,6 +1321,10 @@ public final class GuildRewards {
 					// it here — that is how this path doubled real handouts.
 					long batchSince = System.currentTimeMillis();
 					Map<String, Integer> attempted = new LinkedHashMap<>();
+					// Menu clicks that were never sent, because the menu closed or the run was cut short
+					// mid-member. attempted is capped to what was sent, so without this a member who got
+					// 28 of 71 would read as paid in full.
+					Map<String, Integer> unsent = new LinkedHashMap<>();
 					int done = 0;
 					// Aspects sent so far across the whole batch — the progress bar's total is
 					// the batch's total aspects (batchTotal, a final capture of `total` above
@@ -1339,6 +1364,10 @@ public final class GuildRewards {
 								// below would burn its whole timeout waiting for confirmations that
 								// can never arrive for clicks that were never sent.
 								attempted.merge(target.name(), sentClicks - clickAmount, Integer::sum);
+								unsent.merge(target.name(), clickAmount - sentClicks, Integer::sum);
+								if (!cancelRequested) {
+									LOGGER.warn("Gift: only {} of {} clicks sent for {} — the menu closed or the send was cut short", sentClicks, clickAmount, target.name());
+								}
 							}
 							cumulativeSent += target.amount();
 							// Renewed once per member (simpler than a timer, and guarantees a fresh
@@ -1406,7 +1435,7 @@ public final class GuildRewards {
 							}
 						}
 					}
-					finishBatchPayout(attempted, ticker, log, type, settlesPending, counts);
+					finishBatchPayout(attempted, unsent, ticker, log, evidence != null, type, settlesPending, counts);
 				} finally {
 					onClientRun(this::closeMenu);
 				}
@@ -1639,7 +1668,7 @@ public final class GuildRewards {
 		return missing;
 	}
 
-	private void finishBatchPayout(Map<String, Integer> attempted, Map<String, Integer> ticker, Map<String, Integer> log, RewardType type, boolean settlesPending, long[] startingCounts) {
+	private void finishBatchPayout(Map<String, Integer> attempted, Map<String, Integer> unsent, Map<String, Integer> ticker, Map<String, Integer> log, boolean logRead, RewardType type, boolean settlesPending, long[] startingCounts) {
 		int paidInFull = 0;
 		// attempted/ticker/log are all menu-click counts (see guildLogCounts' doc), so
 		// confirmedTotal is too — convert with realUnitsFor before it touches anything
@@ -1656,9 +1685,11 @@ public final class GuildRewards {
 				sendConfirmedDeduction(entry.getKey(), type, confirmed);
 			}
 			if (confirmed >= entry.getValue()) {
-				paidInFull++;
+				if (!unsent.containsKey(entry.getKey())) {
+					paidInFull++;
+				}
 			} else {
-				stillShort.add(entry.getKey() + " (" + realUnitsFor(type, entry.getValue() - confirmed) + " " + type.label + " unconfirmed)");
+				stillShort.add(entry.getKey() + " (" + realUnitsFor(type, entry.getValue() - confirmed) + " " + type.label + ")");
 			}
 		}
 		StorageReporter currentStorageReporter = storageReporter;
@@ -1669,10 +1700,27 @@ public final class GuildRewards {
 			finalCounts[type.hotbar] = Math.max(0, startingCounts[type.hotbar] - realUnitsFor(type, confirmedTotal));
 			currentStorageReporter.report((int) finalCounts[0], (int) finalCounts[1], finalCounts[2]);
 		}
-		chat((settlesPending ? "Payout" : "Giveaway") + " complete: " + paidInFull + "/" + attempted.size() + " members confirmed (ticker or Guild Log).", ChatFormatting.GREEN);
-		if (!stillShort.isEmpty()) {
-			chat("Still unconfirmed after ticker and Guild Log reconciliation: " + String.join(", ", stillShort), ChatFormatting.RED);
+		chat((settlesPending ? "Payout" : "Giveaway") + " finished: " + paidInFull + "/" + attempted.size() + " members paid in full (confirmed by ticker or Guild Log).", paidInFull == attempted.size() ? ChatFormatting.GREEN : ChatFormatting.YELLOW);
+		if (!unsent.isEmpty()) {
+			chat(describeUnsent(attempted, unsent, type, settlesPending), ChatFormatting.YELLOW);
 		}
+		if (!stillShort.isEmpty()) {
+			// With the Guild Log read, a gap is a gift that never went through; without it, we only know it was not seen.
+			// Either way only what was confirmed is deducted, so the rest stays pending.
+			String lead = logRead ? "Not delivered, per the Guild Log (they stay pending): " : "Not confirmed, as the Guild Log could not be read (they stay pending): ";
+			chat(lead + String.join(", ", stillShort), ChatFormatting.RED);
+		}
+	}
+
+	/** The warning for members who were sent less than planned; {@code attempted} is already capped to what was sent. */
+	static String describeUnsent(Map<String, Integer> attempted, Map<String, Integer> unsent, RewardType type, boolean settlesPending) {
+		List<String> notSent = new ArrayList<>();
+		for (var entry : unsent.entrySet()) {
+			int planned = attempted.getOrDefault(entry.getKey(), 0) + entry.getValue();
+			notSent.add(entry.getKey() + " (" + realUnitsFor(type, entry.getValue()) + " of " + realUnitsFor(type, planned) + " " + type.label + " not sent)");
+		}
+		// A payout's unsent part is still pending; a giveaway has no pending balance, it just was not given.
+		return "Not everything was sent, the menu closed or the run was cut short: " + String.join(", ", notSent) + (settlesPending ? ". The rest stays pending." : ". The rest was not given.");
 	}
 
 	private void requestPostGiftReconciliation() {

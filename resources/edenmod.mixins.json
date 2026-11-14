@@ -29,6 +29,7 @@
     "ItemEntityRenderStateMixin",
     "ItemRenderMixin",
     "LivingEntityRendererMixin",
+    "MinecraftMixin",
     "OptionsMixin",
     "PlayerTabOverlayAccessor",
     "TitleScreenMixin"
