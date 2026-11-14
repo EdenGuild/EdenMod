@@ -18,6 +18,19 @@ class ChatReplyManagerTest {
 	}
 
 	@Test
+	void takeTravelerReplyOnlyTakesTravelerReplies() {
+		ChatReplyManager.setActiveReply("111");
+		assertNull(ChatReplyManager.takeTravelerReply());
+		assertTrue(ChatReplyManager.hasActiveReply());
+		assertEquals("/g ", ChatReplyManager.activeReplyPrefix());
+
+		ChatReplyManager.setActiveTravelerReply("222");
+		assertEquals("/e ", ChatReplyManager.activeReplyPrefix());
+		assertEquals("222", ChatReplyManager.takeTravelerReply());
+		assertFalse(ChatReplyManager.hasActiveReply());
+	}
+
+	@Test
 	void recordsAndRetrievesDiscordMessages() {
 		ChatReplyManager.recordDiscordMessage("123456789", "Alice", "Hello there!");
 		ChatReplyManager.ReplyInfo info = ChatReplyManager.getRecent("123456789");

@@ -66,8 +66,10 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 	}
 
 	public PartyCreateScreen(Screen parent, EdenModClient mod, String initialTarget) {
-		super(Component.literal("Create Guild Party"), parent);
+		super(Component.literal(mod != null && mod.isTraveler() ? "Create Party" : "Create Guild Party"), parent);
 		this.mod = mod;
+		// Travelers can only host ally parties.
+		this.sendToAlly = mod != null && mod.isTraveler();
 		this.initialTarget = initialTarget;
 		this.filledSlots = 0;
 	}
@@ -124,7 +126,9 @@ public final class PartyCreateScreen extends EdenReferenceScreen {
 
 		// Send to Ally toggle
 		btnSendToAlly = Button.builder(Component.literal(sendToAlly ? "§a[✔] Ally" : "§7[ ] Ally"), b -> toggleSendToAlly()).bounds(layout.x(200), layout.y(182), layout.w(135), layout.h(18)).build();
-		this.addRenderableWidget(btnSendToAlly);
+		if (mod == null || !mod.isTraveler()) {
+			this.addRenderableWidget(btnSendToAlly);
+		}
 
 		// Clear Added Members Button (only visible when addedMembers is non-empty)
 		btnClearAdded = Button.builder(Component.literal("§cClear"), b -> onClearAdded()).bounds(layout.x(280), layout.y(204), layout.w(55), layout.h(16)).build();

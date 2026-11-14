@@ -225,10 +225,38 @@ public final class DiscordChatFormatter {
 		body.append(authorComp);
 
 		if (replyTo != null && !replyTo.isEmpty()) {
-			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt)).append(Component.literal(": ").withStyle(ChatFormatting.GREEN));
+			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt, Style.EMPTY.withColor(ChatFormatting.GREEN))).append(Component.literal(": ").withStyle(ChatFormatting.GREEN));
 		}
 		body.append(linkify(content, replyStyle));
 		return withGuildPrefix(body);
+	}
+
+	// Traveler chat's own color, lavender, so it never reads as guild (aqua) or Discord (green) chat.
+	private static final int TRAVELER_RGB = 0xB388FF;
+	// The message text is a lighter shade than the tag and name so the name stands out.
+	private static final int TRAVELER_TEXT_RGB = 0xD8C2FF;
+
+	// Invisible line markers a Wynntils chat-tab regex can match: one zero-width
+	// non-joiner on every line this mod draws, two on traveler chat so it can be
+	// routed to (or kept out of) its own tab.
+	private static final String LINE_MARKER = "\u200C";
+	private static final String TRAVELER_MARKER = "\u200C\u200C";
+
+	/** A traveler-chat line; links, images, GIFs, stickers and emotes render as in bridge chat. */
+	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId) {
+		boolean hasId = messageId != null && !messageId.isEmpty();
+		if (hasId) {
+			ChatReplyManager.recordTravelerMessage(messageId, author, content);
+		}
+		Style color = Style.EMPTY.withColor(TRAVELER_RGB);
+		Style click = hasId ? color.withClickEvent(new ClickEvent.RunCommand("/eden treply " + messageId)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to reply to @" + author).withStyle(ChatFormatting.GRAY))) : color;
+		boolean reply = replyTo != null && !replyTo.isEmpty();
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel("traveler")).withStyle(click.withFont(PILL_FONT))).append(Component.literal(reply ? " " + author : " " + author + ": ").withStyle(click));
+		if (reply) {
+			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt, color)).append(Component.literal(": ").withStyle(color));
+		}
+		body.append(linkify(content, hasId ? click : null, Style.EMPTY.withColor(TRAVELER_TEXT_RGB)));
+		return withGuildPrefix(body, TRAVELER_MARKER);
 	}
 
 	/**
@@ -265,8 +293,8 @@ public final class DiscordChatFormatter {
 	}
 
 	/** The "replyTo (excerpt)" segment: name in green, inline quote gray, full quote on hover. */
-	private static MutableComponent replyTarget(String replyTo, String replyExcerpt) {
-		MutableComponent segment = Component.literal(replyTo).withStyle(ChatFormatting.GREEN);
+	private static MutableComponent replyTarget(String replyTo, String replyExcerpt, Style nameStyle) {
+		MutableComponent segment = Component.literal(replyTo).withStyle(nameStyle);
 		String quote = replyExcerpt == null ? "" : ChatText.normalizeWhitespace(replyExcerpt);
 		if (!quote.isEmpty()) {
 			String shown = quote.length() > EXCERPT_MAX ? quote.substring(0, EXCERPT_MAX).strip() + "…" : quote;
@@ -288,13 +316,17 @@ public final class DiscordChatFormatter {
 	}
 
 	private static MutableComponent linkify(String content, Style replyStyle) {
+		return linkify(content, replyStyle, Style.EMPTY.withColor(ChatFormatting.GREEN));
+	}
+
+	private static MutableComponent linkify(String content, Style replyStyle, Style textStyle) {
 		MutableComponent out = Component.empty();
 		Matcher matcher = TOKEN_PATTERN.matcher(content);
 		int last = 0;
 		// Click event for the text body (without hover popup so reading isn't obstructed)
 		ClickEvent textClick = replyStyle != null ? replyStyle.getClickEvent() : null;
 		java.util.function.Consumer<String> appendText = text -> {
-			MutableComponent comp = Component.literal(text).withStyle(ChatFormatting.GREEN);
+			MutableComponent comp = Component.literal(text).withStyle(textStyle);
 			if (textClick != null) {
 				comp.setStyle(comp.getStyle().withClickEvent(textClick));
 			}
@@ -407,8 +439,12 @@ public final class DiscordChatFormatter {
 
 	/** Wrap the body to chat width, prefixing line 1 with the shield and the rest with bars. */
 	private static Component withGuildPrefix(Component body) {
-		Component shield = prefix(SHIELD);
-		Component continuation = prefix(CONTINUATION);
+		return withGuildPrefix(body, LINE_MARKER);
+	}
+
+	private static Component withGuildPrefix(Component body, String marker) {
+		Component shield = prefix(SHIELD, marker);
+		Component continuation = prefix(CONTINUATION, marker);
 		Minecraft mc = Minecraft.getInstance();
 		Font font = mc.font;
 		int reserve = font.width(continuation);
@@ -440,8 +476,12 @@ public final class DiscordChatFormatter {
 	}
 
 	private static Component prefix(int[] glyphs) {
+		return prefix(glyphs, LINE_MARKER);
+	}
+
+	private static Component prefix(int[] glyphs, String marker) {
 		StringBuilder out = new StringBuilder();
-		out.append('\u200C');
+		out.append(marker);
 		for (int glyph : glyphs) {
 			out.appendCodePoint(glyph);
 		}

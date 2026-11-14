@@ -618,7 +618,7 @@ public final class TerritoryMenuPanel {
 
 	private static void drawWynntilsOverlay(Screen screen, GuiGraphics graphics, int mouseX, int mouseY) {
 		BridgeConfig config = EdenModClient.instance().config();
-		if (config == null || !config.territoryMenuSuite) {
+		if (config == null || !config.presetsEnabled()) {
 			return;
 		}
 
@@ -703,7 +703,7 @@ public final class TerritoryMenuPanel {
 
 	public static boolean handleMouseClick(Screen screen, double mouseX, double mouseY, int button, Map<String, TerritoryPreset.TerritoryLoadout> fallbackLoadouts) {
 		BridgeConfig config = EdenModClient.instance().config();
-		if (config == null || !config.territoryMenuSuite || (button != 0 && button != 1)) {
+		if (config == null || !config.presetsEnabled() || (button != 0 && button != 1)) {
 			return true;
 		}
 
