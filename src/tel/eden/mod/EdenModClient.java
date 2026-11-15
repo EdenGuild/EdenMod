@@ -7,6 +7,7 @@ import tel.eden.mod.chat.BankEventParser;
 import tel.eden.mod.chat.CapturedMessage;
 import tel.eden.mod.chat.ChatRelay;
 import tel.eden.mod.chat.DiscordChatFormatter;
+import tel.eden.mod.chat.EconomyMessageFilter;
 import tel.eden.mod.chat.EmoteRegistry;
 import tel.eden.mod.chat.GuildAnnounceParser;
 import tel.eden.mod.chat.ChatDecorators;
@@ -185,6 +186,7 @@ public final class EdenModClient implements ClientModInitializer {
 	// repeated (e.g. "d" then "d") from the same line relayed by multiple online
 	// members' clients, which is clock-/arrival-skew independent (order, not time).
 	private final OccurrenceSequencer chatSeq = new OccurrenceSequencer(15_000L);
+	private final OccurrenceSequencer economySeq = new OccurrenceSequencer(10_000L);
 	private final BackgroundContainerSession backgroundContainers = new BackgroundContainerSession();
 	private final GuildRewards guildRewards = new GuildRewards(backgroundContainers);
 	private final GuildLogSync guildLogSync = new GuildLogSync(backgroundContainers);
@@ -674,7 +676,7 @@ public final class EdenModClient implements ClientModInitializer {
 			if (current == null) {
 				return;
 			}
-			java.util.List<tel.eden.mod.guild.GuildLogEvent> events = GuildLogSync.isTextCategory(category) ? entries.stream().map(GuildLogSync::textEvent).toList() : entries.stream().map(tel.eden.mod.guild.GuildLogEventParser::parse).flatMap(Optional::stream).toList();
+			java.util.List<tel.eden.mod.guild.GuildLogEvent> events = entries.stream().map(tel.eden.mod.guild.GuildLogEventParser::parse).flatMap(Optional::stream).toList();
 			current.sendGuildLogFullScanPage(category, events);
 		});
 		tel.eden.mod.chat.PlayerNameResolver.setMemberNames(guildRewards::memberNames);
@@ -702,6 +704,7 @@ public final class EdenModClient implements ClientModInitializer {
 				return -1;
 			}
 		});
+		guildRewards.setPostRunLogScanCancel(guildLogSync::requestCancel);
 		guildRewards.setPreGiftEvidenceSupplier(() -> {
 			try {
 				return guildLogSync.reconcileNow().get(20, TimeUnit.SECONDS);
@@ -1880,13 +1883,16 @@ public final class EdenModClient implements ClientModInitializer {
 			return 0;
 		}
 		Minecraft mc = Minecraft.getInstance();
-		tel.eden.mod.gui.GiftProgressScreen progress = new tel.eden.mod.gui.GiftProgressScreen("Guild Log Scan");
+		tel.eden.mod.gui.GiftProgressScreen progress = new tel.eden.mod.gui.GiftProgressScreen("Guild Log Scan", guildLogSync::requestCancel);
 		showProgressScreen(progress);
 		long started = System.currentTimeMillis();
 		guildLogSync.scanWholeLog(progress::onProgress).whenComplete((rows, error) -> {
+			boolean cancelled = guildLogSync.isCancelRequested();
 			progress.onDone();
 			mc.execute(() -> {
-				if (error != null) {
+				if (cancelled) {
+					source.sendFeedback(Component.literal("Guild Log scan cancelled.").withStyle(net.minecraft.ChatFormatting.YELLOW));
+				} else if (error != null) {
 					LOGGER.warn("Guild log scan failed after {}ms", System.currentTimeMillis() - started, error);
 					source.sendFeedback(Component.literal("Guild Log scan failed: " + error.getMessage()).withStyle(net.minecraft.ChatFormatting.RED));
 				} else if (rows > 0) {
@@ -3126,6 +3132,13 @@ public final class EdenModClient implements ClientModInitializer {
 			GuildReward line = reward.get();
 			String signature = line.giver() + "|" + line.reward() + "|" + line.receiver();
 			current.sendGuildReward(line.giver(), line.reward(), line.receiver(), rewardSeq.next(signature));
+			return;
+		}
+		// Territory economy/management announcements — tracked directly from chat for /manage log economy.
+		Optional<String> economy = EconomyMessageFilter.parse(message);
+		if (economy.isPresent()) {
+			String text = economy.get();
+			current.sendGuildEconomy(text, economySeq.next(text));
 			return;
 		}
 		// Annihilation world-event warning (the only advance timing signal we get).

@@ -1175,6 +1175,19 @@ public final class BridgeWebSocketClient {
 		enqueueSend(current, obj);
 	}
 
+	/** Forward an economy chat line for the `/manage log economy` history. */
+	public void sendGuildEconomy(String text, int seq) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "guildEconomy");
+		obj.addProperty("text", text);
+		obj.addProperty("seq", seq);
+		enqueueSend(current, obj);
+	}
+
 	/** Send one parsed guild-management/alliance event to the backend. */
 	public void sendGuildEvent(String kind, String actor, String subject) {
 		WebSocket current = socket;
@@ -1304,10 +1317,6 @@ public final class BridgeWebSocketClient {
 					entry.addProperty("charges", bank.charges());
 				}
 				entry.addProperty("accessTier", bank.accessTier());
-			} else if (event instanceof GuildLogEvent.Text text) {
-				entry.addProperty("kind", "text");
-				entry.addProperty("occurredAt", text.occurredAt());
-				entry.addProperty("text", text.text());
 			} else if (event instanceof GuildLogEvent.Raid raid) {
 				entry.addProperty("kind", "raid");
 				entry.addProperty("occurredAt", raid.occurredAt());

@@ -35,17 +35,11 @@ public final class GuildLogSync {
 	// deliberately bounded to the 4 x 8 log area and never include player inventory.
 	private static final int NEXT_PAGE_SLOT = 45;
 	private static final int MAX_POST_GIFT_LOG_PAGES = 8;
-	// Whole-log walk (see scanWholeLog): every filter has exactly this many pages (so
-	// four page flips), and the header row is where the filter buttons live.
+	// Whole-log walk (see scanWholeLog): General has this many pages (so four page flips).
 	private static final int FULL_SCAN_PAGES = 5;
-	private static final int FILTER_ROW_LAST_SLOT = 8;
 	private static final long FULL_SCAN_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(90);
-	// The filter buttons in the log's first row, left to right from slot 2. Each is checked
-	// against the item actually in its slot before being clicked, so a layout change is
-	// skipped with a warning rather than clicking something else.
-	static final List<FilterButton> KNOWN_FILTERS = List.of(new FilterButton(2, "General"), new FilterButton(3, "Objectives"), new FilterButton(4, "Wars"), new FilterButton(5, "Economy"), new FilterButton(6, "Public Bank"), new FilterButton(7, "High Ranked Bank"));
-	/** Pages a whole-log walk reads in total: every filter, {@link #FULL_SCAN_PAGES} pages each (6 x 5 = 30). */
-	public static final int FULL_SCAN_TOTAL_PAGES = KNOWN_FILTERS.size() * FULL_SCAN_PAGES;
+	/** Pages a log scan reads in total: only the General category ({@link #FULL_SCAN_PAGES} pages). */
+	public static final int FULL_SCAN_TOTAL_PAGES = FULL_SCAN_PAGES;
 	/** A gift run only starts another whole-log scan if the last one finished longer ago than this. */
 	public static final long AUTO_SCAN_COOLDOWN_MS = TimeUnit.MINUTES.toMillis(5);
 	// Wynncraft's own Guild Log can take a while to show a just-completed payout
@@ -77,6 +71,7 @@ public final class GuildLogSync {
 	private volatile boolean dumpedLogContents;
 	private volatile GuildManageSnapshot lastManageSnapshot;
 	private volatile boolean worldTransition;
+	private volatile boolean cancelRequested;
 	private volatile BiConsumer<String, List<GuildLogEntry>> reporter;
 	private volatile FullScanReporter fullScanReporter;
 	private volatile ScanProgress scanProgress;
@@ -141,6 +136,7 @@ public final class GuildLogSync {
 		if (worldTransition) {
 			return CompletableFuture.completedFuture(false);
 		}
+		cancelRequested = false;
 		CompletableFuture<Boolean> result = new CompletableFuture<>();
 		worker.submit(() -> {
 			running = true;
@@ -206,24 +202,21 @@ public final class GuildLogSync {
 		}
 	}
 
-	/** Whether a category is stored as plain sentences rather than parsed into typed events. */
-	public static boolean isTextCategory(String category) {
-		return "Wars".equalsIgnoreCase(category) || "Economy".equalsIgnoreCase(category);
+	/** Request cancellation of an active Guild Log read or scan and close any open background menu. */
+	public void requestCancel() {
+		cancelRequested = true;
+		if (session != null && Minecraft.getInstance() != null) {
+			onClientRun(session::close);
+		}
 	}
 
-	/** A text-category row as a {@link GuildLogEvent.Text}, trimmed to the length the backend accepts. */
-	public static GuildLogEvent textEvent(GuildLogEntry entry) {
-		String text = GuildLogEventParser.plainText(entry.text());
-		return new GuildLogEvent.Text(entry.occurredAt(), text.length() > 300 ? text.substring(0, 300) : text);
+	/** Reset cancellation state before a new Guild Log action. */
+	public void clearCancel() {
+		cancelRequested = false;
 	}
 
-	/** A filter button in the Guild Log's header row. */
-	record FilterButton(int slot, String name) {
-	}
-
-	/** Whether the item found in a filter's slot is the filter we expect there. */
-	static boolean isExpectedFilter(String actualName, String expectedName) {
-		return actualName != null && actualName.toLowerCase(java.util.Locale.ROOT).contains(expectedName.toLowerCase(java.util.Locale.ROOT));
+	public boolean isCancelRequested() {
+		return cancelRequested;
 	}
 
 	/** Receives every complete root-menu status read for optional bridge reporting. */
@@ -255,6 +248,7 @@ public final class GuildLogSync {
 		if (worldTransition) {
 			return CompletableFuture.failedFuture(new IllegalStateException("Guild Log sync is unavailable during a world transition"));
 		}
+		cancelRequested = false;
 		CompletableFuture<List<GuildLogEvent>> result = new CompletableFuture<>();
 		worker.submit(() -> {
 			running = true;
@@ -288,6 +282,7 @@ public final class GuildLogSync {
 		if (worldTransition) {
 			return CompletableFuture.failedFuture(new IllegalStateException("Guild Log sync is unavailable during a world transition"));
 		}
+		cancelRequested = false;
 		CompletableFuture<List<GuildLogEvent>> result = new CompletableFuture<>();
 		worker.submit(() -> {
 			running = true;
@@ -311,6 +306,7 @@ public final class GuildLogSync {
 	/** Reset packet ownership on a connection or {@code /class} transition. */
 	public void onWorldJoin() {
 		worldTransition = false;
+		cancelRequested = false;
 		nextSyncAt = 0L;
 		// A new world's log isn't meaningfully comparable to the old one's — start
 		// this session's fixed baseline (see reportEntries) over, lazily re-set by
@@ -360,13 +356,9 @@ public final class GuildLogSync {
 	}
 
 	/**
-	 * Walk the whole Guild Log: every filter button in the header row, every page of each,
-	 * reporting each page through {@link #fullScanReporter}. Runs on the worker like the
-	 * other log reads and returns the number of rows read. Meant for the end of a Chief's
-	 * gift run, while the progress screen is still blocking input.
-	 *
-	 * <p>Verbose by design while this is being tuned: the header row is dumped (so the real
-	 * filter layout can be read off the log), and every page logs its row count and timing.
+	 * Walk the General Guild Log pages, reporting each page through {@link #fullScanReporter}.
+	 * Runs on the worker like the other log reads and returns the number of rows read.
+	 * Meant for the end of a Chief's gift run, while the progress screen is still blocking input.
 	 */
 	public CompletableFuture<Integer> scanWholeLog() {
 		return scanWholeLog(null);
@@ -374,12 +366,13 @@ public final class GuildLogSync {
 
 	/**
 	 * As {@link #scanWholeLog()}, reporting progress. The walk stops by itself after
-	 * {@link #FULL_SCAN_TIMEOUT_MS} (90 seconds).
+	 * {@link #FULL_SCAN_TIMEOUT_MS} (90 seconds) or when cancelled.
 	 */
 	public CompletableFuture<Integer> scanWholeLog(ScanProgress progress) {
 		if (worldTransition) {
 			return CompletableFuture.failedFuture(new IllegalStateException("Guild Log sync is unavailable during a world transition"));
 		}
+		cancelRequested = false;
 		CompletableFuture<Integer> result = new CompletableFuture<>();
 		worker.submit(() -> {
 			running = true;
@@ -393,7 +386,6 @@ public final class GuildLogSync {
 			} finally {
 				running = false;
 				scanProgress = null;
-				lastScanFinishedAt = System.currentTimeMillis();
 			}
 		});
 		return result;
@@ -404,48 +396,36 @@ public final class GuildLogSync {
 
 	private int syncWholeLog() {
 		long started = System.currentTimeMillis();
-		if (worldTransition || !openAndCommand("guild log", title -> title.contains("Log:"), LOG_SLOTS, "gu log")) {
+		if (cancelRequested || worldTransition || !openAndCommand("guild log", title -> title.contains("Log:"), LOG_SLOTS, "gu log")) {
 			LOGGER.warn("Guild log full scan: couldn't open the Guild Log");
 			return NOT_RUN;
 		}
 		try {
 			reportScanProgress("Opening the Guild Log");
-			if (!waitForLoadedLog("General")) {
+			if (!waitForLoadedLog("General") || cancelRequested) {
 				LOGGER.warn("Guild log full scan: timed out waiting for populated rows");
 				return NOT_RUN;
 			}
-			String title = session.observedTitle();
-			int titleAt = title.indexOf("Log: ");
-			String firstLabel = titleAt >= 0 ? title.substring(titleAt + "Log: ".length()).trim() : "General";
-			List<FilterButton> filters = onClient(this::readFilterButtons);
-			if (filters == null) {
-				filters = List.of();
+			int rows = scanAllPages("General", started);
+			if (shouldStopScan(started)) {
+				LOGGER.info("Guild log scan: stopped early after {} row(s) in {}ms", rows, System.currentTimeMillis() - started);
+				return NOT_RUN;
 			}
-			int rows = scanAllPages(firstLabel, started);
-			for (FilterButton filter : filters) {
-				if (shouldStopScan(started)) {
-					break;
-				}
-				if (filter.name().equalsIgnoreCase(firstLabel) || firstLabel.toLowerCase(java.util.Locale.ROOT).contains(filter.name().toLowerCase(java.util.Locale.ROOT))) {
-					continue;
-				}
-				if (!selectFilter(filter)) {
-					continue;
-				}
-				rows += scanAllPages(filter.name(), started);
+			if (rows > 0) {
+				lastScanFinishedAt = System.currentTimeMillis();
 			}
-			LOGGER.info("Guild log full scan: finished, {} row(s) across {} filter button(s) in {}ms", rows, filters.size(), System.currentTimeMillis() - started);
+			LOGGER.info("Guild log full scan: finished, {} General row(s) in {}ms", rows, System.currentTimeMillis() - started);
 			return rows;
 		} finally {
 			onClientRun(session::close);
 		}
 	}
 
-	/** Whether the walk must stop now: aborted, cancelled, the world changing, or past its time limit. */
+	/** Whether the walk must stop now: cancelled, aborted, the world changing, or past its time limit. */
 	private boolean shouldStopScan(long scanStarted) {
 		long elapsed = System.currentTimeMillis() - scanStarted;
-		if (session.isAborted() || worldTransition || elapsed > FULL_SCAN_TIMEOUT_MS) {
-			LOGGER.warn("Guild log full scan: stopping early (aborted={}, worldTransition={}, elapsed={}ms of {}ms)", session.isAborted(), worldTransition, elapsed, FULL_SCAN_TIMEOUT_MS);
+		if (cancelRequested || session.isAborted() || worldTransition || elapsed > FULL_SCAN_TIMEOUT_MS) {
+			LOGGER.warn("Guild log full scan: stopping early (cancelRequested={}, aborted={}, worldTransition={}, elapsed={}ms of {}ms)", cancelRequested, session.isAborted(), worldTransition, elapsed, FULL_SCAN_TIMEOUT_MS);
 			return true;
 		}
 		return false;
@@ -480,41 +460,6 @@ public final class GuildLogSync {
 			}
 		}
 		return rows;
-	}
-
-	/**
-	 * The {@link #KNOWN_FILTERS} whose slot really holds that filter. The whole header row
-	 * is logged first (name and first lore line per slot) so the real layout is visible.
-	 */
-	private List<FilterButton> readFilterButtons() {
-		List<ItemStack> items = session.items();
-		List<FilterButton> verified = new ArrayList<>();
-		for (FilterButton filter : KNOWN_FILTERS) {
-			ItemStack stack = filter.slot() < items.size() ? items.get(filter.slot()) : ItemStack.EMPTY;
-			if (isExpectedFilter(stack.isEmpty() ? null : headerName(stack), filter.name())) {
-				verified.add(filter);
-			} else {
-				LOGGER.warn("Guild log full scan: slot {} is not the expected '{}' filter (found '{}') — skipping it", filter.slot(), filter.name(), stack.isEmpty() ? "nothing" : headerName(stack));
-			}
-		}
-		return List.copyOf(verified);
-	}
-
-	private static String headerName(ItemStack stack) {
-		return ChatFormatting.stripFormatting(stack.getHoverName().getString()).trim();
-	}
-
-	/** Click a header filter button and wait for the log to repopulate. */
-	private boolean selectFilter(FilterButton filter) {
-		Long before = onClient(() -> {
-			long revision = session.snapshotRevision();
-			return session.prepareInPlaceTransition(title -> title.contains("Log:"), LOG_SLOTS) && session.click(filter.slot(), 0, net.minecraft.world.inventory.ClickType.PICKUP) ? revision : null;
-		});
-		if (before == null || !waitUntil(() -> session.isAborted() || session.snapshotRevision() > before && isGuildLogLoaded()) || session.isAborted()) {
-			LOGGER.warn("Guild log full scan: timed out opening filter slot {} '{}'", filter.slot(), filter.name());
-			return false;
-		}
-		return true;
 	}
 
 	private List<GuildLogEvent> syncLogRows() {
@@ -566,22 +511,20 @@ public final class GuildLogSync {
 		long start = System.currentTimeMillis();
 		long deadline = start + POST_GIFT_LOG_WAIT_MS;
 		int attempt = 0;
-		while (true) {
+		while (!cancelRequested && !worldTransition) {
 			attempt++;
 			List<GuildLogEvent> newer = syncGeneralRowsAfterBaseline(baseline);
 			long elapsed = System.currentTimeMillis() - start;
-			if (!newer.isEmpty() || System.currentTimeMillis() >= deadline) {
+			if (cancelRequested || worldTransition || !newer.isEmpty() || System.currentTimeMillis() >= deadline) {
 				LOGGER.info("Guild log: post-payout scan found {} newer row(s) after {}ms ({} attempt(s))", newer.size(), elapsed, attempt);
 				return newer;
 			}
 			LOGGER.info("Guild log: post-payout scan found nothing yet after {}ms (attempt {}) — retrying", elapsed, attempt);
-			try {
-				Thread.sleep(POST_GIFT_LOG_RETRY_INTERVAL_MS);
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
+			if (!sleepInterruptibly(POST_GIFT_LOG_RETRY_INTERVAL_MS)) {
 				return newer;
 			}
 		}
+		return List.of();
 	}
 
 	private List<GuildLogEvent> syncGeneralRowsAfterBaseline(List<GuildLogEntry> baseline) {
@@ -697,18 +640,18 @@ public final class GuildLogSync {
 			return false;
 		}
 		if (waitForPageAfter(before)) {
-			return !session.isAborted();
+			return !session.isAborted() && !cancelRequested;
 		}
 		// Nothing at all arrived since the click: the server never saw it (a page turn right
 		// after the previous one has been seen to go missing). That is the only case where
 		// clicking again is safe — if any content had arrived the first click landed, and a
 		// second would skip a page.
-		if (session.isAborted() || worldTransition || session.snapshotRevision() != before) {
+		if (cancelRequested || session.isAborted() || worldTransition || session.snapshotRevision() != before) {
 			return false;
 		}
 		LOGGER.warn("Guild log: next-page click got no response in {}ms; clicking once more", OPEN_TIMEOUT_MS);
 		Long retried = clickNextPage();
-		return retried != null && waitForPageAfter(retried) && !session.isAborted();
+		return retried != null && waitForPageAfter(retried) && !session.isAborted() && !cancelRequested;
 	}
 
 	/** Click Next Page and return the snapshot revision from before the click, or null if it could not be clicked. */
@@ -783,7 +726,7 @@ public final class GuildLogSync {
 
 	private boolean openAndCommand(String owner, java.util.function.Predicate<String> title, int slots, String command) {
 		Boolean opened = onClient(() -> {
-			if (worldTransition)
+			if (cancelRequested || worldTransition)
 				return false;
 			if (!session.begin(owner, title, slots))
 				return false;
@@ -933,19 +876,30 @@ public final class GuildLogSync {
 		session.onContainerClosed(containerId);
 	}
 
-	private static boolean waitUntil(Supplier<Boolean> condition) {
+	private boolean waitUntil(Supplier<Boolean> condition) {
 		long deadline = System.currentTimeMillis() + OPEN_TIMEOUT_MS;
-		while (System.currentTimeMillis() < deadline) {
-			if (Boolean.TRUE.equals(onClient(condition)))
-				return true;
+		while (!cancelRequested && !worldTransition && System.currentTimeMillis() < deadline) {
+			if (Boolean.TRUE.equals(onClient(condition))) {
+				return !cancelRequested && !worldTransition;
+			}
+			if (!sleepInterruptibly(POLL_MS)) {
+				return false;
+			}
+		}
+		return false;
+	}
+
+	private boolean sleepInterruptibly(long millis) {
+		long deadline = System.currentTimeMillis() + millis;
+		while (!cancelRequested && !worldTransition && System.currentTimeMillis() < deadline) {
 			try {
-				Thread.sleep(POLL_MS);
+				Thread.sleep(Math.min(POLL_MS, Math.max(1L, deadline - System.currentTimeMillis())));
 			} catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
 				return false;
 			}
 		}
-		return false;
+		return !cancelRequested && !worldTransition;
 	}
 
 	private static <T> T onClient(Supplier<T> action) {
