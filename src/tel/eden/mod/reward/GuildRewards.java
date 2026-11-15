@@ -354,8 +354,6 @@ public final class GuildRewards {
 	// pass above has been scheduled, while the progress screen is still up: a whole-Guild-Log walk. Unlike the reconciler it is not
 	// part of settling the payout, only extra data for the backend.
 	private volatile ToIntFunction<GuildLogSync.ScanProgress> postRunLogScan;
-	private volatile Runnable postRunLogScanCancel;
-	private volatile boolean postRunLogScanRunning;
 	private volatile BooleanSupplier postRunLogScanDue = () -> true;
 	// Blocking, best-effort: reads our own nickname off the Character Info menu. Run first in every
 	// gift or payout, so the Guild Log's reward rows can be matched to us from the start.
@@ -396,12 +394,6 @@ public final class GuildRewards {
 	 */
 	public void requestCancel() {
 		cancelRequested = true;
-		Runnable scanCancel = postRunLogScanCancel;
-		// Forward cancel to GuildLogSync only during the optional post-run whole-log scan; cancelling
-		// during "Confirming with the Guild Log..." would abort payout settlement and risk double-pays.
-		if (postRunLogScanRunning && scanCancel != null) {
-			scanCancel.run();
-		}
 	}
 
 	private void progress(String status, int completed, int total) {
@@ -420,11 +412,6 @@ public final class GuildRewards {
 	/** The scan to run after a gift run: given a progress sink, returns the rows uploaded, or -1 / 0 if it did not run. */
 	public void setPostRunLogScan(ToIntFunction<GuildLogSync.ScanProgress> postRunLogScan) {
 		this.postRunLogScan = postRunLogScan;
-	}
-
-	/** Cancel callback invoked alongside {@link #requestCancel()} so an active post-run Guild Log scan stops too. */
-	public void setPostRunLogScanCancel(Runnable postRunLogScanCancel) {
-		this.postRunLogScanCancel = postRunLogScanCancel;
 	}
 
 	/** Read the Chief's own nickname before a run's first Guild Log read. */
@@ -560,7 +547,7 @@ public final class GuildRewards {
 		return t;
 	});
 
-	volatile String rank = "";
+	private volatile String rank = "";
 	private volatile Map<String, MemberInfo> members = emptyMembers();
 	private volatile long lastRefresh = 0L;
 	private volatile long lastAttempt = 0L;
@@ -732,14 +719,12 @@ public final class GuildRewards {
 
 	/** Gift {@code amount} of {@code type} to {@code name} (one menu run, off-thread). */
 	public void gift(String name, RewardType type, int amount) {
-		cancelRequested = false;
 		String username = canonicalMemberName(name);
 		worker.submit(() -> run(username, type, amount, false));
 	}
 
 	/** Gift all available emeralds to {@code name}. */
 	public void dumpEmeralds(String name) {
-		cancelRequested = false;
 		String username = canonicalMemberName(name);
 		worker.submit(() -> run(username, RewardType.EMERALD, 0, true));
 	}
@@ -747,9 +732,9 @@ public final class GuildRewards {
 	private void run(String name, RewardType type, int requested, boolean dump) {
 		giftInProgress = true;
 		stressLevel = 0;
+		cancelRequested = false;
 		progress("Starting...", 0, 0);
 		SingleGiftResult result = new SingleGiftResult(0, 0);
-		boolean completed = false;
 		try {
 			if (!isChief()) {
 				chat("Only guild Chiefs can gift rewards.", ChatFormatting.RED);
@@ -764,28 +749,22 @@ public final class GuildRewards {
 				chat(name + " has not been in the guild for a week, and is not eligible " + "for rewards.", ChatFormatting.YELLOW);
 				return;
 			}
-			if (cancelRequested || !acquireGiftLock()) {
+			if (!acquireGiftLock()) {
 				return;
 			}
 			try {
-				if (cancelRequested) {
-					return;
-				}
 				readOwnNickname();
-				if (cancelRequested || !establishGiftLogBaseline()) {
+				if (!establishGiftLogBaseline()) {
 					return;
 				}
 				progress("Opening guild manage menu...", 0, 0);
-				if (cancelRequested || !openRewardsMenu()) {
-					if (!cancelRequested) {
-						chat(MENU_OPEN_FAILED, ChatFormatting.RED);
-					}
+				if (!openRewardsMenu()) {
+					chat(MENU_OPEN_FAILED, ChatFormatting.RED);
 					return;
 				}
 				try {
 					result = runSingle(name, type, requested, dump, false);
 				} finally {
-					boolean aborted = backgroundSession.isAborted();
 					onClientRun(this::closeMenu);
 					// A single gift can also be pushed off page one in a busy guild.  Use the
 					// same saved-boundary scan as a batch before releasing the gift lock. In a
@@ -795,7 +774,6 @@ public final class GuildRewards {
 					progress("Confirming with the Guild Log...", 0, 0);
 					// A dump hands out surplus, never a tracked pending balance, so it deducts nothing.
 					int confirmed = reportConfirmedDeduction(name, type, result.given(), collectPostGiftEvidence(), !dump);
-					completed = !cancelRequested && !aborted && result.amount() > 0 && confirmed > 0;
 					// Only report a shortfall now, after ticker AND Guild Log reconciliation —
 					// checking right after runSingle (ticker alone) is a frequent false alarm,
 					// since the Guild Log usually catches exactly the gap the ticker missed.
@@ -818,7 +796,7 @@ public final class GuildRewards {
 			chat("Gift failed: " + e.getMessage(), ChatFormatting.RED);
 		} finally {
 			giftInProgress = false;
-			requestPostGiftReconciliation(completed);
+			requestPostGiftReconciliation();
 			progress(cancelRequested ? "Cancelled" : "Done", 0, 0);
 			GiftProgressListener listener = progressListener;
 			if (listener != null) {
@@ -1232,7 +1210,6 @@ public final class GuildRewards {
 	public void payoutAspects(List<PayoutTarget> targets) {
 		List<PayoutTarget> copy = List.copyOf(targets);
 		if (!copy.isEmpty()) {
-			cancelRequested = false;
 			worker.submit(() -> batchRun(copy, RewardType.ASPECT, true));
 		}
 	}
@@ -1248,7 +1225,6 @@ public final class GuildRewards {
 	public void payoutEmeralds(List<PayoutTarget> targets) {
 		List<PayoutTarget> copy = List.copyOf(targets);
 		if (!copy.isEmpty()) {
-			cancelRequested = false;
 			worker.submit(() -> batchRun(copy, RewardType.EMERALD, true));
 		}
 	}
@@ -1262,7 +1238,6 @@ public final class GuildRewards {
 	public void giveaway(List<PayoutTarget> targets) {
 		List<PayoutTarget> copy = List.copyOf(targets);
 		if (!copy.isEmpty()) {
-			cancelRequested = false;
 			worker.submit(() -> batchRun(copy, RewardType.ASPECT, false));
 		}
 	}
@@ -1270,8 +1245,8 @@ public final class GuildRewards {
 	private void batchRun(List<PayoutTarget> requested, RewardType type, boolean settlesPending) {
 		giftInProgress = true;
 		stressLevel = 0;
+		cancelRequested = false;
 		progress("Starting...", 0, 0);
-		boolean completed = false;
 		try {
 			if (!isChief()) {
 				chat("Only guild Chiefs can pay out rewards.", ChatFormatting.RED);
@@ -1318,21 +1293,16 @@ public final class GuildRewards {
 			// Matches the menu's own ordering so a batch pages strictly forward.
 			targets.sort(Comparator.comparingInt((PayoutTarget t) -> menuRankIndex(memberInfo(t.name()))).thenComparingLong(t -> -contributedXpOf(memberInfo(t.name()))));
 
-			if (cancelRequested || !acquireGiftLock()) {
+			if (!acquireGiftLock()) {
 				return;
 			}
 			try {
-				if (cancelRequested) {
-					return;
-				}
 				readOwnNickname();
-				if (cancelRequested || !establishGiftLogBaseline()) {
+				if (!establishGiftLogBaseline()) {
 					return;
 				}
-				if (cancelRequested || !openRewardsMenu()) {
-					if (!cancelRequested) {
-						chat(MENU_OPEN_FAILED, ChatFormatting.RED);
-					}
+				if (!openRewardsMenu()) {
+					chat(MENU_OPEN_FAILED, ChatFormatting.RED);
 					return;
 				}
 				// The whole batch shares this one menu session.
@@ -1422,7 +1392,6 @@ public final class GuildRewards {
 					}
 					// Close before querying /gu log. The query owns the same server-side
 					// container channel, and the delayed ticker keeps arriving after close.
-					boolean aborted = backgroundSession.isAborted();
 					onClientRun(this::closeMenu);
 					progress("Confirming with the Guild Log...", done, targets.size());
 					Map<String, Integer> ticker = awaitBatchConfirmations(attempted, type, batchSince);
@@ -1466,8 +1435,7 @@ public final class GuildRewards {
 							}
 						}
 					}
-					int confirmedTotal = finishBatchPayout(attempted, unsent, ticker, log, evidence != null, type, settlesPending, counts);
-					completed = !cancelRequested && !aborted && !backgroundSession.isAborted() && unsent.isEmpty() && confirmedTotal > 0;
+					finishBatchPayout(attempted, unsent, ticker, log, evidence != null, type, settlesPending, counts);
 				} finally {
 					onClientRun(this::closeMenu);
 				}
@@ -1479,7 +1447,7 @@ public final class GuildRewards {
 			chat("Payout failed: " + e.getMessage(), ChatFormatting.RED);
 		} finally {
 			giftInProgress = false;
-			requestPostGiftReconciliation(completed);
+			requestPostGiftReconciliation();
 			progress(cancelRequested ? "Cancelled" : "Done", 0, 0);
 			GiftProgressListener listener = progressListener;
 			if (listener != null) {
@@ -1700,7 +1668,7 @@ public final class GuildRewards {
 		return missing;
 	}
 
-	private int finishBatchPayout(Map<String, Integer> attempted, Map<String, Integer> unsent, Map<String, Integer> ticker, Map<String, Integer> log, boolean logRead, RewardType type, boolean settlesPending, long[] startingCounts) {
+	private void finishBatchPayout(Map<String, Integer> attempted, Map<String, Integer> unsent, Map<String, Integer> ticker, Map<String, Integer> log, boolean logRead, RewardType type, boolean settlesPending, long[] startingCounts) {
 		int paidInFull = 0;
 		// attempted/ticker/log are all menu-click counts (see guildLogCounts' doc), so
 		// confirmedTotal is too — convert with realUnitsFor before it touches anything
@@ -1742,7 +1710,6 @@ public final class GuildRewards {
 			String lead = logRead ? "Not delivered, per the Guild Log (they stay pending): " : "Not confirmed, as the Guild Log could not be read (they stay pending): ";
 			chat(lead + String.join(", ", stillShort), ChatFormatting.RED);
 		}
-		return confirmedTotal;
 	}
 
 	/** The warning for members who were sent less than planned; {@code attempted} is already capped to what was sent. */
@@ -1756,34 +1723,29 @@ public final class GuildRewards {
 		return "Not everything was sent, the menu closed or the run was cut short: " + String.join(", ", notSent) + (settlesPending ? ". The rest stays pending." : ". The rest was not given.");
 	}
 
-	void requestPostGiftReconciliation(boolean completed) {
+	private void requestPostGiftReconciliation() {
 		Runnable reconciler = postGiftReconciler;
 		if (reconciler != null) {
 			reconciler.run();
 		}
 		ToIntFunction<GuildLogSync.ScanProgress> scan = postRunLogScan;
-		// Only a Chief's completed, uncancelled run with at least one confirmed unit scans the
-		// Guild Log afterwards, unless one ran recently.
-		if (completed && !cancelRequested && !backgroundSession.isAborted() && scan != null && isChief() && postRunLogScanDue.getAsBoolean()) {
+		// Every kind of gift or payout, however it ended (finished, cancelled, failed): followed by a
+		// whole-log scan, unless one ran in the last few minutes. Only a Chief's scan is of any use.
+		if (scan != null && isChief() && postRunLogScanDue.getAsBoolean()) {
+			GiftProgressListener listener = progressListener;
+			if (listener != null) {
+				listener.onCancelUnavailable();
+			}
 			progress("Syncing Guild Log", 0, GuildLogSync.FULL_SCAN_TOTAL_PAGES);
 			long started = System.currentTimeMillis();
-			postRunLogScanRunning = true;
 			try {
-				if (cancelRequested) {
-					chat("Guild Log scan cancelled.", ChatFormatting.YELLOW);
-					return;
-				}
 				int rows = scan.applyAsInt(this::progress);
-				if (cancelRequested || rows == GuildLogSync.CANCELLED) {
-					chat("Guild Log scan cancelled.", ChatFormatting.YELLOW);
-				} else if (rows > 0) {
-					// Only a scan that actually read the log is reported: a skipped, disabled or failed one is not.
+				// Only a scan that actually read the log is reported: a skipped, disabled or failed one is not.
+				if (rows > 0) {
 					chat("Guild Log scan finished: " + rows + " rows uploaded in " + Math.round((System.currentTimeMillis() - started) / 1000.0) + "s.", ChatFormatting.GREEN);
 				}
 			} catch (RuntimeException e) {
 				LOGGER.warn("Post-run Guild Log scan failed", e);
-			} finally {
-				postRunLogScanRunning = false;
 			}
 		}
 	}
@@ -2429,9 +2391,6 @@ public final class GuildRewards {
 
 	private static void chatComponent(Component message) {
 		Minecraft mc = Minecraft.getInstance();
-		if (mc == null) {
-			return;
-		}
 		mc.execute(() -> {
 			if (mc.player != null) {
 				mc.player.displayClientMessage(message, false);

@@ -35,9 +35,11 @@ public final class GuildLogSync {
 	// deliberately bounded to the 4 x 8 log area and never include player inventory.
 	private static final int NEXT_PAGE_SLOT = 45;
 	private static final int MAX_POST_GIFT_LOG_PAGES = 8;
-	// Whole-log walk (see scanWholeLog): General has this many pages (so four page flips).
+	// Whole-log walk (see scanWholeLog): General has this many pages (four page flips).
 	private static final int FULL_SCAN_PAGES = 5;
 	private static final long FULL_SCAN_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(90);
+	// Dormant all-filter layout retained for future multi-category log scans; active scans read General only.
+	static final List<FilterButton> KNOWN_FILTERS = List.of(new FilterButton(2, "General"), new FilterButton(3, "Objectives"), new FilterButton(4, "Wars"), new FilterButton(5, "Economy"), new FilterButton(6, "Public Bank"), new FilterButton(7, "High Ranked Bank"));
 	/** Pages a log scan reads in total: only the General category ({@link #FULL_SCAN_PAGES} pages). */
 	public static final int FULL_SCAN_TOTAL_PAGES = FULL_SCAN_PAGES;
 	/** A gift run only starts another whole-log scan if the last one finished longer ago than this. */
@@ -201,6 +203,26 @@ public final class GuildLogSync {
 		if (current != null) {
 			current.progress(status, scanPagesDone, scanPagesTotal);
 		}
+	}
+
+	/** Whether a category is stored as plain sentences rather than parsed into typed events (dormant all-logs support). */
+	public static boolean isTextCategory(String category) {
+		return "Wars".equalsIgnoreCase(category) || "Economy".equalsIgnoreCase(category);
+	}
+
+	/** A text-category row as a {@link GuildLogEvent.Text}, trimmed to the length the backend accepts. */
+	public static GuildLogEvent textEvent(GuildLogEntry entry) {
+		String text = GuildLogEventParser.plainText(entry.text());
+		return new GuildLogEvent.Text(entry.occurredAt(), text.length() > 300 ? text.substring(0, 300) : text);
+	}
+
+	/** A filter button in the Guild Log's header row (dormant all-logs support). */
+	record FilterButton(int slot, String name) {
+	}
+
+	/** Whether the item found in a filter's slot is the filter we expect there. */
+	static boolean isExpectedFilter(String actualName, String expectedName) {
+		return actualName != null && actualName.toLowerCase(java.util.Locale.ROOT).contains(expectedName.toLowerCase(java.util.Locale.ROOT));
 	}
 
 	/** Request cancellation of an active Guild Log read or scan and close any open background menu. */
@@ -476,6 +498,59 @@ public final class GuildLogSync {
 			}
 		}
 		return rows;
+	}
+
+	/** Dormant multi-filter walk retained for future all-category log scans; unused while only General is scanned. */
+	@SuppressWarnings("unused")
+	private int scanRemainingFilters(String firstLabel, long scanStarted) {
+		List<FilterButton> filters = onClient(this::readFilterButtons);
+		if (filters == null) {
+			return 0;
+		}
+		int rows = 0;
+		for (FilterButton filter : filters) {
+			if (shouldStopScan(scanStarted)) {
+				break;
+			}
+			if (filter.name().equalsIgnoreCase(firstLabel) || firstLabel.toLowerCase(java.util.Locale.ROOT).contains(filter.name().toLowerCase(java.util.Locale.ROOT))) {
+				continue;
+			}
+			if (!selectFilter(filter)) {
+				continue;
+			}
+			rows += scanAllPages(filter.name(), scanStarted);
+		}
+		return rows;
+	}
+
+	private List<FilterButton> readFilterButtons() {
+		List<ItemStack> items = session.items();
+		List<FilterButton> verified = new ArrayList<>();
+		for (FilterButton filter : KNOWN_FILTERS) {
+			ItemStack stack = filter.slot() < items.size() ? items.get(filter.slot()) : ItemStack.EMPTY;
+			if (isExpectedFilter(stack.isEmpty() ? null : headerName(stack), filter.name())) {
+				verified.add(filter);
+			} else {
+				LOGGER.warn("Guild log full scan: slot {} is not the expected '{}' filter (found '{}') — skipping it", filter.slot(), filter.name(), stack.isEmpty() ? "nothing" : headerName(stack));
+			}
+		}
+		return List.copyOf(verified);
+	}
+
+	private static String headerName(ItemStack stack) {
+		return ChatFormatting.stripFormatting(stack.getHoverName().getString()).trim();
+	}
+
+	private boolean selectFilter(FilterButton filter) {
+		Long before = onClient(() -> {
+			long revision = session.snapshotRevision();
+			return session.prepareInPlaceTransition(title -> title.contains("Log:"), LOG_SLOTS) && session.click(filter.slot(), 0, net.minecraft.world.inventory.ClickType.PICKUP) ? revision : null;
+		});
+		if (before == null || !waitUntil(() -> cancelRequested || session.isAborted() || session.snapshotRevision() > before && isGuildLogLoaded()) || cancelRequested || session.isAborted()) {
+			LOGGER.warn("Guild log full scan: timed out opening filter slot {} '{}'", filter.slot(), filter.name());
+			return false;
+		}
+		return true;
 	}
 
 	private List<GuildLogEvent> syncLogRows() {

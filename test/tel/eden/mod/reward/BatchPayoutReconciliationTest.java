@@ -1,14 +1,9 @@
 package tel.eden.mod.reward;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
-import tel.eden.mod.guild.BackgroundContainerSession;
-import tel.eden.mod.guild.GuildLogSync;
 
 class BatchPayoutReconciliationTest {
 	@Test
@@ -31,29 +26,5 @@ class BatchPayoutReconciliationTest {
 		assertEquals("Not everything was sent, the menu closed or the run was cut short: MicrosRevenge (43 of 71 aspects not sent). The rest stays pending.", GuildRewards.describeUnsent(attempted, unsent, GuildRewards.RewardType.ASPECT, true));
 		// A giveaway has no pending balance to leave the rest in.
 		assertEquals("Not everything was sent, the menu closed or the run was cut short: MicrosRevenge (43 of 71 aspects not sent). The rest was not given.", GuildRewards.describeUnsent(attempted, unsent, GuildRewards.RewardType.ASPECT, false));
-	}
-
-	@Test
-	void cancelForwardsToLogSyncOnlyDuringPostRunScan() {
-		GuildRewards duringPayout = new GuildRewards(new BackgroundContainerSession());
-		AtomicBoolean cancelledLogSync = new AtomicBoolean();
-		duringPayout.setPostRunLogScanCancel(() -> cancelledLogSync.set(true));
-		duringPayout.requestCancel();
-		assertFalse(cancelledLogSync.get());
-
-		GuildRewards duringPostRunScan = new GuildRewards(new BackgroundContainerSession());
-		duringPostRunScan.rank = "Chief";
-		duringPostRunScan.setPostRunLogScanCancel(() -> cancelledLogSync.set(true));
-		duringPostRunScan.setPostRunLogScan(progress -> {
-			duringPostRunScan.requestCancel();
-			return GuildLogSync.CANCELLED;
-		});
-		duringPostRunScan.requestPostGiftReconciliation(true);
-		assertTrue(cancelledLogSync.get());
-
-		// Outside the post-run scan, subsequent cancels must leave log sync alone.
-		cancelledLogSync.set(false);
-		duringPostRunScan.requestCancel();
-		assertFalse(cancelledLogSync.get());
 	}
 }

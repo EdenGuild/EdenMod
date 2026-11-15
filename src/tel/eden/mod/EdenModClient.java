@@ -677,7 +677,7 @@ public final class EdenModClient implements ClientModInitializer {
 			if (current == null) {
 				return;
 			}
-			java.util.List<tel.eden.mod.guild.GuildLogEvent> events = entries.stream().map(tel.eden.mod.guild.GuildLogEventParser::parse).flatMap(Optional::stream).toList();
+			java.util.List<tel.eden.mod.guild.GuildLogEvent> events = GuildLogSync.isTextCategory(category) ? entries.stream().map(GuildLogSync::textEvent).toList() : entries.stream().map(tel.eden.mod.guild.GuildLogEventParser::parse).flatMap(Optional::stream).toList();
 			current.sendGuildLogFullScanPage(category, events);
 		});
 		tel.eden.mod.chat.PlayerNameResolver.setMemberNames(guildRewards::memberNames);
@@ -705,7 +705,6 @@ public final class EdenModClient implements ClientModInitializer {
 				return -1;
 			}
 		});
-		guildRewards.setPostRunLogScanCancel(guildLogSync::requestCancel);
 		guildRewards.setPreGiftEvidenceSupplier(() -> {
 			try {
 				return guildLogSync.reconcileNow().get(20, TimeUnit.SECONDS);
@@ -1863,9 +1862,9 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	/**
-	 * {@code /eden logscan}: a Chief or Owner reads the whole Guild Log (every filter, five
-	 * pages each) and uploads it, behind the same blocking progress screen a gift run uses.
-	 * The walk stops by itself after 90 seconds; there is no Cancel button.
+	 * {@code /eden logscan}: a Chief or Owner reads the General Guild Log (five pages)
+	 * and uploads it, behind a blocking progress screen with a Cancel button. Stops by
+	 * itself after 90 seconds or when cancelled.
 	 */
 	private int scanLog(FabricClientCommandSource source) {
 		if (!ensureRewardsReady(source)) {

@@ -1317,6 +1317,10 @@ public final class BridgeWebSocketClient {
 					entry.addProperty("charges", bank.charges());
 				}
 				entry.addProperty("accessTier", bank.accessTier());
+			} else if (event instanceof GuildLogEvent.Text text) {
+				entry.addProperty("kind", "text");
+				entry.addProperty("occurredAt", text.occurredAt());
+				entry.addProperty("text", text.text());
 			} else if (event instanceof GuildLogEvent.Raid raid) {
 				entry.addProperty("kind", "raid");
 				entry.addProperty("occurredAt", raid.occurredAt());
