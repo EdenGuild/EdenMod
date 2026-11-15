@@ -146,6 +146,7 @@ public final class GuildLogSync {
 				result.completeExceptionally(e);
 			} finally {
 				running = false;
+				cancelRequested = false;
 			}
 		});
 		return result;
@@ -258,6 +259,7 @@ public final class GuildLogSync {
 				result.completeExceptionally(e);
 			} finally {
 				running = false;
+				cancelRequested = false;
 				LOGGER.info("Guild log: payout reconciliation finished");
 			}
 		});
@@ -297,6 +299,7 @@ public final class GuildLogSync {
 				result.completeExceptionally(e);
 			} finally {
 				running = false;
+				cancelRequested = false;
 				LOGGER.info("Guild log: post-payout reconciliation finished");
 			}
 		});
@@ -351,6 +354,7 @@ public final class GuildLogSync {
 			syncLogRows();
 		} finally {
 			running = false;
+			cancelRequested = false;
 			LOGGER.info("Guild sync: background pass finished");
 		}
 	}
@@ -386,6 +390,7 @@ public final class GuildLogSync {
 			} finally {
 				running = false;
 				scanProgress = null;
+				cancelRequested = false;
 			}
 		});
 		return result;
@@ -393,23 +398,34 @@ public final class GuildLogSync {
 
 	/** What {@link #scanWholeLog} yields when the log could not be opened or never loaded, so nothing was scanned. */
 	public static final int NOT_RUN = -1;
+	/** What {@link #scanWholeLog} yields when cancelled before completing. */
+	public static final int CANCELLED = -2;
 
 	private int syncWholeLog() {
 		long started = System.currentTimeMillis();
-		if (cancelRequested || worldTransition || !openAndCommand("guild log", title -> title.contains("Log:"), LOG_SLOTS, "gu log")) {
+		if (cancelRequested) {
+			return CANCELLED;
+		}
+		if (worldTransition || !openAndCommand("guild log", title -> title.contains("Log:"), LOG_SLOTS, "gu log")) {
+			if (cancelRequested) {
+				return CANCELLED;
+			}
 			LOGGER.warn("Guild log full scan: couldn't open the Guild Log");
 			return NOT_RUN;
 		}
 		try {
 			reportScanProgress("Opening the Guild Log");
 			if (!waitForLoadedLog("General") || cancelRequested) {
+				if (cancelRequested) {
+					return CANCELLED;
+				}
 				LOGGER.warn("Guild log full scan: timed out waiting for populated rows");
 				return NOT_RUN;
 			}
 			int rows = scanAllPages("General", started);
 			if (shouldStopScan(started)) {
 				LOGGER.info("Guild log scan: stopped early after {} row(s) in {}ms", rows, System.currentTimeMillis() - started);
-				return NOT_RUN;
+				return cancelRequested ? CANCELLED : NOT_RUN;
 			}
 			if (rows > 0) {
 				lastScanFinishedAt = System.currentTimeMillis();
@@ -508,31 +524,48 @@ public final class GuildLogSync {
 	 * rather than assuming a held-open menu would reflect a server-side log update.
 	 */
 	private List<GuildLogEvent> syncGeneralRowsAfterBaselineWithRetry(List<GuildLogEntry> baseline) {
+		return retryPostGiftLogRead(() -> syncGeneralRowsAfterBaseline(baseline), POST_GIFT_LOG_WAIT_MS, POST_GIFT_LOG_RETRY_INTERVAL_MS);
+	}
+
+	/** Retry loop for post-payout log reads; yields {@code null} ("not read") if cancelled instead of an empty list. */
+	List<GuildLogEvent> retryPostGiftLogRead(Supplier<List<GuildLogEvent>> attemptReader, long waitMs, long retryIntervalMs) {
 		long start = System.currentTimeMillis();
-		long deadline = start + POST_GIFT_LOG_WAIT_MS;
+		long deadline = start + waitMs;
 		int attempt = 0;
 		while (!cancelRequested && !worldTransition) {
 			attempt++;
-			List<GuildLogEvent> newer = syncGeneralRowsAfterBaseline(baseline);
+			List<GuildLogEvent> newer = attemptReader.get();
+			if (newer == null || cancelRequested || worldTransition) {
+				return null;
+			}
 			long elapsed = System.currentTimeMillis() - start;
-			if (cancelRequested || worldTransition || !newer.isEmpty() || System.currentTimeMillis() >= deadline) {
+			if (!newer.isEmpty() || System.currentTimeMillis() >= deadline) {
 				LOGGER.info("Guild log: post-payout scan found {} newer row(s) after {}ms ({} attempt(s))", newer.size(), elapsed, attempt);
 				return newer;
 			}
 			LOGGER.info("Guild log: post-payout scan found nothing yet after {}ms (attempt {}) — retrying", elapsed, attempt);
-			if (!sleepInterruptibly(POST_GIFT_LOG_RETRY_INTERVAL_MS)) {
-				return newer;
+			if (!sleepInterruptibly(retryIntervalMs)) {
+				return null;
 			}
 		}
-		return List.of();
+		return null;
 	}
 
 	private List<GuildLogEvent> syncGeneralRowsAfterBaseline(List<GuildLogEntry> baseline) {
+		if (cancelRequested) {
+			return null;
+		}
 		if (worldTransition || !openAndCommand("guild log", title -> title.contains("Log:"), LOG_SLOTS, "gu log")) {
+			if (cancelRequested) {
+				return null;
+			}
 			throw new IllegalStateException("couldn't open the Guild Log");
 		}
 		try {
 			if (!waitForLoadedLog("General")) {
+				if (cancelRequested || worldTransition) {
+					return null;
+				}
 				throw new IllegalStateException("Guild Log did not finish loading");
 			}
 			List<String> baselineKeys = baseline.stream().map(GuildLogSync::entryKey).toList();
@@ -580,6 +613,9 @@ public final class GuildLogSync {
 				if (page == MAX_POST_GIFT_LOG_PAGES || !openNextLogPage()) {
 					break;
 				}
+			}
+			if (cancelRequested || worldTransition) {
+				return null;
 			}
 			throw new BaselineNotFoundException("Guild Log baseline was not found within " + MAX_POST_GIFT_LOG_PAGES + " pages");
 		} finally {

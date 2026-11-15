@@ -355,6 +355,7 @@ public final class GuildRewards {
 	// part of settling the payout, only extra data for the backend.
 	private volatile ToIntFunction<GuildLogSync.ScanProgress> postRunLogScan;
 	private volatile Runnable postRunLogScanCancel;
+	private volatile boolean postRunLogScanRunning;
 	private volatile BooleanSupplier postRunLogScanDue = () -> true;
 	// Blocking, best-effort: reads our own nickname off the Character Info menu. Run first in every
 	// gift or payout, so the Guild Log's reward rows can be matched to us from the start.
@@ -396,7 +397,9 @@ public final class GuildRewards {
 	public void requestCancel() {
 		cancelRequested = true;
 		Runnable scanCancel = postRunLogScanCancel;
-		if (scanCancel != null) {
+		// Forward cancel to GuildLogSync only during the optional post-run whole-log scan; cancelling
+		// during "Confirming with the Guild Log..." would abort payout settlement and risk double-pays.
+		if (postRunLogScanRunning && scanCancel != null) {
 			scanCancel.run();
 		}
 	}
@@ -557,7 +560,7 @@ public final class GuildRewards {
 		return t;
 	});
 
-	private volatile String rank = "";
+	volatile String rank = "";
 	private volatile Map<String, MemberInfo> members = emptyMembers();
 	private volatile long lastRefresh = 0L;
 	private volatile long lastAttempt = 0L;
@@ -1764,9 +1767,14 @@ public final class GuildRewards {
 		if (completed && !cancelRequested && !backgroundSession.isAborted() && scan != null && isChief() && postRunLogScanDue.getAsBoolean()) {
 			progress("Syncing Guild Log", 0, GuildLogSync.FULL_SCAN_TOTAL_PAGES);
 			long started = System.currentTimeMillis();
+			postRunLogScanRunning = true;
 			try {
-				int rows = scan.applyAsInt(this::progress);
 				if (cancelRequested) {
+					chat("Guild Log scan cancelled.", ChatFormatting.YELLOW);
+					return;
+				}
+				int rows = scan.applyAsInt(this::progress);
+				if (cancelRequested || rows == GuildLogSync.CANCELLED) {
 					chat("Guild Log scan cancelled.", ChatFormatting.YELLOW);
 				} else if (rows > 0) {
 					// Only a scan that actually read the log is reported: a skipped, disabled or failed one is not.
@@ -1774,6 +1782,8 @@ public final class GuildRewards {
 				}
 			} catch (RuntimeException e) {
 				LOGGER.warn("Post-run Guild Log scan failed", e);
+			} finally {
+				postRunLogScanRunning = false;
 			}
 		}
 	}
@@ -2419,6 +2429,9 @@ public final class GuildRewards {
 
 	private static void chatComponent(Component message) {
 		Minecraft mc = Minecraft.getInstance();
+		if (mc == null) {
+			return;
+		}
 		mc.execute(() -> {
 			if (mc.player != null) {
 				mc.player.displayClientMessage(message, false);

@@ -186,7 +186,8 @@ public final class EdenModClient implements ClientModInitializer {
 	// repeated (e.g. "d" then "d") from the same line relayed by multiple online
 	// members' clients, which is clock-/arrival-skew independent (order, not time).
 	private final OccurrenceSequencer chatSeq = new OccurrenceSequencer(15_000L);
-	private final OccurrenceSequencer economySeq = new OccurrenceSequencer(10_000L);
+	// Matches EdenBot's 60s ClaimRelay window (_RAID_DEDUP_WINDOW) so genuine repeats within a minute are not dropped.
+	private final OccurrenceSequencer economySeq = new OccurrenceSequencer(60_000L);
 	private final BackgroundContainerSession backgroundContainers = new BackgroundContainerSession();
 	private final GuildRewards guildRewards = new GuildRewards(backgroundContainers);
 	private final GuildLogSync guildLogSync = new GuildLogSync(backgroundContainers);
@@ -1887,7 +1888,7 @@ public final class EdenModClient implements ClientModInitializer {
 		showProgressScreen(progress);
 		long started = System.currentTimeMillis();
 		guildLogSync.scanWholeLog(progress::onProgress).whenComplete((rows, error) -> {
-			boolean cancelled = guildLogSync.isCancelRequested();
+			boolean cancelled = Integer.valueOf(GuildLogSync.CANCELLED).equals(rows) || guildLogSync.isCancelRequested();
 			progress.onDone();
 			mc.execute(() -> {
 				if (cancelled) {
