@@ -157,7 +157,9 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			raidsScroll = 0;
 			warsScroll = 0;
 			CycleLeaderboardData.CycleSnapshot snap = mod.knownCycleLeaderboard();
-			if (snap != null && !snap.cycleCode().isEmpty() && snap.error().isEmpty()) {
+			if (!mod.recentCycleLeaderboardError().isEmpty()) {
+				selectedCycleCode = (snap != null && !snap.cycleCode().isEmpty()) ? snap.cycleCode() : null;
+			} else if (snap != null && !snap.cycleCode().isEmpty() && snap.error().isEmpty()) {
 				selectedCycleCode = snap.cycleCode();
 			}
 			syncControlState();
@@ -200,7 +202,8 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			return;
 		}
 		List<String> cycles = snap.cycles();
-		int idx = currentCycleIndex(cycles, snap.cycleCode());
+		String currentCode = (selectedCycleCode != null && !selectedCycleCode.isEmpty()) ? selectedCycleCode : snap.cycleCode();
+		int idx = currentCycleIndex(cycles, currentCode);
 		if (idx < 0) {
 			return;
 		}
@@ -252,7 +255,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		if (isCycle && archiveOpen) {
 			CycleLeaderboardData.CycleSnapshot snap = mod != null ? mod.knownCycleLeaderboard() : null;
 			List<String> cycles = snap != null ? snap.cycles() : List.of();
-			String activeCode = snap != null ? snap.cycleCode() : "";
+			String activeCode = (selectedCycleCode != null && !selectedCycleCode.isEmpty()) ? selectedCycleCode : (snap != null ? snap.cycleCode() : "");
 			int idx = currentCycleIndex(cycles, activeCode);
 			prevCycleButton.active = idx > 0;
 			nextCycleButton.active = idx >= 0 && idx < cycles.size() - 1;

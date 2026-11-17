@@ -1967,81 +1967,111 @@ public final class EdenModClient implements ClientModInitializer {
 			source.sendFeedback(DiscordChatFormatter.formatCyclePrint(tel.eden.mod.net.CycleLeaderboardData.summaryFromSnapshot(snap)));
 			return 1;
 		}
-		pendingCyclePrintCode = trimmed;
-		requestCycleLeaderboard(trimmed);
+		requestCycleLeaderboard(trimmed, true);
 		return 1;
 	}
 
-	/** Request promotion cycle leaderboard data (current if null/blank) with 1s query cooldown and 5s timeout. */
+	/** Request promotion cycle leaderboard data (current if null/blank), debounced safely above server throttle. */
 	public void requestCycleLeaderboard(String cycleCode) {
-		if (!isFullMember()) {
-			cycleLeaderboardError = "Failed to fetch cycle leaderboard";
-			cycleLeaderboardErrorAtMs = System.currentTimeMillis();
-			cycleLeaderboardGeneration.incrementAndGet();
-			return;
-		}
+		requestCycleLeaderboard(cycleCode, false);
+	}
+
+	private void requestCycleLeaderboard(String cycleCode, boolean forPrint) {
+		long seq = cycleRequestSeq.incrementAndGet();
+		pendingCyclePrintCode = forPrint ? (cycleCode != null ? cycleCode.trim() : "") : null;
 		BridgeWebSocketClient current = socket;
-		if (current == null || !current.isConnected()) {
-			cycleLeaderboardError = "Failed to fetch cycle leaderboard";
-			cycleLeaderboardErrorAtMs = System.currentTimeMillis();
-			cycleLeaderboardGeneration.incrementAndGet();
+		if (!isFullMember() || current == null || !current.isConnected()) {
+			failCycleLeaderboardRequest();
 			return;
 		}
-		long nowMs = System.currentTimeMillis();
-		if (nowMs - lastCycleQueryAtMs < 1_000L && knownCycleLeaderboard != null) {
+		long delayMs = knownCycleLeaderboard == null ? 0L : Math.max(0L, (lastCycleQueryAtMs + 950L) - System.currentTimeMillis());
+		if (delayMs == 0L) {
+			dispatchCycleLeaderboardRequest(cycleCode, seq);
 			return;
 		}
-		lastCycleQueryAtMs = nowMs;
+		partyCommandExecutor.schedule(() -> {
+			if (cycleRequestSeq.get() == seq) {
+				dispatchCycleLeaderboardRequest(cycleCode, seq);
+			}
+		}, delayMs, TimeUnit.MILLISECONDS);
+	}
+
+	private void dispatchCycleLeaderboardRequest(String cycleCode, long seq) {
+		BridgeWebSocketClient current = socket;
+		if (!isFullMember() || current == null || !current.isConnected()) {
+			if (cycleRequestSeq.get() == seq) {
+				failCycleLeaderboardRequest();
+			}
+			return;
+		}
+		cycleRequestPendingId.set(seq);
+		lastCycleQueryAtMs = System.currentTimeMillis();
 		cycleLeaderboardError = "";
 		cycleLeaderboardErrorAtMs = 0L;
-		long id = cycleRequestSeq.incrementAndGet();
-		cycleRequestPendingId.set(id);
 		current.sendCycleLeaderboardRequest(cycleCode);
 		partyCommandExecutor.schedule(() -> {
-			if (cycleRequestPendingId.compareAndSet(id, 0)) {
-				cycleLeaderboardError = "Failed to fetch cycle leaderboard";
-				cycleLeaderboardErrorAtMs = System.currentTimeMillis();
-				cycleLeaderboardGeneration.incrementAndGet();
-				if (pendingCyclePrintCode != null) {
-					pendingCyclePrintCode = null;
-					display(() -> DiscordChatFormatter.systemLine("Failed to fetch cycle leaderboard", ChatFormatting.RED));
-				}
+			if (cycleRequestPendingId.compareAndSet(seq, 0)) {
+				failCycleLeaderboardRequest();
 			}
 		}, 5, TimeUnit.SECONDS);
 	}
 
-	/** Request lifetime or interval Raids/Wars leaderboards with 1s query cooldown and 5s timeout. */
+	private void failCycleLeaderboardRequest() {
+		cycleRequestPendingId.set(0);
+		cycleLeaderboardError = "Failed to fetch cycle leaderboard";
+		cycleLeaderboardErrorAtMs = System.currentTimeMillis();
+		cycleLeaderboardGeneration.incrementAndGet();
+		if (pendingCyclePrintCode != null) {
+			pendingCyclePrintCode = null;
+			display(() -> DiscordChatFormatter.systemLine("Failed to fetch cycle leaderboard", ChatFormatting.RED));
+		}
+	}
+
+	/** Request lifetime or interval Raids/Wars leaderboards, debounced safely above server throttle. */
 	public void requestLifetimeLeaderboard(Double fromDays, Double toDays) {
-		if (!isFullMember()) {
-			lifetimeLeaderboardError = "Failed to fetch leaderboard stats";
-			lifetimeLeaderboardErrorAtMs = System.currentTimeMillis();
-			lifetimeLeaderboardGeneration.incrementAndGet();
-			return;
-		}
+		long seq = lifetimeRequestSeq.incrementAndGet();
 		BridgeWebSocketClient current = socket;
-		if (current == null || !current.isConnected()) {
-			lifetimeLeaderboardError = "Failed to fetch leaderboard stats";
-			lifetimeLeaderboardErrorAtMs = System.currentTimeMillis();
-			lifetimeLeaderboardGeneration.incrementAndGet();
+		if (!isFullMember() || current == null || !current.isConnected()) {
+			failLifetimeLeaderboardRequest();
 			return;
 		}
-		long nowMs = System.currentTimeMillis();
-		if (nowMs - lastLifetimeQueryAtMs < 1_000L && knownLifetimeLeaderboard != null) {
+		long delayMs = knownLifetimeLeaderboard == null ? 0L : Math.max(0L, (lastLifetimeQueryAtMs + 950L) - System.currentTimeMillis());
+		if (delayMs == 0L) {
+			dispatchLifetimeLeaderboardRequest(fromDays, toDays, seq);
 			return;
 		}
-		lastLifetimeQueryAtMs = nowMs;
+		partyCommandExecutor.schedule(() -> {
+			if (lifetimeRequestSeq.get() == seq) {
+				dispatchLifetimeLeaderboardRequest(fromDays, toDays, seq);
+			}
+		}, delayMs, TimeUnit.MILLISECONDS);
+	}
+
+	private void dispatchLifetimeLeaderboardRequest(Double fromDays, Double toDays, long seq) {
+		BridgeWebSocketClient current = socket;
+		if (!isFullMember() || current == null || !current.isConnected()) {
+			if (lifetimeRequestSeq.get() == seq) {
+				failLifetimeLeaderboardRequest();
+			}
+			return;
+		}
+		lifetimeRequestPendingId.set(seq);
+		lastLifetimeQueryAtMs = System.currentTimeMillis();
 		lifetimeLeaderboardError = "";
 		lifetimeLeaderboardErrorAtMs = 0L;
-		long id = lifetimeRequestSeq.incrementAndGet();
-		lifetimeRequestPendingId.set(id);
 		current.sendLifetimeLeaderboardRequest(fromDays, toDays);
 		partyCommandExecutor.schedule(() -> {
-			if (lifetimeRequestPendingId.compareAndSet(id, 0)) {
-				lifetimeLeaderboardError = "Failed to fetch leaderboard stats";
-				lifetimeLeaderboardErrorAtMs = System.currentTimeMillis();
-				lifetimeLeaderboardGeneration.incrementAndGet();
+			if (lifetimeRequestPendingId.compareAndSet(seq, 0)) {
+				failLifetimeLeaderboardRequest();
 			}
 		}, 5, TimeUnit.SECONDS);
+	}
+
+	private void failLifetimeLeaderboardRequest() {
+		lifetimeRequestPendingId.set(0);
+		lifetimeLeaderboardError = "Failed to fetch leaderboard stats";
+		lifetimeLeaderboardErrorAtMs = System.currentTimeMillis();
+		lifetimeLeaderboardGeneration.incrementAndGet();
 	}
 
 	private CompletableFuture<Suggestions> suggestMembers(CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
@@ -3206,7 +3236,9 @@ public final class EdenModClient implements ClientModInitializer {
 		longEventGeneration.set(0);
 		longEventError = "";
 		longEventErrorAtMs = 0L;
+		cycleRequestSeq.incrementAndGet();
 		cycleRequestPendingId.set(0);
+		lifetimeRequestSeq.incrementAndGet();
 		lifetimeRequestPendingId.set(0);
 		knownCycleLeaderboard = null;
 		cycleLeaderboardGeneration.set(0);
