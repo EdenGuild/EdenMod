@@ -119,6 +119,51 @@ public final class DiscordChatFormatter {
 		return line;
 	}
 
+	/** "The promotion cycle has concluded! [Print] [View]" for in-game guild members only. */
+	public static Component cycleConcluded(String cycleCode) {
+		String arg = (cycleCode != null && !cycleCode.isBlank()) ? " " + cycleCode.trim() : "";
+		Style print = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden cycle print" + arg)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Print top cycle results to chat")));
+		Style view = Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden cycle view" + arg)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open the promotion cycle leaderboard")));
+		return Component.empty().append(prefix(SHIELD)).append(Component.literal("The promotion cycle has concluded! ").withStyle(ChatFormatting.GOLD)).append(Component.literal("[Print]").setStyle(print)).append(Component.literal(" ")).append(Component.literal("[View]").setStyle(view));
+	}
+
+	/** Format concluded cycle summary (top 3 raids, top 1 wars, top 3 raffle, totals) for [Print]. */
+	public static Component formatCyclePrint(tel.eden.mod.net.CycleLeaderboardData.ConcludedCycleSummary summary) {
+		MutableComponent out = Component.empty().append(prefix(SHIELD));
+		String title = (summary.cycleCode() != null && !summary.cycleCode().isBlank()) ? "Promotion Cycle " + summary.cycleCode() + " Results:" : "Promotion Cycle Results:";
+		out.append(Component.literal(title).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+		out.append(Component.literal("\n  Top 3 Raids:").withStyle(ChatFormatting.AQUA));
+		List<tel.eden.mod.net.CycleLeaderboardData.LeaderboardEntry> topRaids = summary.topRaids().stream().filter(e -> e.count() > 0 && e.rank() <= 3).limit(3).toList();
+		if (topRaids.isEmpty()) {
+			out.append(Component.literal("\n    None").withStyle(ChatFormatting.GRAY));
+		} else {
+			for (tel.eden.mod.net.CycleLeaderboardData.LeaderboardEntry e : topRaids) {
+				out.append(Component.literal("\n    #" + e.rank() + " " + e.name()).withStyle(ChatFormatting.WHITE)).append(Component.literal(" — " + e.count() + " raids").withStyle(ChatFormatting.GRAY));
+			}
+		}
+		out.append(Component.literal("\n  Top 1 Wars:").withStyle(ChatFormatting.RED));
+		List<tel.eden.mod.net.CycleLeaderboardData.LeaderboardEntry> topWars = summary.topWars().stream().filter(e -> e.count() > 0 && e.rank() == 1).limit(3).toList();
+		if (topWars.isEmpty()) {
+			out.append(Component.literal("\n    None").withStyle(ChatFormatting.GRAY));
+		} else {
+			for (tel.eden.mod.net.CycleLeaderboardData.LeaderboardEntry e : topWars) {
+				out.append(Component.literal("\n    #" + e.rank() + " " + e.name()).withStyle(ChatFormatting.WHITE)).append(Component.literal(" — " + e.count() + " wars").withStyle(ChatFormatting.GRAY));
+			}
+		}
+		out.append(Component.literal("\n  Top 3 Raffle:").withStyle(ChatFormatting.LIGHT_PURPLE));
+		List<tel.eden.mod.net.CycleLeaderboardData.RaffleWinner> winners = summary.raffleWinners().subList(0, Math.min(3, summary.raffleWinners().size()));
+		if (winners.isEmpty()) {
+			out.append(Component.literal("\n    None").withStyle(ChatFormatting.GRAY));
+		} else {
+			for (int i = 0; i < winners.size(); i++) {
+				tel.eden.mod.net.CycleLeaderboardData.RaffleWinner w = winners.get(i);
+				out.append(Component.literal("\n    #" + (i + 1) + " " + w.name()).withStyle(ChatFormatting.WHITE)).append(Component.literal(" — " + w.tickets() + " tickets (" + w.raids() + " raids)").withStyle(ChatFormatting.GRAY));
+			}
+		}
+		out.append(Component.literal("\n  Totals: ").withStyle(ChatFormatting.GOLD)).append(Component.literal(summary.totalRaids() + " raids | " + summary.totalWars() + " wars | " + summary.totalTickets() + " tickets").withStyle(ChatFormatting.YELLOW));
+		return out;
+	}
+
 	/** A green/gold/red client-side notice line with the guild shield prefix. */
 	public static Component systemLine(String text, ChatFormatting color) {
 		return Component.empty().append(prefix(SHIELD)).append(Component.literal(text).withStyle(color));

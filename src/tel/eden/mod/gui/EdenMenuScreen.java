@@ -17,9 +17,9 @@ public class EdenMenuScreen extends EdenScreen {
 	private static final int BASE_CONTENT_WIDTH = 200;
 	private static final int BUTTON_HEIGHT = 20;
 	private static final int BUTTON_SPACING = 24;
-	private static final int BUTTON_COUNT = 8;
-	// Event and Payouts are guild-only.
-	private static final int TRAVELER_HIDDEN_BUTTONS = 2;
+	private static final int BUTTON_COUNT = 9;
+	// Event, Promotion cycle, and Payouts are hidden from travelers.
+	private static final int TRAVELER_HIDDEN_BUTTONS = 3;
 	private static final int LOGO_WIDTH = 128;
 	private static final int LOGO_GAP = 20;
 	private static final int CONTENT_MARGIN = 12;
@@ -67,6 +67,7 @@ public class EdenMenuScreen extends EdenScreen {
 				}
 				this.minecraft.setScreen(new LongEventScreen(this, mod));
 			}).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
+			this.addRenderableWidget(Button.builder(Component.literal("Promotion cycle"), button -> this.minecraft.setScreen(new PromotionCycleScreen(this, EdenModClient.instance()))).bounds(metrics.buttonX, metrics.startY + (metrics.buttonPitch * slot++), metrics.buttonWidth, metrics.buttonHeight).build());
 		}
 
 		this.addRenderableWidget(Button.builder(Component.literal("Create Party"), button -> {
@@ -213,8 +214,8 @@ public class EdenMenuScreen extends EdenScreen {
 
 	private static int buttonCount() {
 		int count = isTraveler() ? BUTTON_COUNT - TRAVELER_HIDDEN_BUTTONS : BUTTON_COUNT;
-		// Event is member-only; a traveler already has it counted in TRAVELER_HIDDEN_BUTTONS.
-		return !isTraveler() && !isMember() ? count - 1 : count;
+		// Event and Promotion cycle are full-member-only; observers lack both as well.
+		return !isTraveler() && !isMember() ? count - 2 : count;
 	}
 
 	private int bottomSafeMargin() {
