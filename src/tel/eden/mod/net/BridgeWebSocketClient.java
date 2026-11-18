@@ -1204,6 +1204,18 @@ public final class BridgeWebSocketClient {
 		enqueueSend(current, obj);
 	}
 
+	/** Report a Guild Tome found and added to the guild's reward pool. */
+	public void sendGuildTomeFound(int seq) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "guildTomeFound");
+		obj.addProperty("seq", seq);
+		enqueueSend(current, obj);
+	}
+
 	/** Send a rendered shared-item card (base64 PNG) to be relayed as the sender. */
 	public void sendItemCard(String username, String nickname, String imageBase64, String signature) {
 		WebSocket current = socket;

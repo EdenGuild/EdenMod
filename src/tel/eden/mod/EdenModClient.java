@@ -181,6 +181,8 @@ public final class EdenModClient implements ClientModInitializer {
 	// Reward ticker packets are authoritative individual handouts. Unlike bank lines,
 	// never coalesce two that arrive within 200 ms: rapid legitimate gifts must both count.
 	private final OccurrenceSequencer rewardSeq = new OccurrenceSequencer(60_000L, false);
+	// Matches EdenBot's 60s claim window, so two finds within a minute stay distinct.
+	private final OccurrenceSequencer tomeFoundSeq = new OccurrenceSequencer(60_000L);
 	// Guild-chat occurrence index: lets the backend distinguish a line legitimately
 	// repeated (e.g. "d" then "d") from the same line relayed by multiple online
 	// members' clients, which is clock-/arrival-skew independent (order, not time).
@@ -3126,6 +3128,11 @@ public final class EdenModClient implements ClientModInitializer {
 			GuildReward line = reward.get();
 			String signature = line.giver() + "|" + line.reward() + "|" + line.receiver();
 			current.sendGuildReward(line.giver(), line.reward(), line.receiver(), rewardSeq.next(signature));
+			return;
+		}
+		// A Guild Tome dropping into the reward pool, posted to the rewards log.
+		if (tel.eden.mod.chat.GuildTomeFoundParser.matches(message)) {
+			current.sendGuildTomeFound(tomeFoundSeq.next("guildTomeFound"));
 			return;
 		}
 		// Annihilation world-event warning (the only advance timing signal we get).
