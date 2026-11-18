@@ -1,7 +1,6 @@
 package tel.eden.mod.gui;
 
 import java.util.List;
-import java.util.UUID;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -21,21 +20,19 @@ import tel.eden.mod.util.PlayerSkinResolver;
 
 /** Promotion Cycle (& Archive) and Lifetime leaderboard screen for full guild members. */
 public class PromotionCycleScreen extends EdenReferenceScreen {
-	private static final int BASE_PANEL_WIDTH = 468;
-	private static final int BASE_PANEL_HEIGHT = 272;
-
-	private static final int LEFT_COL_X = 14;
-	private static final int RIGHT_COL_X = 240;
-	private static final int COL_WIDTH = 208;
-	private static final int SCROLLBAR_OFFSET = 210;
+	private static final int MARGIN_X = 12;
+	private static final int COL_GAP = 16;
+	private static final int SCROLLBAR_GAP = 2;
 	private static final int SCROLLBAR_WIDTH = 6;
-	private static final int VISIBLE_ROWS = 8;
-	private static final int ROW_PITCH = 18;
-	private static final int ROW_HEIGHT = 16;
-	private static final int ZERO_ROW_OVERLAY = 0x48CC2222;
-	private static final int ROW_FILL = 0x520F281A;
+	private static final int ROW_PITCH = 17;
+	private static final int ROW_HEIGHT = 15;
+	private static final int PODIUM_CAP_WIDTH = 30;
+	private static final int PODIUM_HEAD_SIZE = 32;
+	private static final int ZERO_ROW_OVERLAY = 0x44CC2222;
+	private static final int ROW_FILL = 0x44282828;
 
-	private static final Identifier[] MEDAL_TEXTURES = {Identifier.fromNamespaceAndPath("edenmod", "textures/gui/cycle/medal_1.png"), Identifier.fromNamespaceAndPath("edenmod", "textures/gui/cycle/medal_2.png"), Identifier.fromNamespaceAndPath("edenmod", "textures/gui/cycle/medal_3.png"), Identifier.fromNamespaceAndPath("edenmod", "icon.png"),};
+	private static final Identifier EDEN_ICON = Identifier.fromNamespaceAndPath("edenmod", "icon.png");
+	private static final Identifier[] MEDAL_TEXTURES = {Identifier.fromNamespaceAndPath("edenmod", "textures/gui/cycle/medal_1.png"), Identifier.fromNamespaceAndPath("edenmod", "textures/gui/cycle/medal_2.png"), Identifier.fromNamespaceAndPath("edenmod", "textures/gui/cycle/medal_3.png"),};
 
 	private enum Tab {
 		CYCLE, LIFETIME
@@ -88,7 +85,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 	@Override
 	protected void init() {
 		super.init();
-		layout = centeredLayout(BASE_PANEL_WIDTH, BASE_PANEL_HEIGHT);
+		layout = centeredLayout(200, 120);
 		uiScale = 1.0f;
 		virtualWidth = this.width;
 		virtualHeight = this.height;
@@ -102,40 +99,37 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 
 		this.clearWidgets();
 
-		int tabStartX = Math.max(198, (this.width - 196) / 2);
-		int tabY = 18;
-		cycleTabButton = Button.builder(Component.literal("Promotion Cycle"), b -> switchTab(Tab.CYCLE)).bounds(tabStartX, tabY, 112, 20).build();
-		lifetimeTabButton = Button.builder(Component.literal("Lifetime"), b -> switchTab(Tab.LIFETIME)).bounds(tabStartX + 116, tabY, 80, 20).build();
+		cycleTabButton = Button.builder(Component.literal("Promotion Cycle"), b -> switchTab(Tab.CYCLE)).bounds(12, 24, 110, 18).build();
+		lifetimeTabButton = Button.builder(Component.literal("Lifetime"), b -> switchTab(Tab.LIFETIME)).bounds(126, 24, 80, 18).build();
 		this.addRenderableWidget(cycleTabButton);
 		this.addRenderableWidget(lifetimeTabButton);
 
-		Button closeButton = Button.builder(Component.literal("Close"), b -> onClose()).bounds(this.width - 66, 18, 50, 20).build();
+		int closeX = bottomCloseX();
+		Button closeButton = Button.builder(Component.literal("Close"), b -> onClose()).bounds(closeX, this.height - 24, 100, 18).build();
 		this.addRenderableWidget(closeButton);
 
-		// Cycle tab archive controls in full-width bottom-right footer
-		int archiveY = this.height - 30;
-		prevCycleButton = Button.builder(Component.literal("< Previous"), b -> navigateArchive(-1)).bounds(this.width - 246, archiveY, 70, 18).build();
-		nextCycleButton = Button.builder(Component.literal("Next >"), b -> navigateArchive(1)).bounds(this.width - 172, archiveY, 58, 18).build();
-		archiveButton = Button.builder(Component.literal("Cycle Archive"), b -> toggleArchive()).bounds(this.width - 110, archiveY, 94, 18).build();
+		// Cycle tab archive controls
+		prevCycleButton = Button.builder(Component.literal("< Previous"), b -> navigateArchive(-1)).bounds(this.width - 236, this.height - 24, 68, 18).build();
+		nextCycleButton = Button.builder(Component.literal("Next >"), b -> navigateArchive(1)).bounds(this.width - 164, this.height - 24, 56, 18).build();
+		archiveButton = Button.builder(Component.literal("Cycle Archive"), b -> toggleArchive()).bounds(this.width - 104, this.height - 24, 92, 18).build();
 		this.addRenderableWidget(prevCycleButton);
 		this.addRenderableWidget(nextCycleButton);
 		this.addRenderableWidget(archiveButton);
 
-		// Lifetime tab controls inside emerald filter bar
-		int filterY = 62;
-		fromBox = new EditBox(this.font, 48, filterY, 80, 18, Component.literal("From days ago"));
+		// Lifetime tab controls
+		fromBox = new EditBox(this.font, 42, 48, 78, 18, Component.literal("From days ago"));
 		fromBox.setHint(Component.literal("-# days ago").withStyle(ChatFormatting.GRAY));
 		fromBox.setMaxLength(16);
 		fromBox.setValue(fromDraft);
 
-		toBox = new EditBox(this.font, 154, filterY, 80, 18, Component.literal("To days ago"));
+		toBox = new EditBox(this.font, 146, 48, 78, 18, Component.literal("To days ago"));
 		toBox.setHint(Component.literal("-# days ago").withStyle(ChatFormatting.GRAY));
 		toBox.setMaxLength(16);
 		toBox.setValue(toDraft);
 
-		applyIntervalButton = Button.builder(Component.literal("Apply"), b -> applyInterval()).bounds(240, filterY, 48, 18).build();
-		resetIntervalButton = Button.builder(Component.literal("Reset"), b -> resetInterval()).bounds(292, filterY, 48, 18).build();
-		finishesToggleButton = Button.builder(Component.literal("Cycle Finishes"), b -> toggleFinishes()).bounds(this.width - 126, filterY, 108, 18).build();
+		applyIntervalButton = Button.builder(Component.literal("Apply"), b -> applyInterval()).bounds(230, 48, 46, 18).build();
+		resetIntervalButton = Button.builder(Component.literal("Reset"), b -> resetInterval()).bounds(280, 48, 46, 18).build();
+		finishesToggleButton = Button.builder(Component.literal("Cycle Finishes"), b -> toggleFinishes()).bounds(this.width - 118, 48, 106, 18).build();
 
 		this.addRenderableWidget(fromBox);
 		this.addRenderableWidget(toBox);
@@ -292,45 +286,14 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+		if (uiScale != 1.0f || virtualWidth != this.width || virtualHeight != this.height) {
+			init();
+		}
 		int scaledMouseX = scaledMouseX(mouseX);
 		int scaledMouseY = scaledMouseY(mouseY);
 
 		pushReferencePose(g);
-
-		// Full-screen layered emerald backdrop
-		g.fillGradient(0, 0, this.width, this.height, 0xF006150C, 0xF6030906);
-		g.fillGradient(0, 0, this.width, Math.min(this.height, 150), 0x5C1D7843, 0x0006150C);
-		g.fillGradient(0, Math.max(0, this.height - 96), this.width, this.height, 0x00030906, 0x8C020604);
-		g.fill(0, 0, this.width, 1, 0xFF287D4B);
-		g.fill(0, this.height - 1, this.width, this.height, 0xFF1A5734);
-		g.fill(0, 0, 1, this.height, 0xFF287D4B);
-		g.fill(this.width - 1, 0, this.width, this.height, 0xFF1A5734);
-
-		// Shaded emerald top banner with framed Eden Logo crest
-		int headerRight = this.width - 8;
-		g.fillGradient(8, 6, headerRight, 52, 0xEB113821, 0xEB092113);
-		g.fill(8, 6, headerRight, 7, 0x6658F59F);
-		g.fill(8, 50, headerRight, 52, 0xFF2EA866);
-		g.fill(8, 52, headerRight, 55, 0x55000000);
-		g.fill(8, 6, 9, 52, 0xFF256D43);
-		g.fill(headerRight - 1, 6, headerRight, 52, 0xFF256D43);
-
-		// Eden Logo emblem
-		g.fill(15, 9, 53, 47, 0xAA0C2818);
-		g.fill(15, 9, 53, 10, 0xFF47DB86);
-		g.fill(15, 46, 53, 47, 0xFF257A48);
-		g.fill(15, 9, 16, 47, 0xFF47DB86);
-		g.fill(52, 9, 53, 47, 0xFF257A48);
-		drawTexture(g, MEDAL_TEXTURES[3], 17, 11, 34, 34);
-
-		String heading = activeTab == Tab.CYCLE ? "Eden Promotion Cycle" : "Eden Lifetime Stats";
-		g.drawString(this.font, heading, 60, 15, 0xFF7BFFAE);
-
-		// Active-tab glowing mint indicator underneath the selected tab button
-		int tabStartX = Math.max(198, (this.width - 196) / 2);
-		int activeIndX = activeTab == Tab.CYCLE ? tabStartX : (tabStartX + 116);
-		int activeIndW = activeTab == Tab.CYCLE ? 112 : 80;
-		g.fill(activeIndX + 4, 40, activeIndX + activeIndW - 4, 42, 0xFF56FF9F);
+		EdenPanelLayout.drawPanel(g, 0, 0, this.width, this.height);
 
 		if (activeTab == Tab.CYCLE) {
 			renderCycleTab(g);
@@ -339,6 +302,8 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		}
 
 		super.render(g, scaledMouseX, scaledMouseY, delta);
+		String heading = activeTab == Tab.CYCLE ? "Promotion Cycle" : "Lifetime Stats";
+		g.drawCenteredString(this.font, heading, this.width / 2, 10, 0xFFFFFFFF);
 		popReferencePose(g);
 	}
 
@@ -346,58 +311,29 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		CycleLeaderboardData.CycleSnapshot snap = mod != null ? mod.knownCycleLeaderboard() : null;
 		String err = mod != null ? mod.recentCycleLeaderboardError() : "";
 
-		String cycleBadge;
-		if (snap != null && !snap.cycleCode().isEmpty()) {
-			List<String> cycles = snap.cycles();
-			boolean latest = cycles.isEmpty() || snap.cycleCode().equals(cycles.get(cycles.size() - 1));
-			cycleBadge = "Cycle " + snap.cycleCode() + (latest ? "  •  Current" : "  •  Archive");
-		} else {
-			cycleBadge = "Fetching cycle...";
-		}
-		g.drawString(this.font, cycleBadge, 60, 29, 0xFFA8EBC2);
+		String cycleHeader = (snap != null && !snap.cycleCode().isEmpty()) ? "Cycle " + snap.cycleCode() : "Loading...";
+		g.drawString(this.font, cycleHeader, 220, 29, 0xFFFFCC55);
 
-		// Bottom shaded footer card
-		int footerTop = this.height - 36;
-		int footerRight = this.width - 8;
-		g.fillGradient(8, footerTop, footerRight, this.height - 6, 0xEB0E2E1C, 0xEB07190F);
-		g.fill(8, footerTop, footerRight, footerTop + 1, 0xFF319A5D);
-
-		int centerY = this.height / 2;
 		if (!err.isEmpty()) {
-			g.drawCenteredString(this.font, err, this.width / 2, centerY - 4, 0xFFFF6B6B);
+			g.drawCenteredString(this.font, err, this.width / 2, this.height / 2, 0xFFFF5555);
 			return;
 		}
 		if (snap == null) {
-			g.drawCenteredString(this.font, "Loading cycle leaderboard...", this.width / 2, centerY - 4, 0xFFA8EBC2);
+			g.drawCenteredString(this.font, "Loading cycle leaderboard...", this.width / 2, this.height / 2, 0xFFAAAAAA);
 			return;
 		}
 
-		int listTop = listTopOffset();
-		int colW = Math.max(180, (this.width - 42) / 2);
-		int leftX = 14;
-		int rightX = 14 + colW + 14;
-		int hdrTop = listTop - 20;
+		int colW = colWidth();
+		int titleY = titleY();
+		g.drawCenteredString(this.font, "Raids", colX(true) + colW / 2, titleY, 0xFF55FFFF);
+		g.drawCenteredString(this.font, "Wars", colX(false) + colW / 2, titleY, 0xFFFF5555);
 
-		// Column Headers (shaded emerald & gold-emerald)
-		g.fillGradient(leftX, hdrTop, leftX + colW, listTop, 0xEE14472D, 0xEE0C2C1B);
-		g.fill(leftX, hdrTop, leftX + colW, hdrTop + 2, 0xFF42E695);
-		g.drawString(this.font, "Raids", leftX + 8, hdrTop + 6, 0xFF7CFFD1);
-		String rCount = snap.raids().size() + " players";
-		g.drawString(this.font, rCount, leftX + colW - 8 - this.font.width(rCount), hdrTop + 6, 0xFF93D1AE);
+		renderEntryList(g, true, snap.raids(), raidsScroll, true, true);
+		renderEntryList(g, false, snap.wars(), warsScroll, true, true);
 
-		g.fillGradient(rightX, hdrTop, rightX + colW, listTop, 0xEE1A4223, 0xEE0F2916);
-		g.fill(rightX, hdrTop, rightX + colW, hdrTop + 2, 0xFFFFCA62);
-		g.drawString(this.font, "Wars", rightX + 8, hdrTop + 6, 0xFFFFD479);
-		String wCount = snap.wars().size() + " players";
-		g.drawString(this.font, wCount, rightX + colW - 8 - this.font.width(wCount), hdrTop + 6, 0xFFD9C798);
-
-		renderEntryList(g, LEFT_COL_X, listTop, snap.raids(), raidsScroll, true, true);
-		renderEntryList(g, RIGHT_COL_X, listTop, snap.wars(), warsScroll, true, true);
-
-		int controlsLeft = archiveOpen ? (this.width - 256) : (this.width - 120);
-		int maxTextW = Math.max(80, controlsLeft - 24);
-		String totals = "Totals: " + snap.totalRaids() + " raids  •  " + snap.totalWars() + " wars  •  " + snap.totalTickets() + " tickets";
-		g.drawString(this.font, trimToWidth(totals, maxTextW), 16, footerTop + 5, 0xFFFFE082);
+		int maxFooterW = Math.max(60, bottomCloseX() - 20);
+		String totals = "Totals: " + snap.totalRaids() + " raids | " + snap.totalWars() + " wars | " + snap.totalTickets() + " tickets";
+		g.drawString(this.font, trimToWidth(totals, maxFooterW), 12, this.height - 36, 0xFFFFD966);
 		if (!snap.raffleWinners().isEmpty()) {
 			StringBuilder raffle = new StringBuilder("Raffle Top 3: ");
 			List<CycleLeaderboardData.RaffleWinner> top = snap.raffleWinners().subList(0, Math.min(3, snap.raffleWinners().size()));
@@ -407,103 +343,127 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 				}
 				raffle.append("#").append(i + 1).append(" ").append(top.get(i).name()).append(" (").append(top.get(i).tickets()).append(")");
 			}
-			g.drawString(this.font, trimToWidth(raffle.toString(), maxTextW), 16, footerTop + 17, 0xFFE2C6FF);
+			g.drawString(this.font, trimToWidth(raffle.toString(), maxFooterW), 12, this.height - 24, 0xFFD5A6FF);
 		}
 	}
 
 	private void renderLifetimeTab(GuiGraphics g) {
+		g.drawString(this.font, "From:", 12, 53, 0xFFCCCCCC);
+		g.drawString(this.font, "To:", 126, 53, 0xFFCCCCCC);
+		if (!validationError.isEmpty()) {
+			int errMaxW = Math.max(40, (this.width - 126) - 332);
+			g.drawString(this.font, trimToWidth(validationError, errMaxW), 332, 53, 0xFFFF5555);
+		}
+
 		CycleLeaderboardData.LifetimeSnapshot snap = mod != null ? mod.knownLifetimeLeaderboard() : null;
 		String err = mod != null ? mod.recentLifetimeLeaderboardError() : "";
-
-		String sub = "All-Time Records";
-		if (snap != null && snap.hasInterval()) {
-			String toLabel = (snap.toDays() == null || snap.toDays() <= 0.0) ? "now" : ("-" + snap.toDays() + "d");
-			sub = "Filtered Window: -" + snap.fromDays() + "d to " + toLabel;
-		}
-		g.drawString(this.font, sub, 60, 29, 0xFFA8EBC2);
-
-		// Shaded emerald filter bar
-		int barRight = this.width - 14;
-		g.fillGradient(14, 58, barRight, 84, 0xD80D2B1B, 0xD8081C11);
-		g.fill(14, 58, barRight, 59, 0xFF287549);
-		g.fill(14, 83, barRight, 84, 0xFF1D5937);
-		g.fill(14, 58, 15, 84, 0xFF236841);
-		g.fill(barRight - 1, 58, barRight, 84, 0xFF236841);
-
-		g.drawString(this.font, "From:", 20, 67, 0xFFA8EBC2);
-		g.drawString(this.font, "To:", 134, 67, 0xFFA8EBC2);
-		if (!validationError.isEmpty()) {
-			g.drawString(this.font, trimToWidth(validationError, Math.max(80, this.width - 490)), 346, 67, 0xFFFF6B6B);
-		}
-
-		// Footer strip
-		int footerTop = this.height - 36;
-		g.fillGradient(8, footerTop, this.width - 8, this.height - 6, 0xEB0E2E1C, 0xEB07190F);
-		g.fill(8, footerTop, this.width - 8, footerTop + 1, 0xFF319A5D);
-		g.drawString(this.font, showFinishes ? "Cycle Finishes: cumulative #1 / #2 / #3 placements across concluded cycles" : (snap != null && snap.hasInterval() ? "Custom day interval active (medals disabled)" : "All-time cumulative completions"), 16, footerTop + 11, 0xFF8CD1A8);
-
-		int centerY = this.height / 2 + 12;
 		if (!err.isEmpty()) {
-			g.drawCenteredString(this.font, err, this.width / 2, centerY, 0xFFFF6B6B);
+			g.drawCenteredString(this.font, err, this.width / 2, this.height / 2 + 12, 0xFFFF5555);
 			return;
 		}
 		if (snap == null) {
-			g.drawCenteredString(this.font, "Loading leaderboard stats...", this.width / 2, centerY, 0xFFA8EBC2);
+			g.drawCenteredString(this.font, "Loading leaderboard stats...", this.width / 2, this.height / 2 + 12, 0xFFAAAAAA);
 			return;
 		}
 
-		int listTop = listTopOffset();
-		int colW = Math.max(180, (this.width - 42) / 2);
-		int leftX = 14;
-		int rightX = 14 + colW + 14;
-		int hdrTop = listTop - 20;
+		int colW = colWidth();
+		int titleY = titleY();
+		int leftCenter = colX(true) + colW / 2;
+		int rightCenter = colX(false) + colW / 2;
 
 		if (showFinishes) {
-			g.fillGradient(leftX, hdrTop, leftX + colW, listTop, 0xEE14472D, 0xEE0C2C1B);
-			g.fill(leftX, hdrTop, leftX + colW, hdrTop + 2, 0xFF42E695);
-			g.drawString(this.font, "Raids Cycle Finishes", leftX + 8, hdrTop + 6, 0xFF7CFFD1);
-
-			g.fillGradient(rightX, hdrTop, rightX + colW, listTop, 0xEE1A4223, 0xEE0F2916);
-			g.fill(rightX, hdrTop, rightX + colW, hdrTop + 2, 0xFFFFCA62);
-			g.drawString(this.font, "Wars Cycle Finishes", rightX + 8, hdrTop + 6, 0xFFFFD479);
-
-			renderPodiumList(g, LEFT_COL_X, listTop, snap.raidFinishes(), raidsScroll);
-			renderPodiumList(g, RIGHT_COL_X, listTop, snap.warFinishes(), warsScroll);
+			g.drawCenteredString(this.font, "Raids Finishes", leftCenter, titleY, 0xFF55FFFF);
+			g.drawCenteredString(this.font, "Wars Finishes", rightCenter, titleY, 0xFFFF5555);
+			renderPodiumList(g, true, snap.raidFinishes(), raidsScroll);
+			renderPodiumList(g, false, snap.warFinishes(), warsScroll);
 			return;
 		}
 
 		String subtitle = snap.hasInterval() ? " (Filtered: no medals)" : "";
-		g.fillGradient(leftX, hdrTop, leftX + colW, listTop, 0xEE14472D, 0xEE0C2C1B);
-		g.fill(leftX, hdrTop, leftX + colW, hdrTop + 2, 0xFF42E695);
-		g.drawString(this.font, "Raids" + subtitle, leftX + 8, hdrTop + 6, 0xFF7CFFD1);
-
-		g.fillGradient(rightX, hdrTop, rightX + colW, listTop, 0xEE1A4223, 0xEE0F2916);
-		g.fill(rightX, hdrTop, rightX + colW, hdrTop + 2, 0xFFFFCA62);
-		g.drawString(this.font, "Wars" + subtitle, rightX + 8, hdrTop + 6, 0xFFFFD479);
+		g.drawCenteredString(this.font, "Raids" + subtitle, leftCenter, titleY, 0xFF55FFFF);
+		g.drawCenteredString(this.font, "Wars" + subtitle, rightCenter, titleY, 0xFFFF5555);
 
 		boolean showMedals = !snap.hasInterval();
-		renderEntryList(g, LEFT_COL_X, listTop, snap.raids(), raidsScroll, showMedals, false);
-		renderEntryList(g, RIGHT_COL_X, listTop, snap.wars(), warsScroll, showMedals, false);
+		renderEntryList(g, true, snap.raids(), raidsScroll, showMedals, false);
+		renderEntryList(g, false, snap.wars(), warsScroll, showMedals, false);
 	}
 
-	private void renderEntryList(GuiGraphics g, int baseColX, int baseTopY, List<CycleLeaderboardData.LeaderboardEntry> entries, int scrollOffset, boolean showMedals, boolean showDelta) {
-		int colW = Math.max(180, (this.width - 42) / 2);
-		int x = baseColX == LEFT_COL_X ? 14 : (14 + colW + 14);
-		int listW = colW - 8;
-		int bottomLimit = Math.max(baseTopY + ROW_PITCH * 4 + 4, this.height - 42);
-		int visRows = Math.max(4, (bottomLimit - baseTopY - 4) / ROW_PITCH);
-		int height = visRows * ROW_PITCH + 4;
+	private void renderPodium(GuiGraphics g, int x, int colW, List<?> rawEntries) {
+		int podiumTop = podiumTop();
+		int podiumH = podiumHeight();
+		g.fill(x, podiumTop, x + colW, podiumTop + podiumH, 0x22000000);
 
-		// Shaded card body + border
-		g.fill(x, baseTopY, x + colW, baseTopY + height, 0xB806140C);
-		g.fill(x, baseTopY, x + colW, baseTopY + 1, 0xFF246A43);
-		g.fill(x, baseTopY + height - 1, x + colW, baseTopY + height, 0xFF1A4F32);
-		g.fill(x, baseTopY, x + 1, baseTopY + height, 0xFF246A43);
-		g.fill(x + colW - 1, baseTopY, x + colW, baseTopY + height, 0xFF1A4F32);
+		int slotW = Math.clamp(colW / 3 - 4, 48, 96);
+		int cx1 = x + colW / 2;
+		int cx2 = cx1 - slotW;
+		int cx3 = cx1 + slotW;
+		int maxStandH = Math.max(70, podiumH - 54);
+		int h2 = Math.max(52, maxStandH * 76 / 100);
+		int h3 = Math.max(38, maxStandH * 56 / 100);
+		int baseLineY = podiumTop + podiumH - 4;
+		int lineLeft = Math.max(x + 4, cx2 - PODIUM_CAP_WIDTH / 2 - 8);
+		int lineRight = Math.min(x + colW - 4, cx3 + PODIUM_CAP_WIDTH / 2 + 8);
+		g.fill(lineLeft, baseLineY, lineRight, baseLineY + 2, 0xFF8E8E8E);
+		g.fill(lineLeft, baseLineY + 2, lineRight, baseLineY + 3, 0xFF1E1E1E);
+
+		for (int slot = 0; slot < 3; slot++) {
+			int rank = slot == 0 ? 2 : (slot == 1 ? 1 : 3);
+			int cx = slot == 0 ? cx2 : (slot == 1 ? cx1 : cx3);
+			int standH = slot == 0 ? h2 : (slot == 1 ? maxStandH : h3);
+			int standTopY = baseLineY - standH;
+			drawPillar(g, cx, baseLineY, PODIUM_CAP_WIDTH, standH);
+
+			int entryIdx = rank - 1;
+			if (entryIdx >= rawEntries.size()) {
+				continue;
+			}
+			String uuid = null;
+			String name = null;
+			String suffix = null;
+			Object item = rawEntries.get(entryIdx);
+			if (item instanceof CycleLeaderboardData.LeaderboardEntry e) {
+				if (e.count() <= 0) {
+					continue;
+				}
+				uuid = e.uuid();
+				name = e.name();
+				suffix = " (" + e.count() + ")";
+			} else if (item instanceof CycleLeaderboardData.PodiumEntry p) {
+				uuid = p.uuid();
+				name = p.name();
+				suffix = " (" + p.first() + "/" + p.second() + "/" + p.third() + ")";
+			}
+			if (name == null) {
+				continue;
+			}
+
+			int headStartX = cx - PODIUM_HEAD_SIZE / 2;
+			int headY = standTopY - PODIUM_HEAD_SIZE - 2;
+			drawPlayerFace(g, uuid, name, headStartX, headY, PODIUM_HEAD_SIZE);
+
+			int halfBound = switch (rank) {
+				case 2 -> Math.min(cx - x - 3, slotW - PODIUM_HEAD_SIZE / 2 - 3);
+				case 3 -> Math.min((x + colW) - cx - 3, slotW - PODIUM_HEAD_SIZE / 2 - 3);
+				default -> Math.min(colW / 2 - 4, (slotW + 28) / 2);
+			};
+			int maxLabelW = Math.max(24, halfBound * 2);
+			int maxNameW = Math.max(12, maxLabelW - this.font.width(suffix));
+			g.drawCenteredString(this.font, trimToWidth(name, maxNameW) + suffix, cx, standTopY - PODIUM_HEAD_SIZE - 12, 0xFFFFFFFF);
+		}
+	}
+
+	private void renderEntryList(GuiGraphics g, boolean left, List<CycleLeaderboardData.LeaderboardEntry> entries, int scrollOffset, boolean showMedals, boolean showDelta) {
+		int x = colX(left);
+		int colW = colWidth();
+		renderPodium(g, x, colW, entries);
+
+		int baseTopY = listTopOffset();
+		int visRows = visibleRows();
+		int height = visRows * ROW_PITCH + 4;
+		g.fill(x, baseTopY, x + colW, baseTopY + height, 0x22000000);
 
 		int total = entries.size();
 		int clamped = clampOffset(scrollOffset, total);
-		g.enableScissor(x + 1, baseTopY + 1, x + listW, baseTopY + height - 1);
 		for (int vis = 0; vis < visRows; vis++) {
 			int idx = clamped + vis;
 			if (idx >= total) {
@@ -511,102 +471,60 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			}
 			CycleLeaderboardData.LeaderboardEntry entry = entries.get(idx);
 			int rowY = baseTopY + 2 + vis * ROW_PITCH;
-			int rowBg;
-			int accentBar = 0;
-			if (entry.count() <= 0) {
-				rowBg = ZERO_ROW_OVERLAY;
-				accentBar = 0xFFFF5555;
-			} else if (entry.rank() == 1) {
-				rowBg = 0x623F330F;
-				accentBar = 0xFFFFD700;
-			} else if (entry.rank() == 2) {
-				rowBg = 0x52253633;
-				accentBar = 0xFFD4E0EA;
-			} else if (entry.rank() == 3) {
-				rowBg = 0x523B2616;
-				accentBar = 0xFFDE9151;
-			} else {
-				rowBg = (idx & 1) == 0 ? ROW_FILL : 0x3A0A1C12;
-			}
-			g.fill(x + 3, rowY, x + listW - 2, rowY + ROW_HEIGHT, rowBg);
-			if (accentBar != 0) {
-				g.fill(x + 3, rowY, x + 5, rowY + ROW_HEIGHT, accentBar);
-			}
+			g.fill(x + 2, rowY, x + colW - 2, rowY + ROW_HEIGHT, entry.count() <= 0 ? ZERO_ROW_OVERLAY : ROW_FILL);
 
-			int cursorX = x + 8;
+			int cursorX = x + 4;
 			if (showDelta) {
 				Integer deltaVal = entry.delta();
 				String deltaText = deltaVal == null || deltaVal == 0 ? "-" : (deltaVal > 0 ? "+" + deltaVal : String.valueOf(deltaVal));
-				int deltaColor = deltaVal == null || deltaVal == 0 ? 0xFF729E84 : (deltaVal > 0 ? 0xFF55FF88 : 0xFFFF6B6B);
+				int deltaColor = deltaVal == null || deltaVal == 0 ? 0xFF888888 : (deltaVal > 0 ? 0xFF55FF55 : 0xFFFF5555);
 				g.drawString(this.font, deltaText, cursorX, rowY + 4, deltaColor);
-				cursorX += 24;
+				cursorX += Math.max(22, this.font.width(deltaText) + 4);
 			}
 
-			if (this.minecraft != null) {
-				PlayerSkin skin = PlayerSkinResolver.skinFor(this.minecraft, parseUuid(entry.uuid()), entry.name());
-				if (skin != null) {
-					PlayerFaceRenderer.draw(g, skin, cursorX, rowY + 3, 10);
-				}
-			}
-			cursorX += 14;
+			drawPlayerFace(g, entry.uuid(), entry.name(), cursorX, rowY + 2, 10);
+			cursorX += 13;
 
 			int rankColor = switch (entry.rank()) {
 				case 1 -> 0xFFFFD700;
-				case 2 -> 0xFFD4E0EA;
-				case 3 -> 0xFFDE9151;
-				default -> 0xFF83B89A;
+				case 2 -> 0xFFC0C0C0;
+				case 3 -> 0xFFCD7F32;
+				default -> 0xFFAAAAAA;
 			};
 			String rankStr = "#" + entry.rank();
 			g.drawString(this.font, rankStr, cursorX, rowY + 4, entry.count() <= 0 ? 0xFFCCCCCC : rankColor);
-			cursorX += 22;
+			cursorX += Math.max(28, this.font.width(rankStr) + 4);
 
 			int medal = CycleLeaderboardData.medalForEntry(entry, showMedals);
 			if (medal >= 1 && medal <= 3) {
-				drawTexture(g, MEDAL_TEXTURES[medal - 1], cursorX, rowY + 2, 12, 12);
-				cursorX += 15;
+				drawTexture(g, MEDAL_TEXTURES[medal - 1], cursorX, rowY + 2, 11, 11);
+				cursorX += 13;
 			}
 
 			String countText = String.valueOf(entry.count());
 			int countWidth = this.font.width(countText);
-			int countX = x + listW - 8 - countWidth;
-			int maxNameW = Math.max(24, countX - cursorX - 6);
-			int textColor = entry.count() <= 0 ? 0xFFE0DDDD : 0xFFF2FFF7;
-			int countColor = entry.count() <= 0 ? 0xFFE0A0A0 : 0xFF98FFBF;
+			int countX = x + colW - 6 - countWidth;
+			int maxNameW = Math.max(24, countX - cursorX - 4);
+			int textColor = entry.count() <= 0 ? 0xFFDDDDDD : 0xFFFFFFFF;
 			g.drawString(this.font, trimToWidth(entry.name(), maxNameW), cursorX, rowY + 4, textColor);
-			g.drawString(this.font, countText, countX, rowY + 4, countColor);
+			g.drawString(this.font, countText, countX, rowY + 4, textColor);
 		}
-		g.disableScissor();
 
-		// Emerald custom scrollbar
-		int sbX = x + colW - SCROLLBAR_WIDTH - 2;
-		g.fill(sbX, baseTopY + 2, sbX + SCROLLBAR_WIDTH, baseTopY + height - 2, 0x44030D07);
-		if (total > visRows && total > 0) {
-			int sbH = height - 4;
-			int thumbH = Math.max(18, Math.round(sbH * (visRows / (float) total)));
-			int travel = Math.max(1, sbH - thumbH);
-			int thumbY = baseTopY + 2 + Math.round((clamped / (float) (total - visRows)) * travel);
-			g.fillGradient(sbX + 1, thumbY, sbX + SCROLLBAR_WIDTH - 1, thumbY + thumbH, 0xFF36BF72, 0xFF207A46);
-			g.fill(sbX + 1, thumbY, sbX + SCROLLBAR_WIDTH - 1, thumbY + 1, 0xFF8CFFBE);
-		}
+		layout.drawScrollbar(g, x + colW + SCROLLBAR_GAP, baseTopY, SCROLLBAR_WIDTH, height, visRows, total, clamped);
 	}
 
-	private void renderPodiumList(GuiGraphics g, int baseColX, int baseTopY, List<CycleLeaderboardData.PodiumEntry> entries, int scrollOffset) {
-		int colW = Math.max(180, (this.width - 42) / 2);
-		int x = baseColX == LEFT_COL_X ? 14 : (14 + colW + 14);
-		int listW = colW - 8;
-		int bottomLimit = Math.max(baseTopY + ROW_PITCH * 4 + 4, this.height - 42);
-		int visRows = Math.max(4, (bottomLimit - baseTopY - 4) / ROW_PITCH);
-		int height = visRows * ROW_PITCH + 4;
+	private void renderPodiumList(GuiGraphics g, boolean left, List<CycleLeaderboardData.PodiumEntry> entries, int scrollOffset) {
+		int x = colX(left);
+		int colW = colWidth();
+		renderPodium(g, x, colW, entries);
 
-		g.fill(x, baseTopY, x + colW, baseTopY + height, 0xB806140C);
-		g.fill(x, baseTopY, x + colW, baseTopY + 1, 0xFF246A43);
-		g.fill(x, baseTopY + height - 1, x + colW, baseTopY + height, 0xFF1A4F32);
-		g.fill(x, baseTopY, x + 1, baseTopY + height, 0xFF246A43);
-		g.fill(x + colW - 1, baseTopY, x + colW, baseTopY + height, 0xFF1A4F32);
+		int baseTopY = listTopOffset();
+		int visRows = visibleRows();
+		int height = visRows * ROW_PITCH + 4;
+		g.fill(x, baseTopY, x + colW, baseTopY + height, 0x22000000);
 
 		int total = entries.size();
 		int clamped = clampOffset(scrollOffset, total);
-		g.enableScissor(x + 1, baseTopY + 1, x + listW, baseTopY + height - 1);
 		for (int vis = 0; vis < visRows; vis++) {
 			int idx = clamped + vis;
 			if (idx >= total) {
@@ -614,44 +532,78 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			}
 			CycleLeaderboardData.PodiumEntry entry = entries.get(idx);
 			int rowY = baseTopY + 2 + vis * ROW_PITCH;
-			g.fill(x + 3, rowY, x + listW - 2, rowY + ROW_HEIGHT, (idx & 1) == 0 ? ROW_FILL : 0x3A0A1C12);
+			g.fill(x + 2, rowY, x + colW - 2, rowY + ROW_HEIGHT, ROW_FILL);
 
-			int cursorX = x + 8;
-			if (this.minecraft != null) {
-				PlayerSkin skin = PlayerSkinResolver.skinFor(this.minecraft, parseUuid(entry.uuid()), entry.name());
-				if (skin != null) {
-					PlayerFaceRenderer.draw(g, skin, cursorX, rowY + 3, 10);
-				}
-			}
-			cursorX += 14;
+			int cursorX = x + 4;
+			drawPlayerFace(g, entry.uuid(), entry.name(), cursorX, rowY + 2, 10);
+			cursorX += 13;
 
-			int statsStart = x + listW - 96;
-			int maxNameW = Math.max(24, statsStart - cursorX - 6);
-			g.drawString(this.font, trimToWidth(entry.name(), maxNameW), cursorX, rowY + 4, 0xFFF2FFF7);
+			int statsStart = x + colW - 88;
+			int maxNameW = Math.max(24, statsStart - cursorX - 4);
+			g.drawString(this.font, trimToWidth(entry.name(), maxNameW), cursorX, rowY + 4, 0xFFFFFFFF);
 
 			int[] counts = {entry.first(), entry.second(), entry.third()};
 			for (int m = 0; m < 3; m++) {
-				int slotX = statsStart + m * 30;
-				drawTexture(g, MEDAL_TEXTURES[m], slotX, rowY + 3, 10, 10);
-				g.drawString(this.font, String.valueOf(counts[m]), slotX + 12, rowY + 4, 0xFF98FFBF);
+				int slotX = statsStart + m * 28;
+				drawTexture(g, MEDAL_TEXTURES[m], slotX, rowY + 3, 9, 9);
+				g.drawString(this.font, String.valueOf(counts[m]), slotX + 11, rowY + 4, 0xFFEFEFEF);
 			}
 		}
-		g.disableScissor();
 
-		int sbX = x + colW - SCROLLBAR_WIDTH - 2;
-		g.fill(sbX, baseTopY + 2, sbX + SCROLLBAR_WIDTH, baseTopY + height - 2, 0x44030D07);
-		if (total > visRows && total > 0) {
-			int sbH = height - 4;
-			int thumbH = Math.max(18, Math.round(sbH * (visRows / (float) total)));
-			int travel = Math.max(1, sbH - thumbH);
-			int thumbY = baseTopY + 2 + Math.round((clamped / (float) (total - visRows)) * travel);
-			g.fillGradient(sbX + 1, thumbY, sbX + SCROLLBAR_WIDTH - 1, thumbY + thumbH, 0xFF36BF72, 0xFF207A46);
-			g.fill(sbX + 1, thumbY, sbX + SCROLLBAR_WIDTH - 1, thumbY + 1, 0xFF8CFFBE);
+		layout.drawScrollbar(g, x + colW + SCROLLBAR_GAP, baseTopY, SCROLLBAR_WIDTH, height, visRows, total, clamped);
+	}
+
+	private void drawPlayerFace(GuiGraphics g, String uuid, String name, int x, int y, int size) {
+		if (this.minecraft == null) {
+			return;
+		}
+		PlayerSkin skin = PlayerSkinResolver.skinForId(this.minecraft, uuid, name);
+		if (skin != null) {
+			PlayerFaceRenderer.draw(g, skin, x, y, size);
 		}
 	}
 
+	private int bottomCloseX() {
+		return Math.min(this.width / 2 - 50, Math.max(12, this.width - 344));
+	}
+
+	private int totalColWidth() {
+		return Math.max(200, (this.width - MARGIN_X * 2 - COL_GAP) / 2);
+	}
+
+	private int colWidth() {
+		return totalColWidth() - SCROLLBAR_GAP - SCROLLBAR_WIDTH;
+	}
+
+	private int colX(boolean left) {
+		return left ? MARGIN_X : (MARGIN_X + totalColWidth() + COL_GAP);
+	}
+
+	private int titleY() {
+		return activeTab == Tab.CYCLE ? 46 : 70;
+	}
+
+	private int podiumTop() {
+		return titleY() + 11;
+	}
+
+	private int footerReserve() {
+		return activeTab == Tab.CYCLE ? 42 : 30;
+	}
+
+	private int podiumHeight() {
+		int bottomLimit = Math.max(podiumTop() + 190, this.height - footerReserve());
+		return Math.clamp((bottomLimit - podiumTop()) * 58 / 100, 126, 184);
+	}
+
 	private int listTopOffset() {
-		return activeTab == Tab.CYCLE ? 80 : 110;
+		return podiumTop() + podiumHeight() + 4;
+	}
+
+	private int visibleRows() {
+		int top = listTopOffset();
+		int listBottom = Math.max(top + ROW_PITCH * 4 + 4, this.height - footerReserve());
+		return Math.max(4, (listBottom - top - 4) / ROW_PITCH);
 	}
 
 	private List<?> leftEntries() {
@@ -685,22 +637,8 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 	}
 
 	private int clampOffset(int offset, int total) {
-		int top = listTopOffset();
-		int bottomLimit = Math.max(top + ROW_PITCH * 4 + 4, this.height - 42);
-		int visRows = Math.max(4, (bottomLimit - top - 4) / ROW_PITCH);
-		int max = Math.max(0, total - visRows);
+		int max = Math.max(0, total - visibleRows());
 		return Math.clamp(offset, 0, max);
-	}
-
-	private static UUID parseUuid(String raw) {
-		if (raw == null || raw.isBlank()) {
-			return null;
-		}
-		try {
-			return UUID.fromString(raw.trim());
-		} catch (IllegalArgumentException e) {
-			return null;
-		}
 	}
 
 	private String trimToWidth(String text, int width) {
@@ -710,43 +648,54 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		return this.font.plainSubstrByWidth(text, Math.max(0, width - this.font.width("..."))) + "...";
 	}
 
+	private static void drawPillar(GuiGraphics g, int centerX, int baseLineY, int capW, int standH) {
+		int evenCapW = capW & ~1;
+		int clampedH = Math.max(24, standH);
+		int capH = Math.min(clampedH - 6, Math.max(14, Math.round(evenCapW * 41f / 45f)));
+		int shaftW = Math.max(16, Math.round(evenCapW * 31f / 45f)) & ~1;
+		int shaftH = Math.max(4, clampedH - capH);
+		int standTopY = baseLineY - clampedH;
+
+		g.blit(RenderPipelines.GUI_TEXTURED, EDEN_ICON, centerX - evenCapW / 2, standTopY, 18.0f, 13.0f, evenCapW, capH, 45, 41, 256, 256);
+		int segMaxH = Math.max(12, Math.round(60f * evenCapW / 45f));
+		int drawn = 0;
+		while (drawn < shaftH) {
+			int segH = Math.min(shaftH - drawn, segMaxH);
+			int srcH = Math.clamp(Math.round(segH * 45f / evenCapW), 1, 60);
+			g.blit(RenderPipelines.GUI_TEXTURED, EDEN_ICON, centerX - shaftW / 2, standTopY + capH + drawn, 25.0f, 54.0f, shaftW, segH, 31, srcH, 256, 256);
+			drawn += segH;
+		}
+		g.fill(centerX - shaftW / 2 - 2, baseLineY - 2, centerX - shaftW / 2 + shaftW + 2, baseLineY - 1, 0xFF9E8FB2);
+		g.fill(centerX - shaftW / 2 - 2, baseLineY - 1, centerX - shaftW / 2 + shaftW + 2, baseLineY, 0xFF231F20);
+	}
+
 	private static void drawTexture(GuiGraphics g, Identifier id, int x, int y, int w, int h) {
 		if (id == null || w <= 0 || h <= 0) {
 			return;
 		}
-		int srcSize = id.getPath().endsWith("icon.png") ? 256 : 64;
 		g.pose().pushMatrix();
 		g.pose().translate(x, y);
-		g.pose().scale(w / (float) srcSize, h / (float) srcSize);
-		g.blit(RenderPipelines.GUI_TEXTURED, id, 0, 0, 0.0f, 0.0f, srcSize, srcSize, srcSize, srcSize);
+		g.pose().scale(w / 64.0f, h / 64.0f);
+		g.blit(RenderPipelines.GUI_TEXTURED, id, 0, 0, 0.0f, 0.0f, 64, 64, 64, 64);
 		g.pose().popMatrix();
 	}
 
-	private boolean isInPane(double scaledX, double scaledY, int baseColX) {
-		int colW = Math.max(180, (this.width - 42) / 2);
-		int left = baseColX == LEFT_COL_X ? 14 : (14 + colW + 14);
-		int top = listTopOffset();
-		int bottomLimit = Math.max(top + ROW_PITCH * 4 + 4, this.height - 42);
-		int visRows = Math.max(4, (bottomLimit - top - 4) / ROW_PITCH);
-		int bottom = top + visRows * ROW_PITCH + 4;
-		return scaledX >= left && scaledX <= left + colW && scaledY >= top && scaledY <= bottom;
+	private boolean isInPane(double scaledX, double scaledY, boolean leftPane) {
+		int left = colX(leftPane);
+		int bottom = listTopOffset() + visibleRows() * ROW_PITCH + 4;
+		return scaledX >= left && scaledX <= left + totalColWidth() + 4 && scaledY >= podiumTop() && scaledY <= bottom;
 	}
 
-	private boolean isOverScrollbar(double scaledX, double scaledY, int baseColX) {
-		int colW = Math.max(180, (this.width - 42) / 2);
-		int colLeft = baseColX == LEFT_COL_X ? 14 : (14 + colW + 14);
-		int sbX = colLeft + colW - SCROLLBAR_WIDTH - 2;
+	private boolean isOverScrollbar(double scaledX, double scaledY, boolean leftPane) {
+		int sbX = colX(leftPane) + colWidth() + SCROLLBAR_GAP;
 		int top = listTopOffset();
-		int bottomLimit = Math.max(top + ROW_PITCH * 4 + 4, this.height - 42);
-		int visRows = Math.max(4, (bottomLimit - top - 4) / ROW_PITCH);
-		int bottom = top + visRows * ROW_PITCH + 4;
+		int bottom = top + visibleRows() * ROW_PITCH + 4;
 		return scaledX >= sbX - 2 && scaledX <= sbX + SCROLLBAR_WIDTH + 2 && scaledY >= top && scaledY <= bottom;
 	}
 
 	private void updateScrollFromMouse(double scaledY, int pane) {
 		int top = listTopOffset();
-		int bottomLimit = Math.max(top + ROW_PITCH * 4 + 4, this.height - 42);
-		int visRows = Math.max(4, (bottomLimit - top - 4) / ROW_PITCH);
+		int visRows = visibleRows();
 		int height = visRows * ROW_PITCH + 4;
 		int total = pane == 1 ? leftEntries().size() : rightEntries().size();
 		int maxOffset = Math.max(0, total - visRows);
@@ -763,12 +712,12 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		MouseButtonEvent scaled = rescale(event);
 		if (scaled.button() == 0) {
-			if (isOverScrollbar(scaled.x(), scaled.y(), LEFT_COL_X)) {
+			if (isOverScrollbar(scaled.x(), scaled.y(), true)) {
 				draggingPane = 1;
 				updateScrollFromMouse(scaled.y(), 1);
 				return true;
 			}
-			if (isOverScrollbar(scaled.x(), scaled.y(), RIGHT_COL_X)) {
+			if (isOverScrollbar(scaled.x(), scaled.y(), false)) {
 				draggingPane = 2;
 				updateScrollFromMouse(scaled.y(), 2);
 				return true;
@@ -798,11 +747,11 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		double sx = mouseX / uiScale;
 		double sy = mouseY / uiScale;
 		int step = scrollY > 0 ? -1 : 1;
-		if (isInPane(sx, sy, LEFT_COL_X)) {
+		if (isInPane(sx, sy, true)) {
 			raidsScroll = clampOffset(raidsScroll + step, leftEntries().size());
 			return true;
 		}
-		if (isInPane(sx, sy, RIGHT_COL_X)) {
+		if (isInPane(sx, sy, false)) {
 			warsScroll = clampOffset(warsScroll + step, rightEntries().size());
 			return true;
 		}
