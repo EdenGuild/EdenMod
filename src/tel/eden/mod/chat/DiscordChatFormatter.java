@@ -235,6 +235,11 @@ public final class DiscordChatFormatter {
 	private static final int TRAVELER_RGB = 0xB388FF;
 	// The message text is a lighter shade than the tag and name so the name stands out.
 	private static final int TRAVELER_TEXT_RGB = 0xD8C2FF;
+	// Pill and name colours for the other tiers; the text stays TRAVELER_TEXT_RGB.
+	private static final int MEMBER_RGB = 0x55FFFF;
+	private static final int VETERAN_RGB = 0xFFAA00;
+	// Emblem colour on traveler lines that came from Discord (Discord blurple).
+	private static final int DISCORD_RGB = 0x5865F2;
 
 	// Invisible line markers a Wynntils chat-tab regex can match: one zero-width
 	// non-joiner on every line this mod draws, two on traveler chat so it can be
@@ -242,21 +247,30 @@ public final class DiscordChatFormatter {
 	private static final String LINE_MARKER = "\u200C";
 	private static final String TRAVELER_MARKER = "\u200C\u200C";
 
-	/** A traveler-chat line; links, images, GIFs, stickers and emotes render as in bridge chat. */
-	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId) {
+	/**
+	 * A traveler-chat line; links, images, GIFs, stickers and emotes render as in bridge chat.
+	 * {@code tier} ("member", "veteran", anything else = traveler) picks the pill and name
+	 * colour; the emblem is lavender, or Discord blurple when {@code fromDiscord}.
+	 */
+	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId, String tier, boolean fromDiscord) {
 		boolean hasId = messageId != null && !messageId.isEmpty();
 		if (hasId) {
 			ChatReplyManager.recordTravelerMessage(messageId, author, content);
 		}
-		Style color = Style.EMPTY.withColor(TRAVELER_RGB);
+		String label = "member".equals(tier) || "veteran".equals(tier) ? tier : "traveler";
+		Style color = Style.EMPTY.withColor(switch (label) {
+			case "member" -> MEMBER_RGB;
+			case "veteran" -> VETERAN_RGB;
+			default -> TRAVELER_RGB;
+		});
 		Style click = hasId ? color.withClickEvent(new ClickEvent.RunCommand("/eden treply " + messageId)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to reply to @" + author).withStyle(ChatFormatting.GRAY))) : color;
 		boolean reply = replyTo != null && !replyTo.isEmpty();
-		MutableComponent body = Component.empty().append(Component.literal(pillLabel("traveler")).withStyle(click.withFont(PILL_FONT))).append(Component.literal(reply ? " " + author : " " + author + ": ").withStyle(click));
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(click.withFont(PILL_FONT))).append(Component.literal(reply ? " " + author : " " + author + ": ").withStyle(click));
 		if (reply) {
 			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt, color)).append(Component.literal(": ").withStyle(color));
 		}
 		body.append(linkify(content, hasId ? click : null, Style.EMPTY.withColor(TRAVELER_TEXT_RGB)));
-		return withGuildPrefix(body, TRAVELER_MARKER);
+		return withGuildPrefix(body, TRAVELER_MARKER, fromDiscord ? DISCORD_RGB : TRAVELER_RGB);
 	}
 
 	/**
@@ -443,8 +457,13 @@ public final class DiscordChatFormatter {
 	}
 
 	private static Component withGuildPrefix(Component body, String marker) {
-		Component shield = prefix(SHIELD, marker);
-		Component continuation = prefix(CONTINUATION, marker);
+		return withGuildPrefix(body, marker, null);
+	}
+
+	/** {@code emblemRgb} recolours the emblem and wrap bars; null keeps the guild green. */
+	private static Component withGuildPrefix(Component body, String marker, Integer emblemRgb) {
+		Component shield = prefix(SHIELD, marker, emblemRgb);
+		Component continuation = prefix(CONTINUATION, marker, emblemRgb);
 		Minecraft mc = Minecraft.getInstance();
 		Font font = mc.font;
 		int reserve = font.width(continuation);
@@ -480,12 +499,19 @@ public final class DiscordChatFormatter {
 	}
 
 	private static Component prefix(int[] glyphs, String marker) {
+		return prefix(glyphs, marker, null);
+	}
+
+	private static Component prefix(int[] glyphs, String marker, Integer emblemRgb) {
 		StringBuilder out = new StringBuilder();
-		out.append(marker);
 		for (int glyph : glyphs) {
 			out.appendCodePoint(glyph);
 		}
-		return Component.literal(out.toString()).append(" ").withStyle(PREFIX_STYLE);
+		if (emblemRgb == null) {
+			return Component.literal(marker + out).append(" ").withStyle(PREFIX_STYLE);
+		}
+		// The marker keeps the guild-green style so Wynntils tab filters see the same text.
+		return Component.literal(marker).withStyle(PREFIX_STYLE).append(Component.literal(out + " ").withStyle(PREFIX_STYLE.withColor(emblemRgb)));
 	}
 
 	private static MutableComponent toComponent(FormattedText text) {

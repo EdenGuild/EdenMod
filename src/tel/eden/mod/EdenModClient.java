@@ -1069,11 +1069,11 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onTravelerChat(String author, String content, String source, String color, String replyTo, String replyExcerpt, String messageId) {
+				public void onTravelerChat(String author, String content, String source, String tier, String color, String replyTo, String replyExcerpt, String messageId) {
 					if (!config.travelerChat) {
 						return;
 					}
-					displayColored(color, () -> DiscordChatFormatter.travelerChat(author, content, replyTo, replyExcerpt, messageId));
+					displayColored(color, () -> DiscordChatFormatter.travelerChat(author, content, replyTo, replyExcerpt, messageId, tier, "discord".equals(source)));
 				}
 
 				@Override
