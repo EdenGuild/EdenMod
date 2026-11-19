@@ -338,17 +338,11 @@ public final class BridgeWebSocketClient {
 	 * swallows a prior failure so one bad send can't wedge every send after it.
 	 */
 	private synchronized boolean enqueueSend(WebSocket ws, JsonObject obj) {
-		String type = get(obj, "type");
-		if (!OutboundPolicy.allowed(standing, type)) {
-			LOGGER.warn("Blocked outbound {} frame under standing={} (authenticated={})", type, standing, authenticated);
+		if (!OutboundPolicy.allowed(standing, get(obj, "type"))) {
 			return false;
 		}
 		String text = obj.toString();
-		sendChain = sendChain.handle((v, ex) -> null).thenCompose(ignored -> ws.sendText(text, true)).whenComplete((v, err) -> {
-			if (err != null) {
-				LOGGER.error("Failed to send {} WebSocket frame: {}", type, err.toString(), err);
-			}
-		});
+		sendChain = sendChain.handle((v, ex) -> null).thenCompose(ignored -> ws.sendText(text, true));
 		return true;
 	}
 
@@ -1088,11 +1082,8 @@ public final class BridgeWebSocketClient {
 	public boolean sendCycleLeaderboardRequest(String cycleCode) {
 		WebSocket current = socket;
 		if (current == null) {
-			LOGGER.warn("Skipped cycleLeaderboardRequest (WebSocket disconnected)");
 			return false;
 		}
-		String target = (cycleCode != null && !cycleCode.isBlank()) ? cycleCode.trim() : "<current>";
-		LOGGER.info("Sending cycleLeaderboardRequest (cycle={})", target);
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "cycleLeaderboardRequest");
 		if (cycleCode != null && !cycleCode.isBlank()) {
@@ -1105,10 +1096,8 @@ public final class BridgeWebSocketClient {
 	public boolean sendLifetimeLeaderboardRequest(Double fromDays, Double toDays) {
 		WebSocket current = socket;
 		if (current == null) {
-			LOGGER.warn("Skipped lifetimeLeaderboardRequest (WebSocket disconnected)");
 			return false;
 		}
-		LOGGER.info("Sending lifetimeLeaderboardRequest (fromDays={}, toDays={})", fromDays, toDays);
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "lifetimeLeaderboardRequest");
 		if (fromDays != null) {
@@ -1583,7 +1572,6 @@ public final class BridgeWebSocketClient {
 			JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
 			String inboundType = get(obj, "type");
 			if (!OutboundPolicy.inboundAllowed(standing, inboundType)) {
-				LOGGER.warn("Dropped inbound {} frame under standing={}", inboundType, standing);
 				return;
 			}
 			switch (inboundType) {
@@ -1672,7 +1660,7 @@ public final class BridgeWebSocketClient {
 					/* ignore unknown types */ }
 			}
 		} catch (RuntimeException e) {
-			LOGGER.error("Failed to handle inbound bridge payload: {}", e.toString(), e);
+			LOGGER.debug("Ignoring malformed inbound payload", e);
 		}
 	}
 
@@ -1990,7 +1978,6 @@ public final class BridgeWebSocketClient {
 		try {
 			return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsInt() : null;
 		} catch (RuntimeException e) {
-			LOGGER.warn("Ignoring malformed integer field {}: {}", key, e.toString());
 			return null;
 		}
 	}
@@ -1999,7 +1986,6 @@ public final class BridgeWebSocketClient {
 		try {
 			return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsDouble() : null;
 		} catch (RuntimeException e) {
-			LOGGER.warn("Ignoring malformed double field {}: {}", key, e.toString());
 			return null;
 		}
 	}
@@ -2048,7 +2034,7 @@ public final class BridgeWebSocketClient {
 		if (!error.isEmpty()) {
 			return CycleLeaderboardData.CycleSnapshot.error(error);
 		}
-		return new CycleLeaderboardData.CycleSnapshot(get(obj, "cycleCode"), getStringArray(obj, "cycles"), parseLeaderboardEntries(obj, "raids"), parseLeaderboardEntries(obj, "wars"), parseRaffleWinners(obj), getInt(obj, "totalRaids", 0), getInt(obj, "totalWars", 0), getInt(obj, "totalTickets", 0), "");
+		return new CycleLeaderboardData.CycleSnapshot(get(obj, "cycleCode"), getStringArray(obj, "cycles"), parseLeaderboardEntries(obj, "raids"), parseLeaderboardEntries(obj, "wars"), parseRaffleWinners(obj), getInt(obj, "totalRaids", 0), getInt(obj, "totalWars", 0), getInt(obj, "totalTickets", 0), getLong(obj, "endedAtMs", 0L), getBool(obj, "finalized"), "");
 	}
 
 	static CycleLeaderboardData.LifetimeSnapshot parseLifetimeSnapshot(JsonObject obj) {

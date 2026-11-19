@@ -1537,7 +1537,6 @@ public final class EdenModClient implements ClientModInitializer {
 				@Override
 				public void onCycleLeaderboard(tel.eden.mod.net.CycleLeaderboardData.CycleSnapshot snapshot) {
 					if (!isFullMember()) {
-						LOGGER.warn("Ignoring cycleLeaderboardReply while bridgeStatus={}", bridgeStatus);
 						return;
 					}
 					if (snapshot.error() != null && !snapshot.error().isEmpty()) {
@@ -1545,7 +1544,6 @@ public final class EdenModClient implements ClientModInitializer {
 						cyclePrintPendingId.set(0);
 						pendingCycleGuiCode = null;
 						String err = snapshot.error();
-						LOGGER.error("Cycle leaderboard reply returned error: {}", err);
 						cycleLeaderboardError = err;
 						cycleLeaderboardErrorAtMs = System.currentTimeMillis();
 						cycleLeaderboardGeneration.incrementAndGet();
@@ -1580,13 +1578,11 @@ public final class EdenModClient implements ClientModInitializer {
 				@Override
 				public void onLifetimeLeaderboard(tel.eden.mod.net.CycleLeaderboardData.LifetimeSnapshot snapshot) {
 					if (!isFullMember()) {
-						LOGGER.warn("Ignoring lifetimeLeaderboardReply while bridgeStatus={}", bridgeStatus);
 						return;
 					}
 					if (snapshot.error() != null && !snapshot.error().isEmpty()) {
 						lifetimeRequestPendingId.set(0);
 						pendingLifetimeFilter = null;
-						LOGGER.error("Lifetime leaderboard reply returned error: {}", snapshot.error());
 						lifetimeLeaderboardError = snapshot.error();
 						lifetimeLeaderboardErrorAtMs = System.currentTimeMillis();
 						lifetimeLeaderboardGeneration.incrementAndGet();
@@ -2024,7 +2020,6 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 		BridgeWebSocketClient current = socket;
 		if (!isFullMember() || current == null || !current.isConnected()) {
-			LOGGER.error("Cycle leaderboard request aborted before send (cycle={}, status={}, connected={})", target, bridgeStatus, current != null && current.isConnected());
 			failCycleLeaderboardRequest(forPrint);
 			return;
 		}
@@ -2038,13 +2033,9 @@ public final class EdenModClient implements ClientModInitializer {
 
 	private void scheduleCycleLeaderboardDispatch(String cycleCode, long seq, boolean forPrint, long delayMs) {
 		partyCommandExecutor.schedule(() -> {
-			try {
-				long latest = forPrint ? cyclePrintSeq.get() : cycleGuiSeq.get();
-				if (latest == seq) {
-					dispatchCycleLeaderboardRequest(cycleCode, seq, forPrint);
-				}
-			} catch (RuntimeException e) {
-				LOGGER.error("Scheduled cycle leaderboard dispatch failed (seq={}, cycle={})", seq, cycleCode, e);
+			long latest = forPrint ? cyclePrintSeq.get() : cycleGuiSeq.get();
+			if (latest == seq) {
+				dispatchCycleLeaderboardRequest(cycleCode, seq, forPrint);
 			}
 		}, delayMs, TimeUnit.MILLISECONDS);
 	}
@@ -2054,7 +2045,6 @@ public final class EdenModClient implements ClientModInitializer {
 		if (!isFullMember() || current == null || !current.isConnected()) {
 			long latest = forPrint ? cyclePrintSeq.get() : cycleGuiSeq.get();
 			if (latest == seq) {
-				LOGGER.error("Cycle leaderboard deferred send aborted (seq={}, cycle={}, status={}, connected={})", seq, cycleCode, bridgeStatus, current != null && current.isConnected());
 				failCycleLeaderboardRequest(forPrint);
 			}
 			return;
@@ -2084,13 +2074,8 @@ public final class EdenModClient implements ClientModInitializer {
 			return;
 		}
 		partyCommandExecutor.schedule(() -> {
-			try {
-				if (pendingSlot.compareAndSet(seq, 0)) {
-					LOGGER.error("Cycle leaderboard request timed out after {}s (seq={}, cycle={}, forPrint={}, status={}, connected={}) — no reply from backend", LEADERBOARD_TIMEOUT_SECONDS, seq, cycleCode, forPrint, bridgeStatus, socket != null && socket.isConnected());
-					failCycleLeaderboardRequest(forPrint);
-				}
-			} catch (RuntimeException e) {
-				LOGGER.error("Cycle leaderboard timeout task failed (seq={}, cycle={})", seq, cycleCode, e);
+			if (pendingSlot.compareAndSet(seq, 0)) {
+				failCycleLeaderboardRequest(forPrint);
 			}
 		}, LEADERBOARD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 	}
@@ -2117,7 +2102,6 @@ public final class EdenModClient implements ClientModInitializer {
 		pendingLifetimeFilter = new LifetimeFilter(fromDays, toDays);
 		BridgeWebSocketClient current = socket;
 		if (!isFullMember() || current == null || !current.isConnected()) {
-			LOGGER.error("Lifetime leaderboard request aborted before send (fromDays={}, toDays={}, status={}, connected={})", fromDays, toDays, bridgeStatus, current != null && current.isConnected());
 			failLifetimeLeaderboardRequest();
 			return;
 		}
@@ -2127,12 +2111,8 @@ public final class EdenModClient implements ClientModInitializer {
 			return;
 		}
 		partyCommandExecutor.schedule(() -> {
-			try {
-				if (lifetimeRequestSeq.get() == seq) {
-					dispatchLifetimeLeaderboardRequest(fromDays, toDays, seq);
-				}
-			} catch (RuntimeException e) {
-				LOGGER.error("Scheduled lifetime leaderboard dispatch failed (seq={}, fromDays={}, toDays={})", seq, fromDays, toDays, e);
+			if (lifetimeRequestSeq.get() == seq) {
+				dispatchLifetimeLeaderboardRequest(fromDays, toDays, seq);
 			}
 		}, delayMs, TimeUnit.MILLISECONDS);
 	}
@@ -2141,7 +2121,6 @@ public final class EdenModClient implements ClientModInitializer {
 		BridgeWebSocketClient current = socket;
 		if (!isFullMember() || current == null || !current.isConnected()) {
 			if (lifetimeRequestSeq.get() == seq) {
-				LOGGER.error("Lifetime leaderboard deferred send aborted (seq={}, fromDays={}, toDays={}, status={}, connected={})", seq, fromDays, toDays, bridgeStatus, current != null && current.isConnected());
 				failLifetimeLeaderboardRequest();
 			}
 			return;
@@ -2157,13 +2136,8 @@ public final class EdenModClient implements ClientModInitializer {
 			return;
 		}
 		partyCommandExecutor.schedule(() -> {
-			try {
-				if (lifetimeRequestPendingId.compareAndSet(seq, 0)) {
-					LOGGER.error("Lifetime leaderboard request timed out after {}s (seq={}, fromDays={}, toDays={}, status={}, connected={}) — no reply from backend", LEADERBOARD_TIMEOUT_SECONDS, seq, fromDays, toDays, bridgeStatus, socket != null && socket.isConnected());
-					failLifetimeLeaderboardRequest();
-				}
-			} catch (RuntimeException e) {
-				LOGGER.error("Lifetime leaderboard timeout task failed (seq={}, fromDays={}, toDays={})", seq, fromDays, toDays, e);
+			if (lifetimeRequestPendingId.compareAndSet(seq, 0)) {
+				failLifetimeLeaderboardRequest();
 			}
 		}, LEADERBOARD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 	}

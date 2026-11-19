@@ -133,4 +133,19 @@ class CycleLeaderboardTest {
 		assertFalse(CycleLeaderboardData.countsPartyFinderRaids(""));
 		assertFalse(CycleLeaderboardData.countsPartyFinderRaids(null));
 	}
+
+	@Test
+	void cycleEndTimerUsesPayloadAndUtcFallback() {
+		long explicitEnd = java.time.Instant.parse("2026-12-01T00:00:00Z").toEpochMilli();
+		var parsed = BridgeWebSocketClient.parseCycleSnapshot(JsonParser.parseString("{\"type\":\"cycleLeaderboardReply\",\"cycleCode\":\"2611B\",\"cycles\":[\"2611A\",\"2611B\"],\"endedAtMs\":" + explicitEnd + ",\"finalized\":false}").getAsJsonObject());
+		assertEquals(explicitEnd, CycleLeaderboardData.cycleEndEpochMs(parsed));
+		assertEquals("Ends in 1d 02:03:04", CycleLeaderboardData.cycleEndText(parsed, explicitEnd - ((86_400L + 7_200L + 180L + 4L) * 1000L)));
+		assertEquals("Ended", CycleLeaderboardData.cycleEndText(parsed, explicitEnd));
+
+		CycleLeaderboardData.CycleSnapshot decFallback = new CycleLeaderboardData.CycleSnapshot("2612B", List.of("2612A", "2612B"), List.of(), List.of(), List.of(), 0, 0, 0, "");
+		assertEquals(java.time.Instant.parse("2027-01-01T00:00:00Z").toEpochMilli(), CycleLeaderboardData.cycleEndEpochMs(decFallback));
+
+		CycleLeaderboardData.CycleSnapshot finalized = new CycleLeaderboardData.CycleSnapshot("2611B", List.of("2611B"), List.of(), List.of(), List.of(), 0, 0, 0, explicitEnd, true, "");
+		assertEquals("Ended", CycleLeaderboardData.cycleEndText(finalized, explicitEnd - 60_000L));
+	}
 }

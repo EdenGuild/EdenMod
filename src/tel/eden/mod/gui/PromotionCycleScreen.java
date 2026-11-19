@@ -362,6 +362,18 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			return;
 		}
 
+		String endsText = CycleLeaderboardData.cycleEndText(snap, System.currentTimeMillis());
+		if (!endsText.isEmpty()) {
+			int headingRight = virtualWidth / 2 + this.font.width("Promotion Cycle") / 2 + 8;
+			int maxTimerW = virtualWidth - 12 - headingRight;
+			if (maxTimerW >= 40) {
+				int textW = Math.min(maxTimerW, this.font.width(endsText));
+				int timerX = Math.max(headingRight, virtualWidth - 12 - textW);
+				int timerColor = endsText.startsWith("Ends in ") ? 0xFFCCCCCC : 0xFFAAAAAA;
+				drawTrimmedWithHover(g, endsText, timerX, 10, maxTimerW, timerColor);
+			}
+		}
+
 		int colW = colWidth();
 		int titleY = titleY();
 		g.drawCenteredString(this.font, "Raids", colX(true) + colW / 2, titleY, 0xFF55FFFF);

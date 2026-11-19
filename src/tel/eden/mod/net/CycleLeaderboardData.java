@@ -1,14 +1,18 @@
 package tel.eden.mod.net;
 
+import java.time.DateTimeException;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Models and ranking/interval validation helpers for Promotion Cycle and Lifetime leaderboards. */
 public final class CycleLeaderboardData {
 	private static final Pattern POSITIVE_NUMBER = Pattern.compile("^\\d+(?:\\.\\d+)?$");
-	private static final Pattern CYCLE_CODE = Pattern.compile("^\\d{4}[AB]$");
+	private static final Pattern CYCLE_CODE = Pattern.compile("^(\\d{2})(\\d{2})([AB])$");
 
 	private CycleLeaderboardData() {
 	}
@@ -30,9 +34,13 @@ public final class CycleLeaderboardData {
 	}
 
 	/** Snapshot returned by {@code cycleLeaderboardReply}. */
-	public record CycleSnapshot(String cycleCode, List<String> cycles, List<LeaderboardEntry> raids, List<LeaderboardEntry> wars, List<RaffleWinner> raffleWinners, int totalRaids, int totalWars, int totalTickets, String error) {
+	public record CycleSnapshot(String cycleCode, List<String> cycles, List<LeaderboardEntry> raids, List<LeaderboardEntry> wars, List<RaffleWinner> raffleWinners, int totalRaids, int totalWars, int totalTickets, long endedAtMs, boolean finalized, String error) {
+		public CycleSnapshot(String cycleCode, List<String> cycles, List<LeaderboardEntry> raids, List<LeaderboardEntry> wars, List<RaffleWinner> raffleWinners, int totalRaids, int totalWars, int totalTickets, String error) {
+			this(cycleCode, cycles, raids, wars, raffleWinners, totalRaids, totalWars, totalTickets, 0L, false, error);
+		}
+
 		public static CycleSnapshot error(String message) {
-			return new CycleSnapshot("", List.of(), List.of(), List.of(), List.of(), 0, 0, 0, message);
+			return new CycleSnapshot("", List.of(), List.of(), List.of(), List.of(), 0, 0, 0, 0L, false, message);
 		}
 	}
 
@@ -173,5 +181,47 @@ public final class CycleLeaderboardData {
 		}
 		String trimmed = cycleCode.trim();
 		return CYCLE_CODE.matcher(trimmed).matches() && trimmed.compareTo("2503A") <= 0;
+	}
+
+	/** Resolve the cycle's end timestamp in epoch ms (falling back to UTC half-month boundaries from {@code cycleCode}). */
+	public static long cycleEndEpochMs(CycleSnapshot snapshot) {
+		if (snapshot == null) {
+			return 0L;
+		}
+		if (snapshot.endedAtMs() > 0L) {
+			return snapshot.endedAtMs();
+		}
+		String code = snapshot.cycleCode();
+		if (code == null) {
+			return 0L;
+		}
+		Matcher m = CYCLE_CODE.matcher(code.trim());
+		if (!m.matches()) {
+			return 0L;
+		}
+		int year = 2000 + Integer.parseInt(m.group(1));
+		int month = Integer.parseInt(m.group(2));
+		try {
+			LocalDate endDate = "A".equals(m.group(3)) ? LocalDate.of(year, month, 15) : LocalDate.of(year, month, 1).plusMonths(1);
+			return endDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli();
+		} catch (DateTimeException e) {
+			return 0L;
+		}
+	}
+
+	/** Format the cycle-end countdown (or {@code "Ended"} once concluded), or empty if unknown. */
+	public static String cycleEndText(CycleSnapshot snapshot, long nowMs) {
+		if (snapshot == null) {
+			return "";
+		}
+		long endMs = cycleEndEpochMs(snapshot);
+		if (endMs <= 0L) {
+			return snapshot.finalized() ? "Ended" : "";
+		}
+		if (snapshot.finalized() || isHistoricalCycle(snapshot, snapshot.cycleCode())) {
+			return "Ended";
+		}
+		long remainingMs = endMs - nowMs;
+		return remainingMs > 0L ? "Ends in " + LongEventState.formatCountdown(remainingMs, true) : "Ended";
 	}
 }
