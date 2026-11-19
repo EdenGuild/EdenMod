@@ -50,6 +50,7 @@ import tel.eden.mod.gui.PartyManageScreen;
 import tel.eden.mod.item.DecodedItem;
 import tel.eden.mod.item.ItemCardRenderer;
 import tel.eden.mod.item.ItemStringDetector;
+import tel.eden.mod.item.WynntilsItemDecoder;
 import tel.eden.mod.net.AllyActivityEntry;
 import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.net.LongEventState;
@@ -1069,11 +1070,17 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onTravelerChat(String author, String content, String source, String tier, String color, String replyTo, String replyExcerpt, String messageId) {
+				public void onTravelerChat(String author, String content, String source, String tier, String color, String replyTo, String replyExcerpt, String messageId, String item) {
 					if (!config.travelerChat) {
 						return;
 					}
-					displayColored(color, () -> DiscordChatFormatter.travelerChat(author, content, replyTo, replyExcerpt, messageId, tier, "discord".equals(source)));
+					displayColored(color, () -> {
+						// Decoded on the client thread, like Wynntils does for server chat.
+						Optional<WynntilsItemDecoder.Hover> hover = item.isEmpty() ? Optional.empty() : WynntilsItemDecoder.hover(item);
+						String label = hover.map(WynntilsItemDecoder.Hover::label).orElse(null);
+						Style style = hover.map(h -> Style.EMPTY.withColor(h.rgb()).withUnderlined(true).withHoverEvent(new HoverEvent.ShowItem(h.stack()))).orElse(null);
+						return DiscordChatFormatter.travelerChat(author, content, replyTo, replyExcerpt, messageId, tier, "discord".equals(source), label, style);
+					});
 				}
 
 				@Override
@@ -2411,7 +2418,7 @@ public final class EdenModClient implements ClientModInitializer {
 			DecodedItem card = decoded.get();
 			String image = Base64.getEncoder().encodeToString(ItemCardRenderer.render(card));
 			String text = ItemStringDetector.replace(message, item, "[" + card.name() + "]");
-			if (!current.sendTravelerChat(text, replyId, image)) {
+			if (!current.sendTravelerChat(text, replyId, image, item.encoded())) {
 				displayDirect(EdenModClient::notConnected);
 			}
 		} catch (Exception e) {

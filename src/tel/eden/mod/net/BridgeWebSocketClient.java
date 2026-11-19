@@ -220,7 +220,7 @@ public final class BridgeWebSocketClient {
 		void onAuthStatus(boolean linked, boolean member, boolean traveler, String guildRank, String discordRank);
 
 		/** A traveler-chat line from the game or Discord side. */
-		default void onTravelerChat(String author, String content, String source, String tier, String color, String replyTo, String replyExcerpt, String messageId) {
+		default void onTravelerChat(String author, String content, String source, String tier, String color, String replyTo, String replyExcerpt, String messageId, String item) {
 		}
 	}
 
@@ -678,15 +678,18 @@ public final class BridgeWebSocketClient {
 
 	/** Send a traveler-chat line (members and travelers). */
 	public boolean sendTravelerChat(String content, String replyToMessageId) {
-		return sendTravelerChat(content, replyToMessageId, null);
+		return sendTravelerChat(content, replyToMessageId, null, null);
 	}
 
-	/** Send a traveler-chat line with an optional shared item's rendered card (base64 PNG). */
-	public boolean sendTravelerChat(String content, String replyToMessageId, String imageBase64) {
+	/** Send a traveler-chat line with a shared item's rendered card (base64 PNG) and raw share string, both optional. */
+	public boolean sendTravelerChat(String content, String replyToMessageId, String imageBase64, String itemShare) {
 		WebSocket current = socket;
 		JsonObject obj = travelerChatPayload(content, replyToMessageId);
 		if (imageBase64 != null) {
 			obj.addProperty("image", imageBase64);
+		}
+		if (itemShare != null) {
+			obj.addProperty("item", itemShare);
 		}
 		return current != null && enqueueSend(current, obj);
 	}
@@ -1541,7 +1544,7 @@ public final class BridgeWebSocketClient {
 			}
 			switch (get(obj, "type")) {
 				case "discordMessage" -> sink.onDiscordMessage(get(obj, "author"), get(obj, "content"), get(obj, "replyTo"), get(obj, "replyExcerpt"), get(obj, "color"), get(obj, "messageId"));
-				case "travelerChat" -> sink.onTravelerChat(cap(get(obj, "author"), 64), cap(get(obj, "content"), 512), get(obj, "source"), get(obj, "tier"), get(obj, "color"), cap(get(obj, "replyTo"), 64), cap(get(obj, "replyExcerpt"), 256), get(obj, "messageId").matches("[0-9]{1,20}") ? get(obj, "messageId") : "");
+				case "travelerChat" -> sink.onTravelerChat(cap(get(obj, "author"), 64), cap(get(obj, "content"), 512), get(obj, "source"), get(obj, "tier"), get(obj, "color"), cap(get(obj, "replyTo"), 64), cap(get(obj, "replyExcerpt"), 256), get(obj, "messageId").matches("[0-9]{1,20}") ? get(obj, "messageId") : "", cap(get(obj, "item"), 2200));
 				case "loginNotice" -> sink.onLoginNotice(get(obj, "username"), get(obj, "color"));
 				case "logoutNotice" -> sink.onLogoutNotice(get(obj, "username"), get(obj, "color"));
 				case "onlineList" -> sink.onOnlineList(getStringArray(obj, "users"), get(obj, "color"));

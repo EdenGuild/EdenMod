@@ -67,6 +67,13 @@ class ItemStringDetectorTest {
 	}
 
 	@Test
+	void encodedRebuildsTheShareStringAsTyped() {
+		String crafted = puaRun(8) + " \"My Cool Weapon\"";
+		assertEquals(crafted, ItemStringDetector.detect("look " + crafted).orElseThrow().encoded());
+		assertEquals(puaRun(8), ItemStringDetector.detect(puaRun(8)).orElseThrow().encoded());
+	}
+
+	@Test
 	void rejectsPlainTextAndNullAndEmpty() {
 		assertTrue(ItemStringDetector.detect("just plain chat, no items here").isEmpty());
 		assertTrue(ItemStringDetector.detect(null).isEmpty());

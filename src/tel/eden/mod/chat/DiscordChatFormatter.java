@@ -250,6 +250,11 @@ public final class DiscordChatFormatter {
 	 * emblem is lavender, or Discord blurple when {@code fromDiscord}.
 	 */
 	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId, String tier, boolean fromDiscord) {
+		return travelerChat(author, content, replyTo, replyExcerpt, messageId, tier, fromDiscord, null, null);
+	}
+
+	/** {@link #travelerChat} with the first {@code itemLabel} in the text styled {@code itemStyle} (a shared item's hover). */
+	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId, String tier, boolean fromDiscord, String itemLabel, Style itemStyle) {
 		boolean hasId = messageId != null && !messageId.isEmpty();
 		if (hasId) {
 			ChatReplyManager.recordTravelerMessage(messageId, author, content);
@@ -262,7 +267,14 @@ public final class DiscordChatFormatter {
 		if (reply) {
 			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt, color)).append(Component.literal(": ").withStyle(color));
 		}
-		body.append(linkify(content, hasId ? click : null, Style.EMPTY.withColor(TRAVELER_TEXT_RGB)));
+		int at = itemLabel == null || itemStyle == null ? -1 : content.indexOf(itemLabel);
+		Style textStyle = Style.EMPTY.withColor(TRAVELER_TEXT_RGB);
+		if (at < 0) {
+			body.append(linkify(content, hasId ? click : null, textStyle));
+		} else {
+			int end = at + itemLabel.length();
+			body.append(linkify(content.substring(0, at), hasId ? click : null, textStyle)).append(Component.literal(itemLabel).withStyle(itemStyle)).append(linkify(content.substring(end), hasId ? click : null, textStyle));
+		}
 		return withGuildPrefix(body, TRAVELER_MARKER, fromDiscord ? DISCORD_RGB : TRAVELER_RGB);
 	}
 
