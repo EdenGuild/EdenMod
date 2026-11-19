@@ -43,6 +43,9 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 	private EdenPanelLayout layout;
 	private int closeButtonX = 12;
 	private int toLabelX = 126;
+	private int hoveredMouseX;
+	private int hoveredMouseY;
+	private String hoveredCutoffText;
 
 	private Tab activeTab = Tab.CYCLE;
 	private boolean archiveOpen;
@@ -304,6 +307,9 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
 		int scaledMouseX = scaledMouseX(mouseX);
 		int scaledMouseY = scaledMouseY(mouseY);
+		hoveredMouseX = scaledMouseX;
+		hoveredMouseY = scaledMouseY;
+		hoveredCutoffText = null;
 
 		pushReferencePose(g);
 		EdenPanelLayout.drawPanel(g, 0, 0, virtualWidth, virtualHeight);
@@ -318,6 +324,11 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		String heading = activeTab == Tab.CYCLE ? "Promotion Cycle" : "Lifetime Stats";
 		g.drawCenteredString(this.font, heading, virtualWidth / 2, 10, 0xFFFFFFFF);
 		popReferencePose(g);
+
+		if (hoveredCutoffText != null) {
+			int tipWidth = Math.max(140, Math.min(280, this.width - 24));
+			g.setTooltipForNextFrame(this.font, this.font.split(Component.literal(hoveredCutoffText), tipWidth), mouseX, mouseY);
+		}
 	}
 
 	private void renderCycleTab(GuiGraphics g) {
@@ -326,7 +337,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 
 		String cycleHeader = (snap != null && !snap.cycleCode().isEmpty()) ? "Cycle " + snap.cycleCode() : "Loading...";
 		String trimmedHeader = trimToWidth(cycleHeader, Math.max(40, virtualWidth - 232));
-		g.drawString(this.font, trimmedHeader, 220, 29, 0xFFFFCC55);
+		drawTrimmedWithHover(g, cycleHeader, 220, 29, Math.max(40, virtualWidth - 232), 0xFFFFCC55);
 		if (snap != null && CycleLeaderboardData.countsPartyFinderRaids(snap.cycleCode())) {
 			int warnX = 220 + this.font.width(trimmedHeader) + 6;
 			int availW = virtualWidth - 12 - warnX;
@@ -360,7 +371,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		renderEntryList(g, false, snap.wars(), warsScroll, true, true);
 
 		String totals = "Totals: " + snap.totalRaids() + " raids | " + snap.totalWars() + " wars | " + snap.totalTickets() + " tickets";
-		g.drawString(this.font, trimToWidth(totals, Math.max(60, virtualWidth - 24)), 12, virtualHeight - 36, 0xFFFFD966);
+		drawTrimmedWithHover(g, totals, 12, virtualHeight - 36, Math.max(60, virtualWidth - 24), 0xFFFFD966);
 		if (!snap.raffleWinners().isEmpty()) {
 			StringBuilder raffle = new StringBuilder("Raffle Top 3: ");
 			List<CycleLeaderboardData.RaffleWinner> top = snap.raffleWinners().subList(0, Math.min(3, snap.raffleWinners().size()));
@@ -371,7 +382,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 				raffle.append("#").append(i + 1).append(" ").append(top.get(i).name()).append(" (").append(top.get(i).tickets()).append(")");
 			}
 			int raffleMaxW = Math.max(40, closeButtonX - 20);
-			g.drawString(this.font, trimToWidth(raffle.toString(), raffleMaxW), 12, virtualHeight - 24, 0xFFD5A6FF);
+			drawTrimmedWithHover(g, raffle.toString(), 12, virtualHeight - 24, raffleMaxW, 0xFFD5A6FF);
 		}
 	}
 
@@ -379,7 +390,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		g.drawString(this.font, "From:", 12, 53, 0xFFCCCCCC);
 		g.drawString(this.font, "To:", toLabelX, 53, 0xFFCCCCCC);
 		if (!validationError.isEmpty()) {
-			g.drawString(this.font, trimToWidth(validationError, Math.max(60, virtualWidth - 24)), 12, virtualHeight - 36, 0xFFFF5555);
+			drawTrimmedWithHover(g, validationError, 12, virtualHeight - 36, Math.max(60, virtualWidth - 24), 0xFFFF5555);
 		}
 
 		CycleLeaderboardData.LifetimeSnapshot snap = mod != null ? mod.knownLifetimeLeaderboard() : null;
@@ -478,7 +489,15 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			};
 			int maxLabelW = Math.max(24, halfBound * 2);
 			int maxNameW = Math.max(12, maxLabelW - this.font.width(suffix));
-			g.drawCenteredString(this.font, trimToWidth(name, maxNameW) + suffix, cx, standTopY - headSize - 12, 0xFFFFFFFF);
+			String trimmedName = trimToWidth(name, maxNameW);
+			String label = trimmedName + suffix;
+			int labelY = standTopY - headSize - 12;
+			g.drawCenteredString(this.font, label, cx, labelY, 0xFFFFFFFF);
+			if (!trimmedName.equals(name)) {
+				int labelW = this.font.width(label);
+				int labelLeft = cx - labelW / 2;
+				recordCutoffHover(name + suffix, labelLeft, labelY, labelW);
+			}
 		}
 		g.disableScissor();
 	}
@@ -538,7 +557,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			int countX = x + colW - 6 - countWidth;
 			int maxNameW = Math.max(24, countX - cursorX - 4);
 			int textColor = entry.count() <= 0 ? 0xFFDDDDDD : 0xFFFFFFFF;
-			g.drawString(this.font, trimToWidth(entry.name(), maxNameW), cursorX, rowY + 4, textColor);
+			drawTrimmedWithHover(g, entry.name(), cursorX, rowY + 4, maxNameW, textColor);
 			g.drawString(this.font, countText, countX, rowY + 4, textColor);
 		}
 		g.disableScissor();
@@ -574,7 +593,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 
 			int statsStart = x + colW - 88;
 			int maxNameW = Math.max(24, statsStart - cursorX - 4);
-			g.drawString(this.font, trimToWidth(entry.name(), maxNameW), cursorX, rowY + 4, 0xFFFFFFFF);
+			drawTrimmedWithHover(g, entry.name(), cursorX, rowY + 4, maxNameW, 0xFFFFFFFF);
 
 			int[] counts = {entry.first(), entry.second(), entry.third()};
 			for (int m = 0; m < 3; m++) {
@@ -682,6 +701,20 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			return text;
 		}
 		return this.font.plainSubstrByWidth(text, Math.max(0, width - this.font.width("..."))) + "...";
+	}
+
+	private void drawTrimmedWithHover(GuiGraphics g, String fullText, int x, int y, int maxWidth, int color) {
+		String shown = trimToWidth(fullText, maxWidth);
+		g.drawString(this.font, shown, x, y, color);
+		if (!shown.equals(fullText)) {
+			recordCutoffHover(fullText, x, y, this.font.width(shown));
+		}
+	}
+
+	private void recordCutoffHover(String fullText, int x, int y, int width) {
+		if (hoveredMouseX >= x && hoveredMouseX <= x + width && hoveredMouseY >= y - 1 && hoveredMouseY <= y + this.font.lineHeight) {
+			hoveredCutoffText = fullText;
+		}
 	}
 
 	private static void drawPillar(GuiGraphics g, int centerX, int baseLineY, int capW, int standH) {
