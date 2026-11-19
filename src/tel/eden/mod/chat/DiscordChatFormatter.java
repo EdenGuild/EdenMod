@@ -235,9 +235,6 @@ public final class DiscordChatFormatter {
 	private static final int TRAVELER_RGB = 0xB388FF;
 	// The message text is a lighter shade than the tag and name so the name stands out.
 	private static final int TRAVELER_TEXT_RGB = 0xD8C2FF;
-	// Pill and name colours for the other tiers; the text stays TRAVELER_TEXT_RGB.
-	private static final int MEMBER_RGB = 0x55FFFF;
-	private static final int VETERAN_RGB = 0xFFAA00;
 	// Emblem colour on traveler lines that came from Discord (Discord blurple).
 	private static final int DISCORD_RGB = 0x5865F2;
 
@@ -249,8 +246,8 @@ public final class DiscordChatFormatter {
 
 	/**
 	 * A traveler-chat line; links, images, GIFs, stickers and emotes render as in bridge chat.
-	 * {@code tier} ("member", "veteran", anything else = traveler) picks the pill and name
-	 * colour; the emblem is lavender, or Discord blurple when {@code fromDiscord}.
+	 * {@code tier} ("member", "veteran", anything else = traveler) picks the pill text; the
+	 * emblem is lavender, or Discord blurple when {@code fromDiscord}.
 	 */
 	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId, String tier, boolean fromDiscord) {
 		boolean hasId = messageId != null && !messageId.isEmpty();
@@ -258,11 +255,7 @@ public final class DiscordChatFormatter {
 			ChatReplyManager.recordTravelerMessage(messageId, author, content);
 		}
 		String label = "member".equals(tier) || "veteran".equals(tier) ? tier : "traveler";
-		Style color = Style.EMPTY.withColor(switch (label) {
-			case "member" -> MEMBER_RGB;
-			case "veteran" -> VETERAN_RGB;
-			default -> TRAVELER_RGB;
-		});
+		Style color = Style.EMPTY.withColor(TRAVELER_RGB);
 		Style click = hasId ? color.withClickEvent(new ClickEvent.RunCommand("/eden treply " + messageId)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to reply to @" + author).withStyle(ChatFormatting.GRAY))) : color;
 		boolean reply = replyTo != null && !replyTo.isEmpty();
 		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(click.withFont(PILL_FONT))).append(Component.literal(reply ? " " + author : " " + author + ": ").withStyle(click));
