@@ -18,8 +18,10 @@ import java.util.List;
  *                       current renderer intentionally omits powder visuals
  * @param powderSlots    the number of powder slots on the item
  * @param rerollCount    the number of rerolls, or a negative value if not applicable
+ * @param gear           base stats, requirements and lore from the gear database, or null
+ *                       when Wynntils exposes none (crafted items, older Wynntils)
  */
-public record DecodedItem(String name, String tier, int tierColor, String type, float overallPercent, List<Identification> identifications, List<MajorIdentification> majorIds, List<Weighting> weightings, ShinyTracker shinyTracker, List<PowderSlot> powders, int powderSlots, int rerollCount) {
+public record DecodedItem(String name, String tier, int tierColor, String type, float overallPercent, List<Identification> identifications, List<MajorIdentification> majorIds, List<Weighting> weightings, ShinyTracker shinyTracker, List<PowderSlot> powders, int powderSlots, int rerollCount, GearDetails gear) {
 	public DecodedItem {
 		identifications = List.copyOf(identifications);
 		majorIds = List.copyOf(majorIds);
@@ -92,5 +94,39 @@ public record DecodedItem(String name, String tier, int tierColor, String type, 
 	 * @param element the powder element name (e.g. {@code "Air"})
 	 */
 	public record PowderSlot(String element) {
+	}
+
+	/**
+	 * Fixed gear data shown above the identifications, like the in-game tooltip.
+	 *
+	 * @param health        base health, or 0 when absent
+	 * @param defences      base elemental defences
+	 * @param averageDps    weapon average DPS, or 0 when absent
+	 * @param attackSpeed   weapon attack speed name (e.g. {@code "Very Fast"}), or empty
+	 * @param hitsPerSecond hits per second for the attack speed, or 0
+	 * @param damages       weapon base damages
+	 * @param elements      the item's elements (e.g. {@code "Earth"})
+	 * @param skills        skill point requirements in STR, DEX, INT, DEF, AGI order
+	 * @param level         combat level requirement, or 0
+	 * @param classReq      class requirement (e.g. {@code "Mage/Dark Wizard"}), or empty
+	 * @param lore          the item's lore, or empty
+	 * @param emblemShape   the tooltip emblem's shape column (0-5), or -1 when absent
+	 * @param emblemVariant the tooltip emblem's variant row (0-5), or -1 when absent
+	 */
+	public record GearDetails(int health, List<ElementValue> defences, int averageDps, String attackSpeed, double hitsPerSecond, List<Damage> damages, List<String> elements, List<Integer> skills, int level, String classReq, String lore, int emblemShape, int emblemVariant) {
+		public GearDetails {
+			defences = List.copyOf(defences);
+			damages = List.copyOf(damages);
+			elements = List.copyOf(elements);
+			skills = List.copyOf(skills);
+		}
+	}
+
+	/** One element and its value, e.g. Earth +150 defence. */
+	public record ElementValue(String element, int value) {
+	}
+
+	/** One weapon damage range, e.g. Earth 40-60. */
+	public record Damage(String element, int low, int high) {
 	}
 }

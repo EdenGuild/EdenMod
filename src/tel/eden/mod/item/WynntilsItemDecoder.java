@@ -74,7 +74,7 @@ public final class WynntilsItemDecoder {
 		String tierName = tier == null ? "" : prettyEnum(String.valueOf(call(tier, "getName")));
 		String typeName = type == null ? "" : prettyEnum(enumName(type));
 
-		return Optional.of(new DecodedItem(name, tierName, resolveRarityColor(tierName, tierColor(tier)), typeName, resolveOverallPercent(wynnItem), buildIdentifications(wynnItem), buildMajorIds(wynnItem), buildWeightings(wynnItem), buildShinyTracker(wynnItem), buildPowders(wynnItem), numberOr(callOrNull(wynnItem, "getPowderSlots"), 0), resolveRerollCount(wynnItem)));
+		return Optional.of(new DecodedItem(name, tierName, resolveRarityColor(tierName, tierColor(tier)), typeName, resolveOverallPercent(wynnItem), buildIdentifications(wynnItem), buildMajorIds(wynnItem), buildWeightings(wynnItem), buildShinyTracker(wynnItem), buildPowders(wynnItem), numberOr(callOrNull(wynnItem, "getPowderSlots"), 0), resolveRerollCount(wynnItem), buildGear(wynnItem)));
 	}
 
 	private static List<DecodedItem.Identification> buildIdentifications(Object wynnItem) throws ReflectiveOperationException {
@@ -95,7 +95,11 @@ public final class WynntilsItemDecoder {
 			Object statType = call(actual, "statType");
 			int value = numberOr(call(actual, "value"), 0);
 			String statName = normalizeRenderableText(String.valueOf(call(statType, "getDisplayName")));
-			String valueText = normalizeRenderableText((value >= 0 ? "+" : "") + value + statUnit(statType));
+			// Wynntils stores inverted stats in benefit order; flip the displayed sign,
+			// while retaining the stored value's sign for the renderer's color.
+			boolean calculateAsInverted = Boolean.TRUE.equals(callOrNull(statType, "calculateAsInverted"));
+			long displayed = calculateAsInverted ? -(long) value : value;
+			String valueText = formatStatValue(displayed, statUnit(statType));
 			float roll = rollPercent(actual, possibleByStat.get(statType));
 			ordered.add(new OrderedIdentification(new DecodedItem.Identification(statName, valueText, roll, value >= 0), statOrdinal(statType)));
 		}
@@ -217,6 +221,62 @@ public final class WynntilsItemDecoder {
 		} catch (RuntimeException ignored) {
 		}
 		return powders;
+	}
+
+	private static final List<String> SKILL_ORDER = List.of("STRENGTH", "DEXTERITY", "INTELLIGENCE", "DEFENCE", "AGILITY");
+
+	/** Base stats, requirements and lore from the item's GearInfo, or null when absent. */
+	private static DecodedItem.GearDetails buildGear(Object wynnItem) {
+		try {
+			Object info = callOrNull(wynnItem, "getItemInfo");
+			if (info == null || !hasMethod(info, "fixedStats") || !hasMethod(info, "requirements")) {
+				return null;
+			}
+			Object fixed = call(info, "fixedStats");
+			Object requirements = call(info, "requirements");
+
+			List<DecodedItem.ElementValue> defences = new ArrayList<>();
+			for (Object pair : listOrEmpty(call(fixed, "defences"))) {
+				defences.add(new DecodedItem.ElementValue(prettyEnum(enumName(call(pair, "key"))), numberOr(call(pair, "value"), 0)));
+			}
+			List<DecodedItem.Damage> damages = new ArrayList<>();
+			for (Object pair : listOrEmpty(call(fixed, "damages"))) {
+				Object range = call(pair, "value");
+				damages.add(new DecodedItem.Damage(prettyEnum(enumName(call(pair, "key"))), numberOr(call(range, "low"), 0), numberOr(call(range, "high"), 0)));
+			}
+			Object speed = unwrapOptional(call(fixed, "attackSpeed"));
+			Object hits = speed == null ? null : callOrNull(speed, "getHitsPerSecond");
+
+			List<String> elements = new ArrayList<>();
+			for (Object element : listOrEmpty(callOrNull(info, "elements"))) {
+				elements.add(prettyEnum(enumName(element)));
+			}
+			Integer[] skills = {0, 0, 0, 0, 0};
+			for (Object pair : listOrEmpty(call(requirements, "skills"))) {
+				int index = SKILL_ORDER.indexOf(enumName(call(pair, "key")));
+				if (index >= 0) {
+					skills[index] = numberOr(call(pair, "value"), 0);
+				}
+			}
+			Object classType = unwrapOptional(call(requirements, "classType"));
+			String classReq = classType == null || "NONE".equals(enumName(classType)) ? "" : normalizeRenderableText(stringOrBlank(callOrNull(classType, "getFullName")));
+			Object metaInfo = callOrNull(info, "metaInfo");
+			String lore = readableStyledText(unwrapOptional(metaInfo == null ? null : callOrNull(metaInfo, "lore")));
+
+			Object emblem = callOrNull(info, "emblem");
+			Object shape = emblem == null ? null : callOrNull(emblem, "itemEmblemShape");
+			int emblemShape = shape == null ? -1 : numberOr(callOrNull(shape, "offset"), -1);
+			int emblemVariant = emblem == null ? -1 : numberOr(callOrNull(emblem, "variant"), -1);
+
+			return new DecodedItem.GearDetails(numberOr(call(fixed, "healthBuff"), 0), defences, numberOr(call(fixed, "averageDps"), 0), speed == null ? "" : normalizeRenderableText(stringOrBlank(callOrNull(speed, "getName"))), hits instanceof Number n ? n.doubleValue() : 0, damages, elements, List.of(skills), numberOr(call(requirements, "level"), 0), classReq, lore, emblemShape, emblemVariant);
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			LOGGER.warn("Shared-item gear details unavailable: {}", e.toString());
+			return null;
+		}
+	}
+
+	private static List<?> listOrEmpty(Object value) {
+		return value instanceof List<?> list ? list : List.of();
 	}
 
 	private static int resolveRerollCount(Object wynnItem) {
