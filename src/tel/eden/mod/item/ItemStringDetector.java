@@ -48,4 +48,10 @@ public final class ItemStringDetector {
 		}
 		return bestData == null ? Optional.empty() : Optional.of(new Detected(bestData, bestName));
 	}
+
+	/** {@code rawText} with the detected item (and its {@code "craftedName"}, if any) swapped for {@code replacement}. */
+	public static String replace(String rawText, Detected item, String replacement) {
+		String encoded = item.craftedName() == null ? item.itemString() : item.itemString() + " \"" + item.craftedName() + "\"";
+		return rawText.replace(encoded, replacement);
+	}
 }

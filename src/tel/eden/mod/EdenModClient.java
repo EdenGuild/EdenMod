@@ -2379,11 +2379,44 @@ public final class EdenModClient implements ClientModInitializer {
 
 	private int sendTravelerChat(FabricClientCommandSource source, String message) {
 		BridgeWebSocketClient current = socket;
+		Optional<ItemStringDetector.Detected> item = ItemStringDetector.detect(message);
+		if (current != null && item.isPresent()) {
+			if (!isItemDecoderAvailable()) {
+				source.sendFeedback(Component.literal("Sharing items in traveler chat needs Wynntils.").withStyle(ChatFormatting.RED));
+				return 0;
+			}
+			// Taken now, on the client thread, before the chat screen clears it.
+			String replyId = ChatReplyManager.takeTravelerReply();
+			itemCardExecutor.submit(() -> sendTravelerItem(current, message, item.get(), replyId));
+			return 1;
+		}
 		if (current == null || !current.sendTravelerChat(message, ChatReplyManager.takeTravelerReply())) {
 			source.sendFeedback(notConnected());
 			return 0;
 		}
 		return 1;
+	}
+
+	/**
+	 * The bot drops private-use characters, so a raw share string never reaches traveler chat.
+	 * Swap it for {@code [Item Name]} and send the rendered card with the line instead.
+	 */
+	private void sendTravelerItem(BridgeWebSocketClient current, String message, ItemStringDetector.Detected item, String replyId) {
+		try {
+			Optional<DecodedItem> decoded = decodeSharedItem(item.itemString(), item.craftedName());
+			if (decoded.isEmpty()) {
+				displayDirect(() -> Component.literal("Couldn't read that shared item.").withStyle(ChatFormatting.RED));
+				return;
+			}
+			DecodedItem card = decoded.get();
+			String image = Base64.getEncoder().encodeToString(ItemCardRenderer.render(card));
+			String text = ItemStringDetector.replace(message, item, "[" + card.name() + "]");
+			if (!current.sendTravelerChat(text, replyId, image)) {
+				displayDirect(EdenModClient::notConnected);
+			}
+		} catch (Exception e) {
+			LOGGER.warn("Failed to render/send traveler item card", e);
+		}
 	}
 
 	private static Component notConnected() {

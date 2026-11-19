@@ -678,8 +678,17 @@ public final class BridgeWebSocketClient {
 
 	/** Send a traveler-chat line (members and travelers). */
 	public boolean sendTravelerChat(String content, String replyToMessageId) {
+		return sendTravelerChat(content, replyToMessageId, null);
+	}
+
+	/** Send a traveler-chat line with an optional shared item's rendered card (base64 PNG). */
+	public boolean sendTravelerChat(String content, String replyToMessageId, String imageBase64) {
 		WebSocket current = socket;
-		return current != null && enqueueSend(current, travelerChatPayload(content, replyToMessageId));
+		JsonObject obj = travelerChatPayload(content, replyToMessageId);
+		if (imageBase64 != null) {
+			obj.addProperty("image", imageBase64);
+		}
+		return current != null && enqueueSend(current, obj);
 	}
 
 	/** Tell the backend whether to deliver traveler chat and which game lines to show ("guild", "all" or "off"). */
