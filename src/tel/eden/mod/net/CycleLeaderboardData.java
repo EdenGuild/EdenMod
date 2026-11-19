@@ -8,6 +8,7 @@ import java.util.regex.Pattern;
 /** Models and ranking/interval validation helpers for Promotion Cycle and Lifetime leaderboards. */
 public final class CycleLeaderboardData {
 	private static final Pattern POSITIVE_NUMBER = Pattern.compile("^\\d+(?:\\.\\d+)?$");
+	private static final Pattern CYCLE_CODE = Pattern.compile("^\\d{4}[AB]$");
 
 	private CycleLeaderboardData() {
 	}
@@ -131,5 +132,46 @@ public final class CycleLeaderboardData {
 			return null;
 		}
 		return new IntervalDays(fromVal, toVal);
+	}
+
+	/** Whether {@code snapshot} answers a request for {@code requestedCode} ({@code null}/empty means latest). */
+	public static boolean matchesRequestedCycle(CycleSnapshot snapshot, String requestedCode) {
+		if (snapshot == null || !snapshot.error().isEmpty()) {
+			return false;
+		}
+		if (requestedCode == null || requestedCode.isBlank()) {
+			return snapshot.cycles().isEmpty() || snapshot.cycleCode().equals(snapshot.cycles().getLast());
+		}
+		return requestedCode.trim().equals(snapshot.cycleCode());
+	}
+
+	/** Whether {@code snapshot} is an already-concluded historical cycle matching {@code cycleCode}. */
+	public static boolean isHistoricalCycle(CycleSnapshot snapshot, String cycleCode) {
+		return cycleCode != null && !cycleCode.isBlank() && matchesRequestedCycle(snapshot, cycleCode) && !snapshot.cycles().isEmpty() && !cycleCode.trim().equals(snapshot.cycles().getLast());
+	}
+
+	/** Whether {@code snapshot} answers a lifetime/interval request for {@code (expectedFrom, expectedTo)}. */
+	public static boolean matchesRequestedInterval(LifetimeSnapshot snapshot, Double expectedFrom, Double expectedTo) {
+		if (snapshot == null || !snapshot.error().isEmpty()) {
+			return false;
+		}
+		if (expectedFrom == null) {
+			return !snapshot.hasInterval();
+		}
+		if (!snapshot.hasInterval() || snapshot.fromDays() == null) {
+			return false;
+		}
+		double expTo = expectedTo != null ? expectedTo : 0.0;
+		double actTo = snapshot.toDays() != null ? snapshot.toDays() : 0.0;
+		return Math.abs(expectedFrom - snapshot.fromDays()) < 1.0e-6 && Math.abs(expTo - actTo) < 1.0e-6;
+	}
+
+	/** Cycles 2503A and earlier counted both Party Finder and guild raids in historical tracking. */
+	public static boolean countsPartyFinderRaids(String cycleCode) {
+		if (cycleCode == null) {
+			return false;
+		}
+		String trimmed = cycleCode.trim();
+		return CYCLE_CODE.matcher(trimmed).matches() && trimmed.compareTo("2503A") <= 0;
 	}
 }

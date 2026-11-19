@@ -97,4 +97,40 @@ class CycleLeaderboardTest {
 		var lifeErr = BridgeWebSocketClient.parseLifetimeSnapshot(JsonParser.parseString("{\"type\":\"lifetimeLeaderboardReply\",\"error\":\"Failed to fetch leaderboard stats\"}").getAsJsonObject());
 		assertEquals("Failed to fetch leaderboard stats", lifeErr.error());
 	}
+
+	@Test
+	void requestMatchingAndHistoricalCycleDetection() {
+		CycleLeaderboardData.CycleSnapshot archive = new CycleLeaderboardData.CycleSnapshot("2603B", List.of("2603A", "2603B", "2604A"), List.of(), List.of(), List.of(), 10, 5, 1, "");
+		CycleLeaderboardData.CycleSnapshot current = new CycleLeaderboardData.CycleSnapshot("2604A", List.of("2603A", "2603B", "2604A"), List.of(), List.of(), List.of(), 20, 8, 2, "");
+
+		assertTrue(CycleLeaderboardData.matchesRequestedCycle(archive, "2603B"));
+		assertFalse(CycleLeaderboardData.matchesRequestedCycle(archive, ""));
+		assertFalse(CycleLeaderboardData.matchesRequestedCycle(archive, "2604A"));
+		assertTrue(CycleLeaderboardData.matchesRequestedCycle(current, ""));
+		assertTrue(CycleLeaderboardData.matchesRequestedCycle(current, "2604A"));
+
+		assertTrue(CycleLeaderboardData.isHistoricalCycle(archive, "2603B"));
+		assertFalse(CycleLeaderboardData.isHistoricalCycle(archive, ""));
+		assertFalse(CycleLeaderboardData.isHistoricalCycle(current, "2604A"));
+		assertFalse(CycleLeaderboardData.isHistoricalCycle(CycleLeaderboardData.CycleSnapshot.error("err"), "2603B"));
+
+		CycleLeaderboardData.LifetimeSnapshot interval = new CycleLeaderboardData.LifetimeSnapshot(true, 14.0, 0.0, List.of(), List.of(), List.of(), List.of(), "");
+		CycleLeaderboardData.LifetimeSnapshot allTime = new CycleLeaderboardData.LifetimeSnapshot(false, null, null, List.of(), List.of(), List.of(), List.of(), "");
+		assertTrue(CycleLeaderboardData.matchesRequestedInterval(interval, 14.0, 0.0));
+		assertTrue(CycleLeaderboardData.matchesRequestedInterval(interval, 14.0, null));
+		assertFalse(CycleLeaderboardData.matchesRequestedInterval(interval, null, null));
+		assertTrue(CycleLeaderboardData.matchesRequestedInterval(allTime, null, null));
+		assertFalse(CycleLeaderboardData.matchesRequestedInterval(allTime, 14.0, 0.0));
+	}
+
+	@Test
+	void countsPartyFinderRaidsFor2503AAndBelow() {
+		assertTrue(CycleLeaderboardData.countsPartyFinderRaids("2503A"));
+		assertTrue(CycleLeaderboardData.countsPartyFinderRaids("2501B"));
+		assertTrue(CycleLeaderboardData.countsPartyFinderRaids("2412B"));
+		assertFalse(CycleLeaderboardData.countsPartyFinderRaids("2503B"));
+		assertFalse(CycleLeaderboardData.countsPartyFinderRaids("2604A"));
+		assertFalse(CycleLeaderboardData.countsPartyFinderRaids(""));
+		assertFalse(CycleLeaderboardData.countsPartyFinderRaids(null));
+	}
 }

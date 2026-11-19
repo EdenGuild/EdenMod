@@ -41,6 +41,8 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 	private final EdenModClient mod;
 	private final String initialCycleCode;
 	private EdenPanelLayout layout;
+	private int closeButtonX = 12;
+	private int toLabelX = 126;
 
 	private Tab activeTab = Tab.CYCLE;
 	private boolean archiveOpen;
@@ -85,10 +87,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 	@Override
 	protected void init() {
 		super.init();
-		layout = centeredLayout(200, 120);
-		uiScale = 1.0f;
-		virtualWidth = this.width;
-		virtualHeight = this.height;
+		layout = centeredLayout(560, 320);
 
 		if (fromBox != null) {
 			fromDraft = fromBox.getValue();
@@ -104,32 +103,49 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		this.addRenderableWidget(cycleTabButton);
 		this.addRenderableWidget(lifetimeTabButton);
 
-		int closeX = bottomCloseX();
-		Button closeButton = Button.builder(Component.literal("Close"), b -> onClose()).bounds(closeX, this.height - 24, 100, 18).build();
+		int archiveW = 92;
+		int nextW = 56;
+		int prevW = 68;
+		int archiveX = virtualWidth - 12 - archiveW;
+		int nextX = archiveX - 4 - nextW;
+		int prevX = nextX - 4 - prevW;
+		int closeW = Math.min(100, Math.max(52, prevX - 20));
+		closeButtonX = Math.min(Math.max(12, virtualWidth / 2 - closeW / 2), Math.max(12, prevX - closeW - 8));
+		int bottomY = virtualHeight - 24;
+		Button closeButton = Button.builder(Component.literal("Close"), b -> onClose()).bounds(closeButtonX, bottomY, closeW, 18).build();
 		this.addRenderableWidget(closeButton);
 
 		// Cycle tab archive controls
-		prevCycleButton = Button.builder(Component.literal("< Previous"), b -> navigateArchive(-1)).bounds(this.width - 236, this.height - 24, 68, 18).build();
-		nextCycleButton = Button.builder(Component.literal("Next >"), b -> navigateArchive(1)).bounds(this.width - 164, this.height - 24, 56, 18).build();
-		archiveButton = Button.builder(Component.literal("Cycle Archive"), b -> toggleArchive()).bounds(this.width - 104, this.height - 24, 92, 18).build();
+		prevCycleButton = Button.builder(Component.literal("< Previous"), b -> navigateArchive(-1)).bounds(prevX, bottomY, prevW, 18).build();
+		nextCycleButton = Button.builder(Component.literal("Next >"), b -> navigateArchive(1)).bounds(nextX, bottomY, nextW, 18).build();
+		archiveButton = Button.builder(Component.literal("Cycle Archive"), b -> toggleArchive()).bounds(archiveX, bottomY, archiveW, 18).build();
 		this.addRenderableWidget(prevCycleButton);
 		this.addRenderableWidget(nextCycleButton);
 		this.addRenderableWidget(archiveButton);
 
-		// Lifetime tab controls
-		fromBox = new EditBox(this.font, 42, 48, 78, 18, Component.literal("From days ago"));
+		// Lifetime tab controls (keep toolbar non-overlapping even on compact viewports)
+		int finishesW = 106;
+		int finishesX = virtualWidth - 12 - finishesW;
+		int boxW = virtualWidth >= 460 ? 78 : Math.max(40, (finishesX - 180) / 2);
+		int fromX = 42;
+		toLabelX = fromX + boxW + 6;
+		int toX = toLabelX + 20;
+		int applyX = toX + boxW + 6;
+		int resetX = applyX + 50;
+
+		fromBox = new EditBox(this.font, fromX, 48, boxW, 18, Component.literal("From days ago"));
 		fromBox.setHint(Component.literal("-# days ago").withStyle(ChatFormatting.GRAY));
 		fromBox.setMaxLength(16);
 		fromBox.setValue(fromDraft);
 
-		toBox = new EditBox(this.font, 146, 48, 78, 18, Component.literal("To days ago"));
+		toBox = new EditBox(this.font, toX, 48, boxW, 18, Component.literal("To days ago"));
 		toBox.setHint(Component.literal("-# days ago").withStyle(ChatFormatting.GRAY));
 		toBox.setMaxLength(16);
 		toBox.setValue(toDraft);
 
-		applyIntervalButton = Button.builder(Component.literal("Apply"), b -> applyInterval()).bounds(230, 48, 46, 18).build();
-		resetIntervalButton = Button.builder(Component.literal("Reset"), b -> resetInterval()).bounds(280, 48, 46, 18).build();
-		finishesToggleButton = Button.builder(Component.literal("Cycle Finishes"), b -> toggleFinishes()).bounds(this.width - 118, 48, 106, 18).build();
+		applyIntervalButton = Button.builder(Component.literal("Apply"), b -> applyInterval()).bounds(applyX, 48, 46, 18).build();
+		resetIntervalButton = Button.builder(Component.literal("Reset"), b -> resetInterval()).bounds(resetX, 48, 46, 18).build();
+		finishesToggleButton = Button.builder(Component.literal("Cycle Finishes"), b -> toggleFinishes()).bounds(finishesX, 48, finishesW, 18).build();
 
 		this.addRenderableWidget(fromBox);
 		this.addRenderableWidget(toBox);
@@ -286,14 +302,11 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
-		if (uiScale != 1.0f || virtualWidth != this.width || virtualHeight != this.height) {
-			init();
-		}
 		int scaledMouseX = scaledMouseX(mouseX);
 		int scaledMouseY = scaledMouseY(mouseY);
 
 		pushReferencePose(g);
-		EdenPanelLayout.drawPanel(g, 0, 0, this.width, this.height);
+		EdenPanelLayout.drawPanel(g, 0, 0, virtualWidth, virtualHeight);
 
 		if (activeTab == Tab.CYCLE) {
 			renderCycleTab(g);
@@ -303,7 +316,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 
 		super.render(g, scaledMouseX, scaledMouseY, delta);
 		String heading = activeTab == Tab.CYCLE ? "Promotion Cycle" : "Lifetime Stats";
-		g.drawCenteredString(this.font, heading, this.width / 2, 10, 0xFFFFFFFF);
+		g.drawCenteredString(this.font, heading, virtualWidth / 2, 10, 0xFFFFFFFF);
 		popReferencePose(g);
 	}
 
@@ -312,14 +325,29 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		String err = mod != null ? mod.recentCycleLeaderboardError() : "";
 
 		String cycleHeader = (snap != null && !snap.cycleCode().isEmpty()) ? "Cycle " + snap.cycleCode() : "Loading...";
-		g.drawString(this.font, cycleHeader, 220, 29, 0xFFFFCC55);
+		String trimmedHeader = trimToWidth(cycleHeader, Math.max(40, virtualWidth - 232));
+		g.drawString(this.font, trimmedHeader, 220, 29, 0xFFFFCC55);
+		if (snap != null && CycleLeaderboardData.countsPartyFinderRaids(snap.cycleCode())) {
+			int warnX = 220 + this.font.width(trimmedHeader) + 6;
+			int availW = virtualWidth - 12 - warnX;
+			if (availW >= 40) {
+				String warn = "ALL CYCLES BEFORE 2503B COUNTED BOTH PARTY FINDER AND GUILD RAIDS";
+				float scale = Math.min(1.0f, availW / (float) Math.max(1, this.font.width(warn)));
+				int yOffset = Math.round(4.5f * (1.0f - scale));
+				g.pose().pushMatrix();
+				g.pose().translate(warnX, 29 + yOffset);
+				g.pose().scale(scale, scale);
+				g.drawString(this.font, warn, 0, 0, 0xFFFF5555);
+				g.pose().popMatrix();
+			}
+		}
 
 		if (!err.isEmpty()) {
-			g.drawCenteredString(this.font, err, this.width / 2, this.height / 2, 0xFFFF5555);
+			g.drawCenteredString(this.font, err, virtualWidth / 2, virtualHeight / 2, 0xFFFF5555);
 			return;
 		}
 		if (snap == null) {
-			g.drawCenteredString(this.font, "Loading cycle leaderboard...", this.width / 2, this.height / 2, 0xFFAAAAAA);
+			g.drawCenteredString(this.font, "Loading cycle leaderboard...", virtualWidth / 2, virtualHeight / 2, 0xFFAAAAAA);
 			return;
 		}
 
@@ -331,9 +359,8 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		renderEntryList(g, true, snap.raids(), raidsScroll, true, true);
 		renderEntryList(g, false, snap.wars(), warsScroll, true, true);
 
-		int maxFooterW = Math.max(60, bottomCloseX() - 20);
 		String totals = "Totals: " + snap.totalRaids() + " raids | " + snap.totalWars() + " wars | " + snap.totalTickets() + " tickets";
-		g.drawString(this.font, trimToWidth(totals, maxFooterW), 12, this.height - 36, 0xFFFFD966);
+		g.drawString(this.font, trimToWidth(totals, Math.max(60, virtualWidth - 24)), 12, virtualHeight - 36, 0xFFFFD966);
 		if (!snap.raffleWinners().isEmpty()) {
 			StringBuilder raffle = new StringBuilder("Raffle Top 3: ");
 			List<CycleLeaderboardData.RaffleWinner> top = snap.raffleWinners().subList(0, Math.min(3, snap.raffleWinners().size()));
@@ -343,26 +370,26 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 				}
 				raffle.append("#").append(i + 1).append(" ").append(top.get(i).name()).append(" (").append(top.get(i).tickets()).append(")");
 			}
-			g.drawString(this.font, trimToWidth(raffle.toString(), maxFooterW), 12, this.height - 24, 0xFFD5A6FF);
+			int raffleMaxW = Math.max(40, closeButtonX - 20);
+			g.drawString(this.font, trimToWidth(raffle.toString(), raffleMaxW), 12, virtualHeight - 24, 0xFFD5A6FF);
 		}
 	}
 
 	private void renderLifetimeTab(GuiGraphics g) {
 		g.drawString(this.font, "From:", 12, 53, 0xFFCCCCCC);
-		g.drawString(this.font, "To:", 126, 53, 0xFFCCCCCC);
+		g.drawString(this.font, "To:", toLabelX, 53, 0xFFCCCCCC);
 		if (!validationError.isEmpty()) {
-			int errMaxW = Math.max(40, (this.width - 126) - 332);
-			g.drawString(this.font, trimToWidth(validationError, errMaxW), 332, 53, 0xFFFF5555);
+			g.drawString(this.font, trimToWidth(validationError, Math.max(60, virtualWidth - 24)), 12, virtualHeight - 36, 0xFFFF5555);
 		}
 
 		CycleLeaderboardData.LifetimeSnapshot snap = mod != null ? mod.knownLifetimeLeaderboard() : null;
 		String err = mod != null ? mod.recentLifetimeLeaderboardError() : "";
 		if (!err.isEmpty()) {
-			g.drawCenteredString(this.font, err, this.width / 2, this.height / 2 + 12, 0xFFFF5555);
+			g.drawCenteredString(this.font, err, virtualWidth / 2, virtualHeight / 2 + 12, 0xFFFF5555);
 			return;
 		}
 		if (snap == null) {
-			g.drawCenteredString(this.font, "Loading leaderboard stats...", this.width / 2, this.height / 2 + 12, 0xFFAAAAAA);
+			g.drawCenteredString(this.font, "Loading leaderboard stats...", virtualWidth / 2, virtualHeight / 2 + 12, 0xFFAAAAAA);
 			return;
 		}
 
@@ -392,17 +419,20 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		int podiumTop = podiumTop();
 		int podiumH = podiumHeight();
 		g.fill(x, podiumTop, x + colW, podiumTop + podiumH, 0x22000000);
+		g.enableScissor(x, podiumTop, x + colW, podiumTop + podiumH);
 
-		int slotW = Math.clamp(colW / 3 - 4, 48, 96);
+		int slotW = Math.clamp(colW / 3 - 4, 34, 96);
+		int capW = Math.min(PODIUM_CAP_WIDTH, Math.max(18, slotW - 8));
+		int headSize = Math.min(podiumH >= 118 ? PODIUM_HEAD_SIZE : 24, Math.max(16, slotW - 8));
 		int cx1 = x + colW / 2;
 		int cx2 = cx1 - slotW;
 		int cx3 = cx1 + slotW;
-		int maxStandH = Math.max(70, podiumH - 54);
-		int h2 = Math.max(52, maxStandH * 76 / 100);
-		int h3 = Math.max(38, maxStandH * 56 / 100);
+		int maxStandH = Math.max(24, podiumH - (headSize + 20));
+		int h2 = Math.max(20, maxStandH * 76 / 100);
+		int h3 = Math.max(16, maxStandH * 56 / 100);
 		int baseLineY = podiumTop + podiumH - 4;
-		int lineLeft = Math.max(x + 4, cx2 - PODIUM_CAP_WIDTH / 2 - 8);
-		int lineRight = Math.min(x + colW - 4, cx3 + PODIUM_CAP_WIDTH / 2 + 8);
+		int lineLeft = Math.max(x + 4, cx2 - capW / 2 - 8);
+		int lineRight = Math.min(x + colW - 4, cx3 + capW / 2 + 8);
 		g.fill(lineLeft, baseLineY, lineRight, baseLineY + 2, 0xFF8E8E8E);
 		g.fill(lineLeft, baseLineY + 2, lineRight, baseLineY + 3, 0xFF1E1E1E);
 
@@ -411,7 +441,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			int cx = slot == 0 ? cx2 : (slot == 1 ? cx1 : cx3);
 			int standH = slot == 0 ? h2 : (slot == 1 ? maxStandH : h3);
 			int standTopY = baseLineY - standH;
-			drawPillar(g, cx, baseLineY, PODIUM_CAP_WIDTH, standH);
+			drawPillar(g, cx, baseLineY, capW, standH);
 
 			int entryIdx = rank - 1;
 			if (entryIdx >= rawEntries.size()) {
@@ -437,19 +467,20 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 				continue;
 			}
 
-			int headStartX = cx - PODIUM_HEAD_SIZE / 2;
-			int headY = standTopY - PODIUM_HEAD_SIZE - 2;
-			drawPlayerFace(g, uuid, name, headStartX, headY, PODIUM_HEAD_SIZE);
+			int headStartX = cx - headSize / 2;
+			int headY = standTopY - headSize - 2;
+			drawPlayerFace(g, uuid, name, headStartX, headY, headSize);
 
 			int halfBound = switch (rank) {
-				case 2 -> Math.min(cx - x - 3, slotW - PODIUM_HEAD_SIZE / 2 - 3);
-				case 3 -> Math.min((x + colW) - cx - 3, slotW - PODIUM_HEAD_SIZE / 2 - 3);
+				case 2 -> Math.min(cx - x - 3, slotW - headSize / 2 - 3);
+				case 3 -> Math.min((x + colW) - cx - 3, slotW - headSize / 2 - 3);
 				default -> Math.min(colW / 2 - 4, (slotW + 28) / 2);
 			};
 			int maxLabelW = Math.max(24, halfBound * 2);
 			int maxNameW = Math.max(12, maxLabelW - this.font.width(suffix));
-			g.drawCenteredString(this.font, trimToWidth(name, maxNameW) + suffix, cx, standTopY - PODIUM_HEAD_SIZE - 12, 0xFFFFFFFF);
+			g.drawCenteredString(this.font, trimToWidth(name, maxNameW) + suffix, cx, standTopY - headSize - 12, 0xFFFFFFFF);
 		}
+		g.disableScissor();
 	}
 
 	private void renderEntryList(GuiGraphics g, boolean left, List<CycleLeaderboardData.LeaderboardEntry> entries, int scrollOffset, boolean showMedals, boolean showDelta) {
@@ -461,6 +492,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		int visRows = visibleRows();
 		int height = visRows * ROW_PITCH + 4;
 		g.fill(x, baseTopY, x + colW, baseTopY + height, 0x22000000);
+		g.enableScissor(x, baseTopY, x + colW, baseTopY + height);
 
 		int total = entries.size();
 		int clamped = clampOffset(scrollOffset, total);
@@ -509,6 +541,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			g.drawString(this.font, trimToWidth(entry.name(), maxNameW), cursorX, rowY + 4, textColor);
 			g.drawString(this.font, countText, countX, rowY + 4, textColor);
 		}
+		g.disableScissor();
 
 		layout.drawScrollbar(g, x + colW + SCROLLBAR_GAP, baseTopY, SCROLLBAR_WIDTH, height, visRows, total, clamped);
 	}
@@ -522,6 +555,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		int visRows = visibleRows();
 		int height = visRows * ROW_PITCH + 4;
 		g.fill(x, baseTopY, x + colW, baseTopY + height, 0x22000000);
+		g.enableScissor(x, baseTopY, x + colW, baseTopY + height);
 
 		int total = entries.size();
 		int clamped = clampOffset(scrollOffset, total);
@@ -549,6 +583,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 				g.drawString(this.font, String.valueOf(counts[m]), slotX + 11, rowY + 4, 0xFFEFEFEF);
 			}
 		}
+		g.disableScissor();
 
 		layout.drawScrollbar(g, x + colW + SCROLLBAR_GAP, baseTopY, SCROLLBAR_WIDTH, height, visRows, total, clamped);
 	}
@@ -563,12 +598,8 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 		}
 	}
 
-	private int bottomCloseX() {
-		return Math.min(this.width / 2 - 50, Math.max(12, this.width - 344));
-	}
-
 	private int totalColWidth() {
-		return Math.max(200, (this.width - MARGIN_X * 2 - COL_GAP) / 2);
+		return Math.max(96, (virtualWidth - MARGIN_X * 2 - COL_GAP) / 2);
 	}
 
 	private int colWidth() {
@@ -588,12 +619,18 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 	}
 
 	private int footerReserve() {
-		return activeTab == Tab.CYCLE ? 42 : 30;
+		return (activeTab == Tab.CYCLE || !validationError.isEmpty()) ? 42 : 30;
+	}
+
+	private int availableBodyHeight() {
+		return Math.max(40, virtualHeight - footerReserve() - podiumTop() - 4);
 	}
 
 	private int podiumHeight() {
-		int bottomLimit = Math.max(podiumTop() + 190, this.height - footerReserve());
-		return Math.clamp((bottomLimit - podiumTop()) * 58 / 100, 126, 184);
+		int avail = availableBodyHeight();
+		int minRows = avail >= 140 ? 3 : 2;
+		int maxPodium = Math.max(60, avail - (minRows * ROW_PITCH + 4));
+		return Math.min(maxPodium, Math.clamp(avail * 56 / 100, 96, 184));
 	}
 
 	private int listTopOffset() {
@@ -601,9 +638,8 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 	}
 
 	private int visibleRows() {
-		int top = listTopOffset();
-		int listBottom = Math.max(top + ROW_PITCH * 4 + 4, this.height - footerReserve());
-		return Math.max(4, (listBottom - top - 4) / ROW_PITCH);
+		int listAvail = Math.max(ROW_PITCH + 4, availableBodyHeight() - podiumHeight());
+		return Math.max(1, (listAvail - 4) / ROW_PITCH);
 	}
 
 	private List<?> leftEntries() {
@@ -739,7 +775,7 @@ public class PromotionCycleScreen extends EdenReferenceScreen {
 			updateScrollFromMouse(scaled.y(), draggingPane);
 			return true;
 		}
-		return super.mouseDragged(scaled, d, e);
+		return super.mouseDragged(scaled, d / uiScale, e / uiScale);
 	}
 
 	@Override

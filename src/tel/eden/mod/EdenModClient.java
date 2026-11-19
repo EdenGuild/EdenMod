@@ -303,12 +303,21 @@ public final class EdenModClient implements ClientModInitializer {
 	private volatile long lifetimeLeaderboardErrorAtMs;
 	private final java.util.concurrent.atomic.AtomicInteger lifetimeLeaderboardGeneration = new java.util.concurrent.atomic.AtomicInteger();
 	private final java.util.Map<String, tel.eden.mod.net.CycleLeaderboardData.ConcludedCycleSummary> concludedCyclesByCode = new java.util.concurrent.ConcurrentHashMap<>();
+
+	private record LifetimeFilter(Double fromDays, Double toDays) {
+	}
+
 	private volatile String pendingCyclePrintCode;
+	private volatile String pendingCycleGuiCode;
+	private volatile LifetimeFilter pendingLifetimeFilter;
 	private static final long LEADERBOARD_TIMEOUT_SECONDS = 15L;
-	private final java.util.concurrent.atomic.AtomicLong cycleRequestSeq = new java.util.concurrent.atomic.AtomicLong();
-	private final java.util.concurrent.atomic.AtomicLong cycleRequestPendingId = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong cycleGuiSeq = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong cycleGuiPendingId = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong cyclePrintSeq = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong cyclePrintPendingId = new java.util.concurrent.atomic.AtomicLong();
 	private final java.util.concurrent.atomic.AtomicLong lifetimeRequestSeq = new java.util.concurrent.atomic.AtomicLong();
 	private final java.util.concurrent.atomic.AtomicLong lifetimeRequestPendingId = new java.util.concurrent.atomic.AtomicLong();
+	private final Object cycleSendLock = new Object();
 	private volatile long lastCycleQueryAtMs;
 	private volatile long lastLifetimeQueryAtMs;
 	// GitHub update check: run once per game session; the prompt offers a one-click
@@ -866,8 +875,6 @@ public final class EdenModClient implements ClientModInitializer {
 			tel.eden.mod.war.eco.TerritoryGuideController.reset();
 			guildAllyManager.requestCancel();
 			eventRewardsPendingId.set(0);
-			cycleRequestPendingId.set(0);
-			lifetimeRequestPendingId.set(0);
 			// Connect if applicable; the backend reports link/membership standing via
 			// authOk (handleAuthStatus), which drives any "please link" prompt.
 			evaluateGating(client);
@@ -1527,50 +1534,68 @@ public final class EdenModClient implements ClientModInitializer {
 
 				@Override
 				public void onCycleLeaderboard(tel.eden.mod.net.CycleLeaderboardData.CycleSnapshot snapshot) {
-					cycleRequestPendingId.set(0);
 					if (!isFullMember()) {
 						LOGGER.warn("Ignoring cycleLeaderboardReply while bridgeStatus={}", bridgeStatus);
 						return;
 					}
 					if (snapshot.error() != null && !snapshot.error().isEmpty()) {
+						cycleGuiPendingId.set(0);
+						cyclePrintPendingId.set(0);
+						pendingCycleGuiCode = null;
 						String err = snapshot.error();
 						LOGGER.error("Cycle leaderboard reply returned error: {}", err);
 						cycleLeaderboardError = err;
 						cycleLeaderboardErrorAtMs = System.currentTimeMillis();
 						cycleLeaderboardGeneration.incrementAndGet();
-						String pendingCode = pendingCyclePrintCode;
-						if (pendingCode != null) {
+						if (pendingCyclePrintCode != null) {
 							pendingCyclePrintCode = null;
 							display(() -> DiscordChatFormatter.systemLine(err, ChatFormatting.RED));
 						}
 						return;
 					}
+					String printTarget = pendingCyclePrintCode;
+					if (printTarget != null && tel.eden.mod.net.CycleLeaderboardData.matchesRequestedCycle(snapshot, printTarget)) {
+						pendingCyclePrintCode = null;
+						cyclePrintPendingId.set(0);
+						tel.eden.mod.net.CycleLeaderboardData.ConcludedCycleSummary derived = tel.eden.mod.net.CycleLeaderboardData.summaryFromSnapshot(snapshot);
+						display(() -> DiscordChatFormatter.formatCyclePrint(derived));
+					}
+					String guiTarget = pendingCycleGuiCode;
+					if (guiTarget == null && cycleGuiPendingId.get() == 0 && knownCycleLeaderboard != null) {
+						return;
+					}
+					if (guiTarget != null && !tel.eden.mod.net.CycleLeaderboardData.matchesRequestedCycle(snapshot, guiTarget)) {
+						return;
+					}
+					cycleGuiPendingId.set(0);
+					pendingCycleGuiCode = null;
 					cycleLeaderboardError = "";
 					cycleLeaderboardErrorAtMs = 0L;
 					knownCycleLeaderboard = snapshot;
 					cycleLeaderboardGeneration.incrementAndGet();
-					String pendingCode = pendingCyclePrintCode;
-					if (pendingCode != null && (pendingCode.isEmpty() || pendingCode.equals(snapshot.cycleCode()))) {
-						pendingCyclePrintCode = null;
-						tel.eden.mod.net.CycleLeaderboardData.ConcludedCycleSummary derived = tel.eden.mod.net.CycleLeaderboardData.summaryFromSnapshot(snapshot);
-						display(() -> DiscordChatFormatter.formatCyclePrint(derived));
-					}
 				}
 
 				@Override
 				public void onLifetimeLeaderboard(tel.eden.mod.net.CycleLeaderboardData.LifetimeSnapshot snapshot) {
-					lifetimeRequestPendingId.set(0);
 					if (!isFullMember()) {
 						LOGGER.warn("Ignoring lifetimeLeaderboardReply while bridgeStatus={}", bridgeStatus);
 						return;
 					}
 					if (snapshot.error() != null && !snapshot.error().isEmpty()) {
+						lifetimeRequestPendingId.set(0);
+						pendingLifetimeFilter = null;
 						LOGGER.error("Lifetime leaderboard reply returned error: {}", snapshot.error());
 						lifetimeLeaderboardError = snapshot.error();
 						lifetimeLeaderboardErrorAtMs = System.currentTimeMillis();
 						lifetimeLeaderboardGeneration.incrementAndGet();
 						return;
 					}
+					LifetimeFilter expected = pendingLifetimeFilter;
+					if (expected != null && !tel.eden.mod.net.CycleLeaderboardData.matchesRequestedInterval(snapshot, expected.fromDays(), expected.toDays())) {
+						return;
+					}
+					lifetimeRequestPendingId.set(0);
+					pendingLifetimeFilter = null;
 					lifetimeLeaderboardError = "";
 					lifetimeLeaderboardErrorAtMs = 0L;
 					knownLifetimeLeaderboard = snapshot;
@@ -1974,7 +1999,7 @@ public final class EdenModClient implements ClientModInitializer {
 			return 1;
 		}
 		tel.eden.mod.net.CycleLeaderboardData.CycleSnapshot snap = knownCycleLeaderboard;
-		if (snap != null && snap.error().isEmpty() && (trimmed.isEmpty() || trimmed.equals(snap.cycleCode()))) {
+		if (tel.eden.mod.net.CycleLeaderboardData.isHistoricalCycle(snap, trimmed)) {
 			source.sendFeedback(DiscordChatFormatter.formatCyclePrint(tel.eden.mod.net.CycleLeaderboardData.summaryFromSnapshot(snap)));
 			return 1;
 		}
@@ -1988,23 +2013,33 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	private void requestCycleLeaderboard(String cycleCode, boolean forPrint) {
-		long seq = cycleRequestSeq.incrementAndGet();
-		pendingCyclePrintCode = forPrint ? (cycleCode != null ? cycleCode.trim() : "") : null;
+		String target = (cycleCode != null && !cycleCode.isBlank()) ? cycleCode.trim() : "";
+		long seq = forPrint ? cyclePrintSeq.incrementAndGet() : cycleGuiSeq.incrementAndGet();
+		if (forPrint) {
+			pendingCyclePrintCode = target;
+		} else {
+			pendingCycleGuiCode = target;
+		}
 		BridgeWebSocketClient current = socket;
 		if (!isFullMember() || current == null || !current.isConnected()) {
-			LOGGER.error("Cycle leaderboard request aborted before send (cycle={}, status={}, connected={})", cycleCode, bridgeStatus, current != null && current.isConnected());
-			failCycleLeaderboardRequest();
+			LOGGER.error("Cycle leaderboard request aborted before send (cycle={}, status={}, connected={})", target, bridgeStatus, current != null && current.isConnected());
+			failCycleLeaderboardRequest(forPrint);
 			return;
 		}
-		long delayMs = knownCycleLeaderboard == null ? 0L : Math.max(0L, (lastCycleQueryAtMs + 950L) - System.currentTimeMillis());
+		long delayMs = knownCycleLeaderboard == null && lastCycleQueryAtMs == 0L ? 0L : Math.max(0L, (lastCycleQueryAtMs + 950L) - System.currentTimeMillis());
 		if (delayMs == 0L) {
-			dispatchCycleLeaderboardRequest(cycleCode, seq);
+			dispatchCycleLeaderboardRequest(target, seq, forPrint);
 			return;
 		}
+		scheduleCycleLeaderboardDispatch(target, seq, forPrint, delayMs);
+	}
+
+	private void scheduleCycleLeaderboardDispatch(String cycleCode, long seq, boolean forPrint, long delayMs) {
 		partyCommandExecutor.schedule(() -> {
 			try {
-				if (cycleRequestSeq.get() == seq) {
-					dispatchCycleLeaderboardRequest(cycleCode, seq);
+				long latest = forPrint ? cyclePrintSeq.get() : cycleGuiSeq.get();
+				if (latest == seq) {
+					dispatchCycleLeaderboardRequest(cycleCode, seq, forPrint);
 				}
 			} catch (RuntimeException e) {
 				LOGGER.error("Scheduled cycle leaderboard dispatch failed (seq={}, cycle={})", seq, cycleCode, e);
@@ -2012,25 +2047,45 @@ public final class EdenModClient implements ClientModInitializer {
 		}, delayMs, TimeUnit.MILLISECONDS);
 	}
 
-	private void dispatchCycleLeaderboardRequest(String cycleCode, long seq) {
+	private void dispatchCycleLeaderboardRequest(String cycleCode, long seq, boolean forPrint) {
 		BridgeWebSocketClient current = socket;
 		if (!isFullMember() || current == null || !current.isConnected()) {
-			if (cycleRequestSeq.get() == seq) {
+			long latest = forPrint ? cyclePrintSeq.get() : cycleGuiSeq.get();
+			if (latest == seq) {
 				LOGGER.error("Cycle leaderboard deferred send aborted (seq={}, cycle={}, status={}, connected={})", seq, cycleCode, bridgeStatus, current != null && current.isConnected());
-				failCycleLeaderboardRequest();
+				failCycleLeaderboardRequest(forPrint);
 			}
 			return;
 		}
-		cycleRequestPendingId.set(seq);
-		lastCycleQueryAtMs = System.currentTimeMillis();
-		cycleLeaderboardError = "";
-		cycleLeaderboardErrorAtMs = 0L;
-		current.sendCycleLeaderboardRequest(cycleCode);
+		long remainingCooldownMs;
+		synchronized (cycleSendLock) {
+			long now = System.currentTimeMillis();
+			remainingCooldownMs = (lastCycleQueryAtMs + 950L) - now;
+			if (remainingCooldownMs <= 0L) {
+				lastCycleQueryAtMs = now;
+			}
+		}
+		if (remainingCooldownMs > 0L) {
+			scheduleCycleLeaderboardDispatch(cycleCode, seq, forPrint, remainingCooldownMs);
+			return;
+		}
+		java.util.concurrent.atomic.AtomicLong pendingSlot = forPrint ? cyclePrintPendingId : cycleGuiPendingId;
+		pendingSlot.set(seq);
+		if (!forPrint) {
+			cycleLeaderboardError = "";
+			cycleLeaderboardErrorAtMs = 0L;
+		}
+		if (!current.sendCycleLeaderboardRequest(cycleCode)) {
+			if (pendingSlot.compareAndSet(seq, 0)) {
+				failCycleLeaderboardRequest(forPrint);
+			}
+			return;
+		}
 		partyCommandExecutor.schedule(() -> {
 			try {
-				if (cycleRequestPendingId.compareAndSet(seq, 0)) {
-					LOGGER.error("Cycle leaderboard request timed out after {}s (seq={}, cycle={}, status={}, connected={}) — no reply from backend", LEADERBOARD_TIMEOUT_SECONDS, seq, cycleCode, bridgeStatus, socket != null && socket.isConnected());
-					failCycleLeaderboardRequest();
+				if (pendingSlot.compareAndSet(seq, 0)) {
+					LOGGER.error("Cycle leaderboard request timed out after {}s (seq={}, cycle={}, forPrint={}, status={}, connected={}) — no reply from backend", LEADERBOARD_TIMEOUT_SECONDS, seq, cycleCode, forPrint, bridgeStatus, socket != null && socket.isConnected());
+					failCycleLeaderboardRequest(forPrint);
 				}
 			} catch (RuntimeException e) {
 				LOGGER.error("Cycle leaderboard timeout task failed (seq={}, cycle={})", seq, cycleCode, e);
@@ -2038,20 +2093,26 @@ public final class EdenModClient implements ClientModInitializer {
 		}, LEADERBOARD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 	}
 
-	private void failCycleLeaderboardRequest() {
-		cycleRequestPendingId.set(0);
+	private void failCycleLeaderboardRequest(boolean forPrint) {
+		if (forPrint) {
+			cyclePrintPendingId.set(0);
+			if (pendingCyclePrintCode != null) {
+				pendingCyclePrintCode = null;
+				display(() -> DiscordChatFormatter.systemLine("Failed to fetch cycle leaderboard", ChatFormatting.RED));
+			}
+			return;
+		}
+		cycleGuiPendingId.set(0);
+		pendingCycleGuiCode = null;
 		cycleLeaderboardError = "Failed to fetch cycle leaderboard";
 		cycleLeaderboardErrorAtMs = System.currentTimeMillis();
 		cycleLeaderboardGeneration.incrementAndGet();
-		if (pendingCyclePrintCode != null) {
-			pendingCyclePrintCode = null;
-			display(() -> DiscordChatFormatter.systemLine("Failed to fetch cycle leaderboard", ChatFormatting.RED));
-		}
 	}
 
 	/** Request lifetime or interval Raids/Wars leaderboards, debounced safely above server throttle. */
 	public void requestLifetimeLeaderboard(Double fromDays, Double toDays) {
 		long seq = lifetimeRequestSeq.incrementAndGet();
+		pendingLifetimeFilter = new LifetimeFilter(fromDays, toDays);
 		BridgeWebSocketClient current = socket;
 		if (!isFullMember() || current == null || !current.isConnected()) {
 			LOGGER.error("Lifetime leaderboard request aborted before send (fromDays={}, toDays={}, status={}, connected={})", fromDays, toDays, bridgeStatus, current != null && current.isConnected());
@@ -2087,7 +2148,12 @@ public final class EdenModClient implements ClientModInitializer {
 		lastLifetimeQueryAtMs = System.currentTimeMillis();
 		lifetimeLeaderboardError = "";
 		lifetimeLeaderboardErrorAtMs = 0L;
-		current.sendLifetimeLeaderboardRequest(fromDays, toDays);
+		if (!current.sendLifetimeLeaderboardRequest(fromDays, toDays)) {
+			if (lifetimeRequestPendingId.compareAndSet(seq, 0)) {
+				failLifetimeLeaderboardRequest();
+			}
+			return;
+		}
 		partyCommandExecutor.schedule(() -> {
 			try {
 				if (lifetimeRequestPendingId.compareAndSet(seq, 0)) {
@@ -2102,6 +2168,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 	private void failLifetimeLeaderboardRequest() {
 		lifetimeRequestPendingId.set(0);
+		pendingLifetimeFilter = null;
 		lifetimeLeaderboardError = "Failed to fetch leaderboard stats";
 		lifetimeLeaderboardErrorAtMs = System.currentTimeMillis();
 		lifetimeLeaderboardGeneration.incrementAndGet();
@@ -3269,8 +3336,10 @@ public final class EdenModClient implements ClientModInitializer {
 		longEventGeneration.set(0);
 		longEventError = "";
 		longEventErrorAtMs = 0L;
-		cycleRequestSeq.incrementAndGet();
-		cycleRequestPendingId.set(0);
+		cycleGuiSeq.incrementAndGet();
+		cycleGuiPendingId.set(0);
+		cyclePrintSeq.incrementAndGet();
+		cyclePrintPendingId.set(0);
 		lifetimeRequestSeq.incrementAndGet();
 		lifetimeRequestPendingId.set(0);
 		knownCycleLeaderboard = null;
@@ -3283,6 +3352,8 @@ public final class EdenModClient implements ClientModInitializer {
 		lifetimeLeaderboardErrorAtMs = 0L;
 		concludedCyclesByCode.clear();
 		pendingCyclePrintCode = null;
+		pendingCycleGuiCode = null;
+		pendingLifetimeFilter = null;
 		lastCycleQueryAtMs = 0L;
 		lastLifetimeQueryAtMs = 0L;
 		tel.eden.mod.chat.ImagePreviewManager.clear();

@@ -35,4 +35,13 @@ class PlayerSkinResolverTest {
 		assertNull(PlayerSkinResolver.parseUuid(""));
 		assertNull(PlayerSkinResolver.parseUuid(null));
 	}
+
+	@Test
+	void resetSafelyBumpsGenerationAndKeepsFallbackSkinsAvailable() {
+		PlayerSkinResolver.reset();
+		PlayerSkin skin = PlayerSkinResolver.skinFor(null, UUID.fromString("387c49fd-f06c-47b7-97a6-b97a5ecc0bd3"), "Hino1712");
+		assertNotNull(skin);
+		PlayerSkinResolver.reset();
+		assertSame(DefaultPlayerSkin.getDefaultSkin(), PlayerSkinResolver.skinFor(null, null, null));
+	}
 }

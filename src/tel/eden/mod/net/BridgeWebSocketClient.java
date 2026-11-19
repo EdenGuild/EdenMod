@@ -1085,11 +1085,11 @@ public final class BridgeWebSocketClient {
 	}
 
 	/** Request a promotion-cycle leaderboard snapshot (null/blank means current cycle). */
-	public void sendCycleLeaderboardRequest(String cycleCode) {
+	public boolean sendCycleLeaderboardRequest(String cycleCode) {
 		WebSocket current = socket;
 		if (current == null) {
 			LOGGER.warn("Skipped cycleLeaderboardRequest (WebSocket disconnected)");
-			return;
+			return false;
 		}
 		String target = (cycleCode != null && !cycleCode.isBlank()) ? cycleCode.trim() : "<current>";
 		LOGGER.info("Sending cycleLeaderboardRequest (cycle={})", target);
@@ -1098,15 +1098,15 @@ public final class BridgeWebSocketClient {
 		if (cycleCode != null && !cycleCode.isBlank()) {
 			obj.addProperty("cycleCode", cycleCode.trim());
 		}
-		enqueueSend(current, obj);
+		return enqueueSend(current, obj);
 	}
 
 	/** Request lifetime (or custom day-interval) Raids/Wars leaderboards and cycle finishes. */
-	public void sendLifetimeLeaderboardRequest(Double fromDays, Double toDays) {
+	public boolean sendLifetimeLeaderboardRequest(Double fromDays, Double toDays) {
 		WebSocket current = socket;
 		if (current == null) {
 			LOGGER.warn("Skipped lifetimeLeaderboardRequest (WebSocket disconnected)");
-			return;
+			return false;
 		}
 		LOGGER.info("Sending lifetimeLeaderboardRequest (fromDays={}, toDays={})", fromDays, toDays);
 		JsonObject obj = new JsonObject();
@@ -1117,7 +1117,7 @@ public final class BridgeWebSocketClient {
 		if (toDays != null) {
 			obj.addProperty("toDays", toDays);
 		}
-		enqueueSend(current, obj);
+		return enqueueSend(current, obj);
 	}
 
 	/** Ask the backend to reroll a long-event mission slot ({@code "daily"}, {@code "weekly"}, or {@code "repeatable"}). */
