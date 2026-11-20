@@ -7,6 +7,7 @@ import tel.eden.mod.chat.BankEventParser;
 import tel.eden.mod.chat.CapturedMessage;
 import tel.eden.mod.chat.ChatRelay;
 import tel.eden.mod.chat.DiscordChatFormatter;
+import tel.eden.mod.chat.EconomyMessageFilter;
 import tel.eden.mod.chat.EmoteRegistry;
 import tel.eden.mod.chat.GuildAnnounceParser;
 import tel.eden.mod.chat.ChatDecorators;
@@ -188,6 +189,8 @@ public final class EdenModClient implements ClientModInitializer {
 	// repeated (e.g. "d" then "d") from the same line relayed by multiple online
 	// members' clients, which is clock-/arrival-skew independent (order, not time).
 	private final OccurrenceSequencer chatSeq = new OccurrenceSequencer(15_000L);
+	// Matches EdenBot's 60s ClaimRelay window (_RAID_DEDUP_WINDOW) so genuine repeats within a minute are not dropped.
+	private final OccurrenceSequencer economySeq = new OccurrenceSequencer(60_000L);
 	private final BackgroundContainerSession backgroundContainers = new BackgroundContainerSession();
 	private final GuildRewards guildRewards = new GuildRewards(backgroundContainers);
 	private final GuildLogSync guildLogSync = new GuildLogSync(backgroundContainers);
@@ -2186,9 +2189,9 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	/**
-	 * {@code /eden logscan}: a Chief or Owner reads the whole Guild Log (every filter, five
-	 * pages each) and uploads it, behind the same blocking progress screen a gift run uses.
-	 * The walk stops by itself after 90 seconds; there is no Cancel button.
+	 * {@code /eden logscan}: a Chief or Owner reads the General Guild Log (five pages)
+	 * and uploads it, behind a blocking progress screen with a Cancel button. Stops by
+	 * itself after 90 seconds or when cancelled.
 	 */
 	private int scanLog(FabricClientCommandSource source) {
 		if (!ensureRewardsReady(source)) {
@@ -2207,13 +2210,16 @@ public final class EdenModClient implements ClientModInitializer {
 			return 0;
 		}
 		Minecraft mc = Minecraft.getInstance();
-		tel.eden.mod.gui.GiftProgressScreen progress = new tel.eden.mod.gui.GiftProgressScreen("Guild Log Scan");
+		tel.eden.mod.gui.GiftProgressScreen progress = new tel.eden.mod.gui.GiftProgressScreen("Guild Log Scan", guildLogSync::requestCancel);
 		showProgressScreen(progress);
 		long started = System.currentTimeMillis();
 		guildLogSync.scanWholeLog(progress::onProgress).whenComplete((rows, error) -> {
+			boolean cancelled = Integer.valueOf(GuildLogSync.CANCELLED).equals(rows) || guildLogSync.isCancelRequested();
 			progress.onDone();
 			mc.execute(() -> {
-				if (error != null) {
+				if (cancelled) {
+					source.sendFeedback(Component.literal("Guild Log scan cancelled.").withStyle(net.minecraft.ChatFormatting.YELLOW));
+				} else if (error != null) {
 					LOGGER.warn("Guild log scan failed after {}ms", System.currentTimeMillis() - started, error);
 					source.sendFeedback(Component.literal("Guild Log scan failed: " + error.getMessage()).withStyle(net.minecraft.ChatFormatting.RED));
 				} else if (rows > 0) {
@@ -3512,6 +3518,13 @@ public final class EdenModClient implements ClientModInitializer {
 		// A Guild Tome dropping into the reward pool, posted to the rewards log.
 		if (tel.eden.mod.chat.GuildTomeFoundParser.matches(message)) {
 			current.sendGuildTomeFound(tomeFoundSeq.next("guildTomeFound"));
+			return;
+		}
+		// Territory economy/management announcements — tracked directly from chat for /manage log economy.
+		Optional<String> economy = EconomyMessageFilter.parse(message);
+		if (economy.isPresent()) {
+			String text = economy.get();
+			current.sendGuildEconomy(text, economySeq.next(text));
 			return;
 		}
 		// Annihilation world-event warning (the only advance timing signal we get).

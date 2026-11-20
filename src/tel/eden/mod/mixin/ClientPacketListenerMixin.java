@@ -133,6 +133,7 @@ public class ClientPacketListenerMixin {
 			return;
 		}
 		if (mod != null && mod.config().hideEconomyMessages && EconomyMessageFilter.isEconomyMessage(packet.content())) {
+			mod.handleSystemChat(packet.content());
 			ci.cancel();
 			return;
 		}

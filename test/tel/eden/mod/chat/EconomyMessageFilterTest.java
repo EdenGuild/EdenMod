@@ -1,8 +1,10 @@
 package tel.eden.mod.chat;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Optional;
 import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 
@@ -81,5 +83,17 @@ class EconomyMessageFilterTest {
 		assertFalse(EconomyMessageFilter.isEconomyMessage(""));
 		assertFalse(EconomyMessageFilter.isEconomyMessage("   "));
 		assertFalse(EconomyMessageFilter.isEconomyMessage((Component) null));
+	}
+
+	@Test
+	void parseNormalizesEconomyMessagesAndRejectsOthers() {
+		String raw = "&b&{fr:cp}\uDBFF\uDFCC\uE007\uFFFD\u0003\uFFFD&{fr:d} MemberA changed the ally tax of Path to the Grootslangs\n\uDBFF\uDFCC\uE001 to 67%";
+		Optional<String> expected = Optional.of("MemberA changed the ally tax of Path to the Grootslangs to 67%");
+		assertEquals(expected, EconomyMessageFilter.parse(raw));
+		assertEquals(expected, EconomyMessageFilter.parse(Component.literal(raw)));
+		assertEquals(Optional.empty(), EconomyMessageFilter.parse("MemberA: thank u"));
+		assertEquals(Optional.empty(), EconomyMessageFilter.parse((String) null));
+		assertEquals(Optional.empty(), EconomyMessageFilter.parse("   "));
+		assertEquals(Optional.empty(), EconomyMessageFilter.parse((Component) null));
 	}
 }

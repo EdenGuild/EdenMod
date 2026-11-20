@@ -1,5 +1,6 @@
 package tel.eden.mod.chat;
 
+import java.util.Optional;
 import java.util.regex.Pattern;
 import net.minecraft.network.chat.Component;
 
@@ -26,7 +27,12 @@ public final class EconomyMessageFilter {
 	 * @return true if the message is an economy announcement that should be hidden
 	 */
 	public static boolean isEconomyMessage(Component message) {
-		return message != null && isEconomyMessage(message.getString());
+		return parse(message).isPresent();
+	}
+
+	/** Parse a raw component into a normalized economy line, or empty if it is not an economy message. */
+	public static Optional<String> parse(Component message) {
+		return message == null ? Optional.empty() : parse(message.getString());
 	}
 
 	/**
@@ -36,10 +42,19 @@ public final class EconomyMessageFilter {
 	 * @return true if the text matches an economy message pattern
 	 */
 	public static boolean isEconomyMessage(String rawText) {
+		return parse(rawText).isPresent();
+	}
+
+	/** Parse a raw string into a normalized economy line, or empty if it is not an economy message. */
+	public static Optional<String> parse(String rawText) {
 		if (rawText == null || rawText.isBlank()) {
-			return false;
+			return Optional.empty();
 		}
-		return ECONOMY_PATTERN.matcher(normalize(rawText)).matches();
+		String normalized = normalize(rawText);
+		if (!ECONOMY_PATTERN.matcher(normalized).matches()) {
+			return Optional.empty();
+		}
+		return Optional.of(normalized.length() > 300 ? normalized.substring(0, 300) : normalized);
 	}
 
 	/**
