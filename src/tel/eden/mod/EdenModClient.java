@@ -2300,7 +2300,11 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 		guildRewards.ensureFresh(playerName());
 		if (guildRewards.memberNames().isEmpty()) {
-			source.sendFeedback(Component.literal("Fetching guild data — try again in a moment.").withStyle(net.minecraft.ChatFormatting.YELLOW));
+			if (guildRewards.lastRefreshFailed()) {
+				source.sendFeedback(Component.literal("Couldn't load guild data: Wynncraft's API isn't responding. Rewards are paused until it does — try again in a minute.").withStyle(net.minecraft.ChatFormatting.RED));
+			} else {
+				source.sendFeedback(Component.literal("Fetching guild data — try again in a moment.").withStyle(net.minecraft.ChatFormatting.YELLOW));
+			}
 			return false;
 		}
 		return true;

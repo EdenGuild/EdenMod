@@ -549,9 +549,13 @@ public final class GuildRewards {
 
 	private volatile String rank = "";
 	private volatile Map<String, MemberInfo> members = emptyMembers();
+	private static final java.util.regex.Pattern GUILD_UUID = java.util.regex.Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 	private volatile long lastRefresh = 0L;
 	private volatile long lastAttempt = 0L;
 	private volatile boolean refreshing;
+	// Set when the last refresh failed, cleared by the next good one, so the reward commands
+	// can say the API is down instead of "fetching" forever.
+	private volatile boolean lastRefreshFailed;
 
 	/** Whether the linked player is a Chief or Owner (only they may gift). */
 	public boolean isChief() {
@@ -663,7 +667,9 @@ public final class GuildRewards {
 		worker.submit(() -> {
 			try {
 				refresh(playerName);
+				lastRefreshFailed = false;
 			} catch (Exception e) {
+				lastRefreshFailed = true;
 				LOGGER.warn("Guild rewards refresh failed: {}", e.toString());
 			} finally {
 				refreshing = false;
@@ -681,9 +687,25 @@ public final class GuildRewards {
 		JsonObject guild = player.getAsJsonObject("guild");
 		rank = guild.has("rank") ? guild.get("rank").getAsString() : "";
 		String guildName = guild.get("name").getAsString();
-		JsonObject g = getJson("https://api.wynncraft.com/v3/guild/" + URLEncoder.encode(guildName, StandardCharsets.UTF_8));
+		JsonObject g = getJson(guildUrl(guild.has("uuid") && !guild.get("uuid").isJsonNull() ? guild.get("uuid").getAsString() : null, guildName));
 		members = parseMembers(g);
 		lastRefresh = System.currentTimeMillis();
+	}
+
+	/**
+	 * The guild endpoint for this guild. By UUID when the player record gives one: the by-name
+	 * lookup has been answering Eden with 500s while the UUID one works (EdenGuild/todo#27).
+	 */
+	static String guildUrl(String uuid, String name) {
+		if (uuid != null && GUILD_UUID.matcher(uuid).matches()) {
+			return "https://api.wynncraft.com/v3/guild/uuid/" + uuid;
+		}
+		return "https://api.wynncraft.com/v3/guild/" + URLEncoder.encode(name, StandardCharsets.UTF_8);
+	}
+
+	/** Whether the last member-list refresh failed (Wynncraft's API down or erroring). */
+	public boolean lastRefreshFailed() {
+		return lastRefreshFailed;
 	}
 
 	private static Map<String, MemberInfo> parseMembers(JsonObject guild) {
