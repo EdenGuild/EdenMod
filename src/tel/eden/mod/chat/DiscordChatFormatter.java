@@ -119,6 +119,51 @@ public final class DiscordChatFormatter {
 		return line;
 	}
 
+	/** "The promotion cycle has concluded! [Print] [View]" for in-game guild members only. */
+	public static Component cycleConcluded(String cycleCode) {
+		String arg = (cycleCode != null && !cycleCode.isBlank()) ? " " + cycleCode.trim() : "";
+		Style print = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden cycle print" + arg)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Print top cycle results to chat")));
+		Style view = Style.EMPTY.withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.RunCommand("/eden cycle view" + arg)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open the promotion cycle leaderboard")));
+		return Component.empty().append(prefix(SHIELD)).append(Component.literal("The promotion cycle has concluded! ").withStyle(ChatFormatting.GOLD)).append(Component.literal("[Print]").setStyle(print)).append(Component.literal(" ")).append(Component.literal("[View]").setStyle(view));
+	}
+
+	/** Format concluded cycle summary (top 3 raids, top 1 wars, top 3 raffle, totals) for [Print]. */
+	public static Component formatCyclePrint(tel.eden.mod.net.CycleLeaderboardData.ConcludedCycleSummary summary) {
+		MutableComponent out = Component.empty().append(prefix(SHIELD));
+		String title = (summary.cycleCode() != null && !summary.cycleCode().isBlank()) ? "Promotion Cycle " + summary.cycleCode() + " Results:" : "Promotion Cycle Results:";
+		out.append(Component.literal(title).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+		out.append(Component.literal("\n  Top 3 Raids:").withStyle(ChatFormatting.AQUA));
+		List<tel.eden.mod.net.CycleLeaderboardData.LeaderboardEntry> topRaids = summary.topRaids().stream().filter(e -> e.count() > 0 && e.rank() <= 3).limit(3).toList();
+		if (topRaids.isEmpty()) {
+			out.append(Component.literal("\n    None").withStyle(ChatFormatting.GRAY));
+		} else {
+			for (tel.eden.mod.net.CycleLeaderboardData.LeaderboardEntry e : topRaids) {
+				out.append(Component.literal("\n    #" + e.rank() + " " + e.name()).withStyle(ChatFormatting.WHITE)).append(Component.literal(" — " + e.count() + " raids").withStyle(ChatFormatting.GRAY));
+			}
+		}
+		out.append(Component.literal("\n  Top 1 Wars:").withStyle(ChatFormatting.RED));
+		List<tel.eden.mod.net.CycleLeaderboardData.LeaderboardEntry> topWars = summary.topWars().stream().filter(e -> e.count() > 0 && e.rank() == 1).limit(3).toList();
+		if (topWars.isEmpty()) {
+			out.append(Component.literal("\n    None").withStyle(ChatFormatting.GRAY));
+		} else {
+			for (tel.eden.mod.net.CycleLeaderboardData.LeaderboardEntry e : topWars) {
+				out.append(Component.literal("\n    #" + e.rank() + " " + e.name()).withStyle(ChatFormatting.WHITE)).append(Component.literal(" — " + e.count() + " wars").withStyle(ChatFormatting.GRAY));
+			}
+		}
+		out.append(Component.literal("\n  Top 3 Raffle:").withStyle(ChatFormatting.LIGHT_PURPLE));
+		List<tel.eden.mod.net.CycleLeaderboardData.RaffleWinner> winners = summary.raffleWinners().subList(0, Math.min(3, summary.raffleWinners().size()));
+		if (winners.isEmpty()) {
+			out.append(Component.literal("\n    None").withStyle(ChatFormatting.GRAY));
+		} else {
+			for (int i = 0; i < winners.size(); i++) {
+				tel.eden.mod.net.CycleLeaderboardData.RaffleWinner w = winners.get(i);
+				out.append(Component.literal("\n    #" + (i + 1) + " " + w.name()).withStyle(ChatFormatting.WHITE)).append(Component.literal(" — " + w.tickets() + " tickets (" + w.raids() + " raids)").withStyle(ChatFormatting.GRAY));
+			}
+		}
+		out.append(Component.literal("\n  Totals: ").withStyle(ChatFormatting.GOLD)).append(Component.literal(summary.totalRaids() + " raids | " + summary.totalWars() + " wars | " + summary.totalTickets() + " tickets").withStyle(ChatFormatting.YELLOW));
+		return out;
+	}
+
 	/** A green/gold/red client-side notice line with the guild shield prefix. */
 	public static Component systemLine(String text, ChatFormatting color) {
 		return Component.empty().append(prefix(SHIELD)).append(Component.literal(text).withStyle(color));
@@ -235,6 +280,8 @@ public final class DiscordChatFormatter {
 	private static final int TRAVELER_RGB = 0xB388FF;
 	// The message text is a lighter shade than the tag and name so the name stands out.
 	private static final int TRAVELER_TEXT_RGB = 0xD8C2FF;
+	// Emblem colour on traveler lines that came from Discord (Discord blurple).
+	private static final int DISCORD_RGB = 0x5865F2;
 
 	// Invisible line markers a Wynntils chat-tab regex can match: one zero-width
 	// non-joiner on every line this mod draws, two on traveler chat so it can be
@@ -242,21 +289,38 @@ public final class DiscordChatFormatter {
 	private static final String LINE_MARKER = "\u200C";
 	private static final String TRAVELER_MARKER = "\u200C\u200C";
 
-	/** A traveler-chat line; links, images, GIFs, stickers and emotes render as in bridge chat. */
-	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId) {
+	/**
+	 * A traveler-chat line; links, images, GIFs, stickers and emotes render as in bridge chat.
+	 * {@code tier} ("member", "veteran", anything else = traveler) picks the pill text; the
+	 * emblem is lavender, or Discord blurple when {@code fromDiscord}.
+	 */
+	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId, String tier, boolean fromDiscord) {
+		return travelerChat(author, content, replyTo, replyExcerpt, messageId, tier, fromDiscord, null, null);
+	}
+
+	/** {@link #travelerChat} with the first {@code itemLabel} in the text styled {@code itemStyle} (a shared item's hover). */
+	public static Component travelerChat(String author, String content, String replyTo, String replyExcerpt, String messageId, String tier, boolean fromDiscord, String itemLabel, Style itemStyle) {
 		boolean hasId = messageId != null && !messageId.isEmpty();
 		if (hasId) {
 			ChatReplyManager.recordTravelerMessage(messageId, author, content);
 		}
+		String label = "member".equals(tier) || "veteran".equals(tier) ? tier : "traveler";
 		Style color = Style.EMPTY.withColor(TRAVELER_RGB);
 		Style click = hasId ? color.withClickEvent(new ClickEvent.RunCommand("/eden treply " + messageId)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to reply to @" + author).withStyle(ChatFormatting.GRAY))) : color;
 		boolean reply = replyTo != null && !replyTo.isEmpty();
-		MutableComponent body = Component.empty().append(Component.literal(pillLabel("traveler")).withStyle(click.withFont(PILL_FONT))).append(Component.literal(reply ? " " + author : " " + author + ": ").withStyle(click));
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(click.withFont(PILL_FONT))).append(Component.literal(reply ? " " + author : " " + author + ": ").withStyle(click));
 		if (reply) {
 			body.append(Component.literal(" replied to ").withStyle(ChatFormatting.GRAY)).append(replyTarget(replyTo, replyExcerpt, color)).append(Component.literal(": ").withStyle(color));
 		}
-		body.append(linkify(content, hasId ? click : null, Style.EMPTY.withColor(TRAVELER_TEXT_RGB)));
-		return withGuildPrefix(body, TRAVELER_MARKER);
+		int at = itemLabel == null || itemStyle == null ? -1 : content.indexOf(itemLabel);
+		Style textStyle = Style.EMPTY.withColor(TRAVELER_TEXT_RGB);
+		if (at < 0) {
+			body.append(linkify(content, hasId ? click : null, textStyle));
+		} else {
+			int end = at + itemLabel.length();
+			body.append(linkify(content.substring(0, at), hasId ? click : null, textStyle)).append(Component.literal(itemLabel).withStyle(itemStyle)).append(linkify(content.substring(end), hasId ? click : null, textStyle));
+		}
+		return withGuildPrefix(body, TRAVELER_MARKER, fromDiscord ? DISCORD_RGB : TRAVELER_RGB);
 	}
 
 	/**
@@ -443,8 +507,13 @@ public final class DiscordChatFormatter {
 	}
 
 	private static Component withGuildPrefix(Component body, String marker) {
-		Component shield = prefix(SHIELD, marker);
-		Component continuation = prefix(CONTINUATION, marker);
+		return withGuildPrefix(body, marker, null);
+	}
+
+	/** {@code emblemRgb} recolours the emblem and wrap bars; null keeps the guild green. */
+	private static Component withGuildPrefix(Component body, String marker, Integer emblemRgb) {
+		Component shield = prefix(SHIELD, marker, emblemRgb);
+		Component continuation = prefix(CONTINUATION, marker, emblemRgb);
 		Minecraft mc = Minecraft.getInstance();
 		Font font = mc.font;
 		int reserve = font.width(continuation);
@@ -480,12 +549,19 @@ public final class DiscordChatFormatter {
 	}
 
 	private static Component prefix(int[] glyphs, String marker) {
+		return prefix(glyphs, marker, null);
+	}
+
+	private static Component prefix(int[] glyphs, String marker, Integer emblemRgb) {
 		StringBuilder out = new StringBuilder();
-		out.append(marker);
 		for (int glyph : glyphs) {
 			out.appendCodePoint(glyph);
 		}
-		return Component.literal(out.toString()).append(" ").withStyle(PREFIX_STYLE);
+		if (emblemRgb == null) {
+			return Component.literal(marker + out).append(" ").withStyle(PREFIX_STYLE);
+		}
+		// The marker keeps the guild-green style so Wynntils tab filters see the same text.
+		return Component.literal(marker).withStyle(PREFIX_STYLE).append(Component.literal(out + " ").withStyle(PREFIX_STYLE.withColor(emblemRgb)));
 	}
 
 	private static MutableComponent toComponent(FormattedText text) {

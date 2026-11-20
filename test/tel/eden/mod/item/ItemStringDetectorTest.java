@@ -59,6 +59,21 @@ class ItemStringDetectorTest {
 	}
 
 	@Test
+	void replacesTheItemAndItsCraftedNameWithALabel() {
+		String plain = "look " + puaRun(8) + " nice";
+		assertEquals("look [Dondasch] nice", ItemStringDetector.replace(plain, ItemStringDetector.detect(plain).orElseThrow(), "[Dondasch]"));
+		String crafted = puaRun(8) + " \"My Cool Weapon\" ok";
+		assertEquals("[My Cool Weapon] ok", ItemStringDetector.replace(crafted, ItemStringDetector.detect(crafted).orElseThrow(), "[My Cool Weapon]"));
+	}
+
+	@Test
+	void encodedRebuildsTheShareStringAsTyped() {
+		String crafted = puaRun(8) + " \"My Cool Weapon\"";
+		assertEquals(crafted, ItemStringDetector.detect("look " + crafted).orElseThrow().encoded());
+		assertEquals(puaRun(8), ItemStringDetector.detect(puaRun(8)).orElseThrow().encoded());
+	}
+
+	@Test
 	void rejectsPlainTextAndNullAndEmpty() {
 		assertTrue(ItemStringDetector.detect("just plain chat, no items here").isEmpty());
 		assertTrue(ItemStringDetector.detect(null).isEmpty());

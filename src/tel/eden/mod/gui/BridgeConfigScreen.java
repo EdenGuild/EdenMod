@@ -119,6 +119,10 @@ public final class BridgeConfigScreen extends EdenScreen {
 		if (!traveler) {
 			addToggleRow(Category.GENERAL, "Discord Bridge Messages", () -> config.discordBridgeMessages, v -> config.discordBridgeMessages = v, "On", "Off", true);
 		}
+		if (mod.isFullMember()) {
+			addButtonRow(Category.GENERAL, "Promotion cycle", () -> Component.literal("Open..."), () -> this.minecraft.setScreen(new PromotionCycleScreen(this, mod)), () -> {
+			});
+		}
 		addToggleRow(Category.GENERAL, "Traveler chat", () -> config.travelerChat, v -> {
 			config.travelerChat = v;
 			EdenModClient.syncTravelerPrefs(config);

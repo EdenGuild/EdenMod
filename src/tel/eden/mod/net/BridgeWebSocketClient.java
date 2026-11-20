@@ -220,7 +220,19 @@ public final class BridgeWebSocketClient {
 		void onAuthStatus(boolean linked, boolean member, boolean traveler, String guildRank, String discordRank);
 
 		/** A traveler-chat line from the game or Discord side. */
-		default void onTravelerChat(String author, String content, String source, String color, String replyTo, String replyExcerpt, String messageId) {
+		default void onTravelerChat(String author, String content, String source, String tier, String color, String replyTo, String replyExcerpt, String messageId, String item) {
+		}
+
+		/** Promotion cycle leaderboard snapshot (current or archived cycle). */
+		default void onCycleLeaderboard(CycleLeaderboardData.CycleSnapshot snapshot) {
+		}
+
+		/** Lifetime or custom-interval leaderboard snapshot with cycle podium finishes. */
+		default void onLifetimeLeaderboard(CycleLeaderboardData.LifetimeSnapshot snapshot) {
+		}
+
+		/** Broadcast sent when a promotion cycle finishes and finalizes. */
+		default void onCycleConcluded(CycleLeaderboardData.ConcludedCycleSummary summary) {
 		}
 	}
 
@@ -678,8 +690,20 @@ public final class BridgeWebSocketClient {
 
 	/** Send a traveler-chat line (members and travelers). */
 	public boolean sendTravelerChat(String content, String replyToMessageId) {
+		return sendTravelerChat(content, replyToMessageId, null, null);
+	}
+
+	/** Send a traveler-chat line with a shared item's rendered card (base64 PNG) and raw share string, both optional. */
+	public boolean sendTravelerChat(String content, String replyToMessageId, String imageBase64, String itemShare) {
 		WebSocket current = socket;
-		return current != null && enqueueSend(current, travelerChatPayload(content, replyToMessageId));
+		JsonObject obj = travelerChatPayload(content, replyToMessageId);
+		if (imageBase64 != null) {
+			obj.addProperty("image", imageBase64);
+		}
+		if (itemShare != null) {
+			obj.addProperty("item", itemShare);
+		}
+		return current != null && enqueueSend(current, obj);
 	}
 
 	/** Tell the backend whether to deliver traveler chat and which game lines to show ("guild", "all" or "off"). */
@@ -1066,6 +1090,37 @@ public final class BridgeWebSocketClient {
 		sendType("longEventStateRequest");
 	}
 
+	/** Request a promotion-cycle leaderboard snapshot (null/blank means current cycle). */
+	public boolean sendCycleLeaderboardRequest(String cycleCode) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "cycleLeaderboardRequest");
+		if (cycleCode != null && !cycleCode.isBlank()) {
+			obj.addProperty("cycleCode", cycleCode.trim());
+		}
+		return enqueueSend(current, obj);
+	}
+
+	/** Request lifetime (or custom day-interval) Raids/Wars leaderboards and cycle finishes. */
+	public boolean sendLifetimeLeaderboardRequest(Double fromDays, Double toDays) {
+		WebSocket current = socket;
+		if (current == null) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "lifetimeLeaderboardRequest");
+		if (fromDays != null) {
+			obj.addProperty("fromDays", fromDays);
+		}
+		if (toDays != null) {
+			obj.addProperty("toDays", toDays);
+		}
+		return enqueueSend(current, obj);
+	}
+
 	/** Ask the backend to reroll a long-event mission slot ({@code "daily"}, {@code "weekly"}, or {@code "repeatable"}). */
 	public void sendLongEventReroll(String slot) {
 		sendLongEventReroll(slot, false);
@@ -1213,6 +1268,18 @@ public final class BridgeWebSocketClient {
 		obj.addProperty("giver", giver);
 		obj.addProperty("reward", reward);
 		obj.addProperty("receiver", receiver);
+		obj.addProperty("seq", seq);
+		enqueueSend(current, obj);
+	}
+
+	/** Report a Guild Tome found and added to the guild's reward pool. */
+	public void sendGuildTomeFound(int seq) {
+		WebSocket current = socket;
+		if (current == null) {
+			return;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "guildTomeFound");
 		obj.addProperty("seq", seq);
 		enqueueSend(current, obj);
 	}
@@ -1528,12 +1595,13 @@ public final class BridgeWebSocketClient {
 	private void handlePayload(String payload) {
 		try {
 			JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
-			if (!OutboundPolicy.inboundAllowed(standing, get(obj, "type"))) {
+			String inboundType = get(obj, "type");
+			if (!OutboundPolicy.inboundAllowed(standing, inboundType)) {
 				return;
 			}
-			switch (get(obj, "type")) {
+			switch (inboundType) {
 				case "discordMessage" -> sink.onDiscordMessage(get(obj, "author"), get(obj, "content"), get(obj, "replyTo"), get(obj, "replyExcerpt"), get(obj, "color"), get(obj, "messageId"));
-				case "travelerChat" -> sink.onTravelerChat(cap(get(obj, "author"), 64), cap(get(obj, "content"), 512), get(obj, "source"), get(obj, "color"), cap(get(obj, "replyTo"), 64), cap(get(obj, "replyExcerpt"), 256), get(obj, "messageId").matches("[0-9]{1,20}") ? get(obj, "messageId") : "");
+				case "travelerChat" -> sink.onTravelerChat(cap(get(obj, "author"), 64), cap(get(obj, "content"), 512), get(obj, "source"), get(obj, "tier"), get(obj, "color"), cap(get(obj, "replyTo"), 64), cap(get(obj, "replyExcerpt"), 256), get(obj, "messageId").matches("[0-9]{1,20}") ? get(obj, "messageId") : "", cap(get(obj, "item"), 2200));
 				case "loginNotice" -> sink.onLoginNotice(get(obj, "username"), get(obj, "color"));
 				case "logoutNotice" -> sink.onLogoutNotice(get(obj, "username"), get(obj, "color"));
 				case "onlineList" -> sink.onOnlineList(getStringArray(obj, "users"), get(obj, "color"));
@@ -1574,6 +1642,9 @@ public final class BridgeWebSocketClient {
 					sink.onLongEventState(state, state.isSnapshot());
 				}
 				case "longEventRewards" -> sink.onLongEventRewards(getInt(obj, "pendingLe", 0), get(obj, "error"));
+				case "cycleLeaderboardReply" -> sink.onCycleLeaderboard(parseCycleSnapshot(obj));
+				case "lifetimeLeaderboardReply" -> sink.onLifetimeLeaderboard(parseLifetimeSnapshot(obj));
+				case "cycleConcluded" -> sink.onCycleConcluded(parseConcludedCycleSummary(obj));
 				case "authChallenge" -> handleAuthChallenge(get(obj, "serverId"));
 				case "authOk" -> {
 					authenticated = true;
@@ -1926,5 +1997,80 @@ public final class BridgeWebSocketClient {
 			}
 		}
 		return new LongEventState(getBool(obj, "active"), getLong(obj, "endsAtMs", 0L), getInt(obj, "pendingLe", 0), getInt(obj, "rerollCost", 0), getInt(obj, "triviaPoints", 0), getBool(obj, "repeatSlot2Active"), get(obj, "error"), slots, masters, specialSlots);
+	}
+
+	private static Integer getOptionalInt(JsonObject obj, String key) {
+		try {
+			return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsInt() : null;
+		} catch (RuntimeException e) {
+			return null;
+		}
+	}
+
+	private static Double getOptionalDouble(JsonObject obj, String key) {
+		try {
+			return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsDouble() : null;
+		} catch (RuntimeException e) {
+			return null;
+		}
+	}
+
+	private static java.util.List<CycleLeaderboardData.LeaderboardEntry> parseLeaderboardEntries(JsonObject obj, String key) {
+		java.util.List<CycleLeaderboardData.LeaderboardEntry> out = new java.util.ArrayList<>();
+		if (obj.has(key) && obj.get(key).isJsonArray()) {
+			for (var element : obj.get(key).getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject row = element.getAsJsonObject();
+					out.add(new CycleLeaderboardData.LeaderboardEntry(get(row, "uuid"), get(row, "name"), getInt(row, "count", 0), getInt(row, "rank", 0), getOptionalInt(row, "delta")));
+				}
+			}
+		}
+		return CycleLeaderboardData.rankEntries(out);
+	}
+
+	private static java.util.List<CycleLeaderboardData.PodiumEntry> parsePodiumEntries(JsonObject obj, String key) {
+		java.util.List<CycleLeaderboardData.PodiumEntry> out = new java.util.ArrayList<>();
+		if (obj.has(key) && obj.get(key).isJsonArray()) {
+			for (var element : obj.get(key).getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject row = element.getAsJsonObject();
+					out.add(new CycleLeaderboardData.PodiumEntry(get(row, "uuid"), get(row, "name"), getInt(row, "first", 0), getInt(row, "second", 0), getInt(row, "third", 0)));
+				}
+			}
+		}
+		return java.util.List.copyOf(out);
+	}
+
+	private static java.util.List<CycleLeaderboardData.RaffleWinner> parseRaffleWinners(JsonObject obj) {
+		java.util.List<CycleLeaderboardData.RaffleWinner> out = new java.util.ArrayList<>();
+		if (obj.has("raffleWinners") && obj.get("raffleWinners").isJsonArray()) {
+			for (var element : obj.get("raffleWinners").getAsJsonArray()) {
+				if (element.isJsonObject() && out.size() < 3) {
+					JsonObject row = element.getAsJsonObject();
+					out.add(new CycleLeaderboardData.RaffleWinner(get(row, "name"), getInt(row, "tickets", 0), getInt(row, "raids", 0)));
+				}
+			}
+		}
+		return java.util.List.copyOf(out);
+	}
+
+	static CycleLeaderboardData.CycleSnapshot parseCycleSnapshot(JsonObject obj) {
+		String error = obj.has("error") && !obj.get("error").isJsonNull() ? get(obj, "error") : "";
+		if (!error.isEmpty()) {
+			return CycleLeaderboardData.CycleSnapshot.error(error);
+		}
+		return new CycleLeaderboardData.CycleSnapshot(get(obj, "cycleCode"), getStringArray(obj, "cycles"), parseLeaderboardEntries(obj, "raids"), parseLeaderboardEntries(obj, "wars"), parseRaffleWinners(obj), getInt(obj, "totalRaids", 0), getInt(obj, "totalWars", 0), getInt(obj, "totalTickets", 0), getLong(obj, "endedAtMs", 0L), getBool(obj, "finalized"), "");
+	}
+
+	static CycleLeaderboardData.LifetimeSnapshot parseLifetimeSnapshot(JsonObject obj) {
+		String error = obj.has("error") && !obj.get("error").isJsonNull() ? get(obj, "error") : "";
+		if (!error.isEmpty()) {
+			return CycleLeaderboardData.LifetimeSnapshot.error(error);
+		}
+		return new CycleLeaderboardData.LifetimeSnapshot(getBool(obj, "hasInterval"), getOptionalDouble(obj, "fromDays"), getOptionalDouble(obj, "toDays"), parseLeaderboardEntries(obj, "raids"), parseLeaderboardEntries(obj, "wars"), parsePodiumEntries(obj, "raidFinishes"), parsePodiumEntries(obj, "warFinishes"), "");
+	}
+
+	static CycleLeaderboardData.ConcludedCycleSummary parseConcludedCycleSummary(JsonObject obj) {
+		return new CycleLeaderboardData.ConcludedCycleSummary(get(obj, "cycleCode"), parseLeaderboardEntries(obj, "topRaids"), parseLeaderboardEntries(obj, "topWars"), parseRaffleWinners(obj), getInt(obj, "totalRaids", 0), getInt(obj, "totalWars", 0), getInt(obj, "totalTickets", 0));
 	}
 }

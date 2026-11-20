@@ -27,7 +27,7 @@ public final class OutboundPolicy {
 	private OutboundPolicy() {
 	}
 
-	private static final Set<String> GUILD_ONLY_INBOUND = Set.of("warBoard", "discordMessage", "loginNotice", "logoutNotice", "onlineList");
+	private static final Set<String> GUILD_ONLY_INBOUND = Set.of("warBoard", "discordMessage", "loginNotice", "logoutNotice", "onlineList", "cycleLeaderboardReply", "lifetimeLeaderboardReply", "cycleConcluded");
 
 	/** Defence in depth: the server never sends these to a traveler, so drop them if one arrives. */
 	public static boolean inboundAllowed(Standing standing, String type) {

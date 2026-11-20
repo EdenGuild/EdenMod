@@ -51,6 +51,7 @@ import tel.eden.mod.gui.PartyManageScreen;
 import tel.eden.mod.item.DecodedItem;
 import tel.eden.mod.item.ItemCardRenderer;
 import tel.eden.mod.item.ItemStringDetector;
+import tel.eden.mod.item.WynntilsItemDecoder;
 import tel.eden.mod.net.AllyActivityEntry;
 import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.net.LongEventState;
@@ -182,6 +183,8 @@ public final class EdenModClient implements ClientModInitializer {
 	// Reward ticker packets are authoritative individual handouts. Unlike bank lines,
 	// never coalesce two that arrive within 200 ms: rapid legitimate gifts must both count.
 	private final OccurrenceSequencer rewardSeq = new OccurrenceSequencer(60_000L, false);
+	// Matches EdenBot's 60s claim window, so two finds within a minute stay distinct.
+	private final OccurrenceSequencer tomeFoundSeq = new OccurrenceSequencer(60_000L);
 	// Guild-chat occurrence index: lets the backend distinguish a line legitimately
 	// repeated (e.g. "d" then "d") from the same line relayed by multiple online
 	// members' clients, which is clock-/arrival-skew independent (order, not time).
@@ -249,6 +252,8 @@ public final class EdenModClient implements ClientModInitializer {
 
 	/** Guild-only commands are hidden from travelers; an unverified player keeps them, as before. */
 	private final java.util.function.Predicate<FabricClientCommandSource> guildOnly = source -> !isTraveler();
+	/** Member-only commands (events/cycle leaderboards) are hidden from travelers AND observers. */
+	private final java.util.function.Predicate<FabricClientCommandSource> fullMemberOnly = source -> isFullMember();
 
 	/** In-game guild rank last reported by the backend, or empty if unknown. */
 	public String liveGuildRank() {
@@ -295,6 +300,32 @@ public final class EdenModClient implements ClientModInitializer {
 	private volatile String longEventError = "";
 	private volatile long longEventErrorAtMs;
 	private final java.util.concurrent.atomic.AtomicInteger longEventGeneration = new java.util.concurrent.atomic.AtomicInteger();
+	private volatile tel.eden.mod.net.CycleLeaderboardData.CycleSnapshot knownCycleLeaderboard;
+	private volatile String cycleLeaderboardError = "";
+	private volatile long cycleLeaderboardErrorAtMs;
+	private final java.util.concurrent.atomic.AtomicInteger cycleLeaderboardGeneration = new java.util.concurrent.atomic.AtomicInteger();
+	private volatile tel.eden.mod.net.CycleLeaderboardData.LifetimeSnapshot knownLifetimeLeaderboard;
+	private volatile String lifetimeLeaderboardError = "";
+	private volatile long lifetimeLeaderboardErrorAtMs;
+	private final java.util.concurrent.atomic.AtomicInteger lifetimeLeaderboardGeneration = new java.util.concurrent.atomic.AtomicInteger();
+	private final java.util.Map<String, tel.eden.mod.net.CycleLeaderboardData.ConcludedCycleSummary> concludedCyclesByCode = new java.util.concurrent.ConcurrentHashMap<>();
+
+	private record LifetimeFilter(Double fromDays, Double toDays) {
+	}
+
+	private volatile String pendingCyclePrintCode;
+	private volatile String pendingCycleGuiCode;
+	private volatile LifetimeFilter pendingLifetimeFilter;
+	private static final long LEADERBOARD_TIMEOUT_SECONDS = 15L;
+	private final java.util.concurrent.atomic.AtomicLong cycleGuiSeq = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong cycleGuiPendingId = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong cyclePrintSeq = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong cyclePrintPendingId = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong lifetimeRequestSeq = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong lifetimeRequestPendingId = new java.util.concurrent.atomic.AtomicLong();
+	private final Object cycleSendLock = new Object();
+	private volatile long lastCycleQueryAtMs;
+	private volatile long lastLifetimeQueryAtMs;
 	// GitHub update check: run once per game session; the prompt offers a one-click
 	// download (applied on game close) and a link to the release page.
 	private final UpdateChecker updateChecker = new UpdateChecker();
@@ -576,6 +607,42 @@ public final class EdenModClient implements ClientModInitializer {
 		return longEventGeneration.get();
 	}
 
+	/** Latest promotion-cycle leaderboard snapshot, or {@code null} before first reply. */
+	public tel.eden.mod.net.CycleLeaderboardData.CycleSnapshot knownCycleLeaderboard() {
+		return knownCycleLeaderboard;
+	}
+
+	/** Last cycle leaderboard error while no snapshot is loaded or within 30s, else {@code ""}. */
+	public String recentCycleLeaderboardError() {
+		if (cycleLeaderboardError.isEmpty()) {
+			return "";
+		}
+		return (knownCycleLeaderboard == null || System.currentTimeMillis() - cycleLeaderboardErrorAtMs < 30_000L) ? cycleLeaderboardError : "";
+	}
+
+	/** Bumped on every cycle leaderboard snapshot or error update. */
+	public int cycleLeaderboardGeneration() {
+		return cycleLeaderboardGeneration.get();
+	}
+
+	/** Latest lifetime/interval leaderboard snapshot, or {@code null} before first reply. */
+	public tel.eden.mod.net.CycleLeaderboardData.LifetimeSnapshot knownLifetimeLeaderboard() {
+		return knownLifetimeLeaderboard;
+	}
+
+	/** Last lifetime leaderboard error while no snapshot is loaded or within 30s, else {@code ""}. */
+	public String recentLifetimeLeaderboardError() {
+		if (lifetimeLeaderboardError.isEmpty()) {
+			return "";
+		}
+		return (knownLifetimeLeaderboard == null || System.currentTimeMillis() - lifetimeLeaderboardErrorAtMs < 30_000L) ? lifetimeLeaderboardError : "";
+	}
+
+	/** Bumped on every lifetime leaderboard snapshot or error update. */
+	public int lifetimeLeaderboardGeneration() {
+		return lifetimeLeaderboardGeneration.get();
+	}
+
 	/** The guild reward helper (rank lookups + gifting). */
 	public GuildRewards guildRewards() {
 		return guildRewards;
@@ -850,7 +917,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(buildEventCommand()).then(ClientCommandManager.literal("logscan").requires(guildOnly).executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").requires(guildOnly).then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").requires(guildOnly).executes(ctx -> {
+			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(buildEventCommand()).then(buildCycleCommand()).then(ClientCommandManager.literal("logscan").requires(guildOnly).executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").requires(guildOnly).then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").requires(guildOnly).executes(ctx -> {
 				requestWarCounts(ctx.getSource(), 7);
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
@@ -1070,11 +1137,17 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
-				public void onTravelerChat(String author, String content, String source, String color, String replyTo, String replyExcerpt, String messageId) {
+				public void onTravelerChat(String author, String content, String source, String tier, String color, String replyTo, String replyExcerpt, String messageId, String item) {
 					if (!config.travelerChat) {
 						return;
 					}
-					displayColored(color, () -> DiscordChatFormatter.travelerChat(author, content, replyTo, replyExcerpt, messageId));
+					displayColored(color, () -> {
+						// Decoded on the client thread, like Wynntils does for server chat.
+						Optional<WynntilsItemDecoder.Hover> hover = item.isEmpty() ? Optional.empty() : WynntilsItemDecoder.hover(item);
+						String label = hover.map(WynntilsItemDecoder.Hover::label).orElse(null);
+						Style style = hover.map(h -> Style.EMPTY.withColor(h.rgb()).withUnderlined(true).withHoverEvent(new HoverEvent.ShowItem(h.stack()))).orElse(null);
+						return DiscordChatFormatter.travelerChat(author, content, replyTo, replyExcerpt, messageId, tier, "discord".equals(source), label, style);
+					});
 				}
 
 				@Override
@@ -1472,6 +1545,83 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
+				public void onCycleLeaderboard(tel.eden.mod.net.CycleLeaderboardData.CycleSnapshot snapshot) {
+					if (!isFullMember()) {
+						return;
+					}
+					if (snapshot.error() != null && !snapshot.error().isEmpty()) {
+						cycleGuiPendingId.set(0);
+						cyclePrintPendingId.set(0);
+						pendingCycleGuiCode = null;
+						String err = snapshot.error();
+						cycleLeaderboardError = err;
+						cycleLeaderboardErrorAtMs = System.currentTimeMillis();
+						cycleLeaderboardGeneration.incrementAndGet();
+						if (pendingCyclePrintCode != null) {
+							pendingCyclePrintCode = null;
+							display(() -> DiscordChatFormatter.systemLine(err, ChatFormatting.RED));
+						}
+						return;
+					}
+					String printTarget = pendingCyclePrintCode;
+					if (printTarget != null && tel.eden.mod.net.CycleLeaderboardData.matchesRequestedCycle(snapshot, printTarget)) {
+						pendingCyclePrintCode = null;
+						cyclePrintPendingId.set(0);
+						tel.eden.mod.net.CycleLeaderboardData.ConcludedCycleSummary derived = tel.eden.mod.net.CycleLeaderboardData.summaryFromSnapshot(snapshot);
+						display(() -> DiscordChatFormatter.formatCyclePrint(derived));
+					}
+					String guiTarget = pendingCycleGuiCode;
+					if (guiTarget == null && cycleGuiPendingId.get() == 0 && knownCycleLeaderboard != null) {
+						return;
+					}
+					if (guiTarget != null && !tel.eden.mod.net.CycleLeaderboardData.matchesRequestedCycle(snapshot, guiTarget)) {
+						return;
+					}
+					cycleGuiPendingId.set(0);
+					pendingCycleGuiCode = null;
+					cycleLeaderboardError = "";
+					cycleLeaderboardErrorAtMs = 0L;
+					knownCycleLeaderboard = snapshot;
+					cycleLeaderboardGeneration.incrementAndGet();
+				}
+
+				@Override
+				public void onLifetimeLeaderboard(tel.eden.mod.net.CycleLeaderboardData.LifetimeSnapshot snapshot) {
+					if (!isFullMember()) {
+						return;
+					}
+					if (snapshot.error() != null && !snapshot.error().isEmpty()) {
+						lifetimeRequestPendingId.set(0);
+						pendingLifetimeFilter = null;
+						lifetimeLeaderboardError = snapshot.error();
+						lifetimeLeaderboardErrorAtMs = System.currentTimeMillis();
+						lifetimeLeaderboardGeneration.incrementAndGet();
+						return;
+					}
+					LifetimeFilter expected = pendingLifetimeFilter;
+					if (expected != null && !tel.eden.mod.net.CycleLeaderboardData.matchesRequestedInterval(snapshot, expected.fromDays(), expected.toDays())) {
+						return;
+					}
+					lifetimeRequestPendingId.set(0);
+					pendingLifetimeFilter = null;
+					lifetimeLeaderboardError = "";
+					lifetimeLeaderboardErrorAtMs = 0L;
+					knownLifetimeLeaderboard = snapshot;
+					lifetimeLeaderboardGeneration.incrementAndGet();
+				}
+
+				@Override
+				public void onCycleConcluded(tel.eden.mod.net.CycleLeaderboardData.ConcludedCycleSummary summary) {
+					if (!isFullMember()) {
+						return;
+					}
+					if (summary.cycleCode() != null && !summary.cycleCode().isEmpty()) {
+						concludedCyclesByCode.put(summary.cycleCode(), summary);
+					}
+					display(() -> DiscordChatFormatter.cycleConcluded(summary.cycleCode()));
+				}
+
+				@Override
 				public void onAuthStatus(boolean linked, boolean member, boolean traveler, String guildRank, String discordRank) {
 					handleAuthStatus(linked, member, traveler, guildRank, discordRank);
 				}
@@ -1831,6 +1981,183 @@ public final class EdenModClient implements ClientModInitializer {
 				display(() -> Component.literal("Could not fetch event rewards").withStyle(ChatFormatting.RED));
 			}
 		}, 5, TimeUnit.SECONDS);
+	}
+
+	private LiteralArgumentBuilder<FabricClientCommandSource> buildCycleCommand() {
+		return ClientCommandManager.literal("cycle").requires(fullMemberOnly).executes(ctx -> openCycleGui(null)).then(ClientCommandManager.literal("view").executes(ctx -> openCycleGui(null)).then(ClientCommandManager.argument("cycle", StringArgumentType.word()).executes(ctx -> openCycleGui(StringArgumentType.getString(ctx, "cycle"))))).then(ClientCommandManager.literal("print").executes(ctx -> printCycleSummary(ctx.getSource(), null)).then(ClientCommandManager.argument("cycle", StringArgumentType.word()).executes(ctx -> printCycleSummary(ctx.getSource(), StringArgumentType.getString(ctx, "cycle")))));
+	}
+
+	private int openCycleGui(String cycleCode) {
+		if (!isFullMember()) {
+			return 0;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		mc.execute(() -> mc.setScreen(new tel.eden.mod.gui.PromotionCycleScreen(mc.screen, this, cycleCode)));
+		return 1;
+	}
+
+	private int printCycleSummary(FabricClientCommandSource source, String cycleCode) {
+		if (!isFullMember()) {
+			return 0;
+		}
+		String trimmed = (cycleCode != null && !cycleCode.isBlank()) ? cycleCode.trim() : "";
+		tel.eden.mod.net.CycleLeaderboardData.ConcludedCycleSummary cached = !trimmed.isEmpty() ? concludedCyclesByCode.get(trimmed) : null;
+		if (cached != null) {
+			source.sendFeedback(DiscordChatFormatter.formatCyclePrint(cached));
+			return 1;
+		}
+		tel.eden.mod.net.CycleLeaderboardData.CycleSnapshot snap = knownCycleLeaderboard;
+		if (tel.eden.mod.net.CycleLeaderboardData.isHistoricalCycle(snap, trimmed)) {
+			source.sendFeedback(DiscordChatFormatter.formatCyclePrint(tel.eden.mod.net.CycleLeaderboardData.summaryFromSnapshot(snap)));
+			return 1;
+		}
+		requestCycleLeaderboard(trimmed, true);
+		return 1;
+	}
+
+	/** Request promotion cycle leaderboard data (current if null/blank), debounced safely above server throttle. */
+	public void requestCycleLeaderboard(String cycleCode) {
+		requestCycleLeaderboard(cycleCode, false);
+	}
+
+	private void requestCycleLeaderboard(String cycleCode, boolean forPrint) {
+		String target = (cycleCode != null && !cycleCode.isBlank()) ? cycleCode.trim() : "";
+		long seq = forPrint ? cyclePrintSeq.incrementAndGet() : cycleGuiSeq.incrementAndGet();
+		if (forPrint) {
+			pendingCyclePrintCode = target;
+		} else {
+			pendingCycleGuiCode = target;
+		}
+		BridgeWebSocketClient current = socket;
+		if (!isFullMember() || current == null || !current.isConnected()) {
+			failCycleLeaderboardRequest(forPrint);
+			return;
+		}
+		long delayMs = knownCycleLeaderboard == null && lastCycleQueryAtMs == 0L ? 0L : Math.max(0L, (lastCycleQueryAtMs + 950L) - System.currentTimeMillis());
+		if (delayMs == 0L) {
+			dispatchCycleLeaderboardRequest(target, seq, forPrint);
+			return;
+		}
+		scheduleCycleLeaderboardDispatch(target, seq, forPrint, delayMs);
+	}
+
+	private void scheduleCycleLeaderboardDispatch(String cycleCode, long seq, boolean forPrint, long delayMs) {
+		partyCommandExecutor.schedule(() -> {
+			long latest = forPrint ? cyclePrintSeq.get() : cycleGuiSeq.get();
+			if (latest == seq) {
+				dispatchCycleLeaderboardRequest(cycleCode, seq, forPrint);
+			}
+		}, delayMs, TimeUnit.MILLISECONDS);
+	}
+
+	private void dispatchCycleLeaderboardRequest(String cycleCode, long seq, boolean forPrint) {
+		BridgeWebSocketClient current = socket;
+		if (!isFullMember() || current == null || !current.isConnected()) {
+			long latest = forPrint ? cyclePrintSeq.get() : cycleGuiSeq.get();
+			if (latest == seq) {
+				failCycleLeaderboardRequest(forPrint);
+			}
+			return;
+		}
+		long remainingCooldownMs;
+		synchronized (cycleSendLock) {
+			long now = System.currentTimeMillis();
+			remainingCooldownMs = (lastCycleQueryAtMs + 950L) - now;
+			if (remainingCooldownMs <= 0L) {
+				lastCycleQueryAtMs = now;
+			}
+		}
+		if (remainingCooldownMs > 0L) {
+			scheduleCycleLeaderboardDispatch(cycleCode, seq, forPrint, remainingCooldownMs);
+			return;
+		}
+		java.util.concurrent.atomic.AtomicLong pendingSlot = forPrint ? cyclePrintPendingId : cycleGuiPendingId;
+		pendingSlot.set(seq);
+		if (!forPrint) {
+			cycleLeaderboardError = "";
+			cycleLeaderboardErrorAtMs = 0L;
+		}
+		if (!current.sendCycleLeaderboardRequest(cycleCode)) {
+			if (pendingSlot.compareAndSet(seq, 0)) {
+				failCycleLeaderboardRequest(forPrint);
+			}
+			return;
+		}
+		partyCommandExecutor.schedule(() -> {
+			if (pendingSlot.compareAndSet(seq, 0)) {
+				failCycleLeaderboardRequest(forPrint);
+			}
+		}, LEADERBOARD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+	}
+
+	private void failCycleLeaderboardRequest(boolean forPrint) {
+		if (forPrint) {
+			cyclePrintPendingId.set(0);
+			if (pendingCyclePrintCode != null) {
+				pendingCyclePrintCode = null;
+				display(() -> DiscordChatFormatter.systemLine("Failed to fetch cycle leaderboard", ChatFormatting.RED));
+			}
+			return;
+		}
+		cycleGuiPendingId.set(0);
+		pendingCycleGuiCode = null;
+		cycleLeaderboardError = "Failed to fetch cycle leaderboard";
+		cycleLeaderboardErrorAtMs = System.currentTimeMillis();
+		cycleLeaderboardGeneration.incrementAndGet();
+	}
+
+	/** Request lifetime or interval Raids/Wars leaderboards, debounced safely above server throttle. */
+	public void requestLifetimeLeaderboard(Double fromDays, Double toDays) {
+		long seq = lifetimeRequestSeq.incrementAndGet();
+		pendingLifetimeFilter = new LifetimeFilter(fromDays, toDays);
+		BridgeWebSocketClient current = socket;
+		if (!isFullMember() || current == null || !current.isConnected()) {
+			failLifetimeLeaderboardRequest();
+			return;
+		}
+		long delayMs = knownLifetimeLeaderboard == null ? 0L : Math.max(0L, (lastLifetimeQueryAtMs + 950L) - System.currentTimeMillis());
+		if (delayMs == 0L) {
+			dispatchLifetimeLeaderboardRequest(fromDays, toDays, seq);
+			return;
+		}
+		partyCommandExecutor.schedule(() -> {
+			if (lifetimeRequestSeq.get() == seq) {
+				dispatchLifetimeLeaderboardRequest(fromDays, toDays, seq);
+			}
+		}, delayMs, TimeUnit.MILLISECONDS);
+	}
+
+	private void dispatchLifetimeLeaderboardRequest(Double fromDays, Double toDays, long seq) {
+		BridgeWebSocketClient current = socket;
+		if (!isFullMember() || current == null || !current.isConnected()) {
+			if (lifetimeRequestSeq.get() == seq) {
+				failLifetimeLeaderboardRequest();
+			}
+			return;
+		}
+		lifetimeRequestPendingId.set(seq);
+		lastLifetimeQueryAtMs = System.currentTimeMillis();
+		lifetimeLeaderboardError = "";
+		lifetimeLeaderboardErrorAtMs = 0L;
+		if (!current.sendLifetimeLeaderboardRequest(fromDays, toDays)) {
+			if (lifetimeRequestPendingId.compareAndSet(seq, 0)) {
+				failLifetimeLeaderboardRequest();
+			}
+			return;
+		}
+		partyCommandExecutor.schedule(() -> {
+			if (lifetimeRequestPendingId.compareAndSet(seq, 0)) {
+				failLifetimeLeaderboardRequest();
+			}
+		}, LEADERBOARD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+	}
+
+	private void failLifetimeLeaderboardRequest() {
+		lifetimeRequestPendingId.set(0);
+		pendingLifetimeFilter = null;
+		lifetimeLeaderboardError = "Failed to fetch leaderboard stats";
+		lifetimeLeaderboardErrorAtMs = System.currentTimeMillis();
+		lifetimeLeaderboardGeneration.incrementAndGet();
 	}
 
 	private CompletableFuture<Suggestions> suggestMembers(CommandContext<FabricClientCommandSource> context, SuggestionsBuilder builder) {
@@ -2383,11 +2710,44 @@ public final class EdenModClient implements ClientModInitializer {
 
 	private int sendTravelerChat(FabricClientCommandSource source, String message) {
 		BridgeWebSocketClient current = socket;
+		Optional<ItemStringDetector.Detected> item = ItemStringDetector.detect(message);
+		if (current != null && item.isPresent()) {
+			if (!isItemDecoderAvailable()) {
+				source.sendFeedback(Component.literal("Sharing items in traveler chat needs Wynntils.").withStyle(ChatFormatting.RED));
+				return 0;
+			}
+			// Taken now, on the client thread, before the chat screen clears it.
+			String replyId = ChatReplyManager.takeTravelerReply();
+			itemCardExecutor.submit(() -> sendTravelerItem(current, message, item.get(), replyId));
+			return 1;
+		}
 		if (current == null || !current.sendTravelerChat(message, ChatReplyManager.takeTravelerReply())) {
 			source.sendFeedback(notConnected());
 			return 0;
 		}
 		return 1;
+	}
+
+	/**
+	 * The bot drops private-use characters, so a raw share string never reaches traveler chat.
+	 * Swap it for {@code [Item Name]} and send the rendered card with the line instead.
+	 */
+	private void sendTravelerItem(BridgeWebSocketClient current, String message, ItemStringDetector.Detected item, String replyId) {
+		try {
+			Optional<DecodedItem> decoded = decodeSharedItem(item.itemString(), item.craftedName());
+			if (decoded.isEmpty()) {
+				displayDirect(() -> Component.literal("Couldn't read that shared item.").withStyle(ChatFormatting.RED));
+				return;
+			}
+			DecodedItem card = decoded.get();
+			String image = Base64.getEncoder().encodeToString(ItemCardRenderer.render(card));
+			String text = ItemStringDetector.replace(message, item, "[" + card.name() + "]");
+			if (!current.sendTravelerChat(text, replyId, image, item.encoded())) {
+				displayDirect(EdenModClient::notConnected);
+			}
+		} catch (Exception e) {
+			LOGGER.warn("Failed to render/send traveler item card", e);
+		}
 	}
 
 	private static Component notConnected() {
@@ -2732,9 +3092,9 @@ public final class EdenModClient implements ClientModInitializer {
 	private record HelpEntry(String command, String description) {
 	}
 
-	private static final java.util.Set<String> GUILD_ONLY_COMMANDS = java.util.Set.of("online", "wars", "event", "aspects", "emeralds", "warpay", "rewards", "gift", "dump", "deduct", "ally", "reply", "logscan");
+	private static final java.util.Set<String> GUILD_ONLY_COMMANDS = java.util.Set.of("online", "wars", "event", "cycle", "aspects", "emeralds", "warpay", "rewards", "gift", "dump", "deduct", "ally", "reply", "logscan");
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden tc <message>", "chat with travelers and members (alias /e)"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden event", "open the event missions screen"), new HelpEntry("/eden event rewards", "check your pending event LE"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds/warpay and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden warpay optout [true|false]", "opt out of or into receiving warpay"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden tc <message>", "chat with travelers and members (alias /e)"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden event", "open the event missions screen"), new HelpEntry("/eden event rewards", "check your pending event LE"), new HelpEntry("/eden cycle", "open the promotion cycle leaderboard"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds/warpay and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden warpay optout [true|false]", "opt out of or into receiving warpay"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -2773,7 +3133,8 @@ public final class EdenModClient implements ClientModInitializer {
 	private void showHelp(FabricClientCommandSource source) {
 		MutableComponent help = Component.literal("EdenMod — in-game commands:").withStyle(net.minecraft.ChatFormatting.GREEN);
 		for (HelpEntry entry : HELP_ENTRIES) {
-			if (isTraveler() && GUILD_ONLY_COMMANDS.contains(entry.command().split(" ")[1])) {
+			String cmd = entry.command().split(" ")[1];
+			if (("cycle".equals(cmd) && !isFullMember()) || (isTraveler() && GUILD_ONLY_COMMANDS.contains(cmd))) {
 				continue;
 			}
 			help.append(helpLine(entry.command(), entry.description()));
@@ -2997,6 +3358,26 @@ public final class EdenModClient implements ClientModInitializer {
 		longEventGeneration.set(0);
 		longEventError = "";
 		longEventErrorAtMs = 0L;
+		cycleGuiSeq.incrementAndGet();
+		cycleGuiPendingId.set(0);
+		cyclePrintSeq.incrementAndGet();
+		cyclePrintPendingId.set(0);
+		lifetimeRequestSeq.incrementAndGet();
+		lifetimeRequestPendingId.set(0);
+		knownCycleLeaderboard = null;
+		cycleLeaderboardGeneration.set(0);
+		cycleLeaderboardError = "";
+		cycleLeaderboardErrorAtMs = 0L;
+		knownLifetimeLeaderboard = null;
+		lifetimeLeaderboardGeneration.set(0);
+		lifetimeLeaderboardError = "";
+		lifetimeLeaderboardErrorAtMs = 0L;
+		concludedCyclesByCode.clear();
+		pendingCyclePrintCode = null;
+		pendingCycleGuiCode = null;
+		pendingLifetimeFilter = null;
+		lastCycleQueryAtMs = 0L;
+		lastLifetimeQueryAtMs = 0L;
 		tel.eden.mod.chat.ImagePreviewManager.clear();
 		// Before the socket goes: an outstanding deduct must not outlive the session that
 		// made it, or it resurfaces at the next connect naming a player from another
@@ -3132,6 +3513,11 @@ public final class EdenModClient implements ClientModInitializer {
 			GuildReward line = reward.get();
 			String signature = line.giver() + "|" + line.reward() + "|" + line.receiver();
 			current.sendGuildReward(line.giver(), line.reward(), line.receiver(), rewardSeq.next(signature));
+			return;
+		}
+		// A Guild Tome dropping into the reward pool, posted to the rewards log.
+		if (tel.eden.mod.chat.GuildTomeFoundParser.matches(message)) {
+			current.sendGuildTomeFound(tomeFoundSeq.next("guildTomeFound"));
 			return;
 		}
 		// Territory economy/management announcements — tracked directly from chat for /manage log economy.

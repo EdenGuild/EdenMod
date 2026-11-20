@@ -26,6 +26,10 @@ public final class ItemStringDetector {
 
 	/** A detected shared item: the encoded string and an optional crafted name. */
 	public record Detected(String itemString, String craftedName) {
+		/** The share string as typed: the data plus its {@code "craftedName"}, if any. */
+		public String encoded() {
+			return craftedName == null ? itemString : itemString + " \"" + craftedName + "\"";
+		}
 	}
 
 	/** The longest qualifying item string in {@code rawText}, if any. */
@@ -47,5 +51,10 @@ public final class ItemStringDetector {
 			}
 		}
 		return bestData == null ? Optional.empty() : Optional.of(new Detected(bestData, bestName));
+	}
+
+	/** {@code rawText} with the detected item (and its {@code "craftedName"}, if any) swapped for {@code replacement}. */
+	public static String replace(String rawText, Detected item, String replacement) {
+		return rawText.replace(item.encoded(), replacement);
 	}
 }
