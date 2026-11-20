@@ -1,15 +1,10 @@
 package tel.eden.mod.war;
 
-import com.mojang.authlib.GameProfile;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
@@ -17,7 +12,6 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.multiplayer.PlayerInfo;
-import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.scores.DisplaySlot;
@@ -26,7 +20,6 @@ import net.minecraft.world.scores.PlayerScoreEntry;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
 import org.lwjgl.glfw.GLFW;
-import tel.eden.mod.EdenLogger;
 import tel.eden.mod.EdenModClient;
 import tel.eden.mod.chat.ChatText;
 import tel.eden.mod.config.BridgeConfig;
@@ -38,6 +31,7 @@ import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.net.WarBoardEntry;
 import tel.eden.mod.net.WarGoer;
 import tel.eden.mod.net.WarQueuer;
+import tel.eden.mod.util.PlayerSkinResolver;
 
 /**
  * HUD list of upcoming territory attacks read from the scoreboard sidebar, each row
@@ -863,79 +857,12 @@ public final class AttackTimerMenu {
 		return fallbackName;
 	}
 
-	private static final EdenLogger LOGGER = EdenLogger.get();
-	/** Skins resolved by uuid from Mojang, for goers not in our player list (cross-world). */
-	private static final Map<UUID, PlayerSkin> resolvedSkins = new ConcurrentHashMap<>();
-	/**
-	 * Earliest time (ms) each uuid may be (re)fetched. Set on every attempt so a failed or
-	 * empty resolve backs off instead of re-submitting every frame; a success caches into
-	 * {@link #resolvedSkins} and is served before this map is ever consulted again.
-	 */
-	private static final Map<UUID, Long> skinNextAttempt = new ConcurrentHashMap<>();
-	private static final long SKIN_RETRY_MS = 30_000L;
-	private static final ExecutorService skinWorker = Executors.newSingleThreadExecutor(runnable -> {
-		Thread thread = new Thread(runnable, "eden-war-skins");
-		thread.setDaemon(true);
-		return thread;
-	});
-
-	/**
-	 * The skin to draw for a player head. A guildmate on our own world is in the player list with
-	 * their skin already loaded (free). One on a <em>different</em> Wynncraft world instance
-	 * (routine during a war rush) isn't in our list, so their profile carries no textures and
-	 * the game would only give a default skin — we resolve those by uuid from Mojang in the
-	 * background (cached), showing the default until it lands.
-	 */
 	private static PlayerSkin skinFor(Minecraft mc, WarGoer goer) {
 		return skinFor(mc, goer.uuid(), goer.name());
 	}
 
 	private static PlayerSkin skinFor(Minecraft mc, String uuidStr, String fallbackName) {
-		UUID uuid;
-		try {
-			uuid = UUID.fromString(uuidStr);
-		} catch (IllegalArgumentException e) {
-			return DefaultPlayerSkin.get(UUID.nameUUIDFromBytes(fallbackName.getBytes(StandardCharsets.UTF_8)));
-		}
-		if (mc.getConnection() != null) {
-			PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
-			if (info != null) {
-				return info.getSkin();
-			}
-		}
-		PlayerSkin resolved = resolvedSkins.get(uuid);
-		if (resolved != null) {
-			return resolved;
-		}
-		fetchSkin(mc, uuid, fallbackName);
-		return DefaultPlayerSkin.get(uuid);
-	}
-
-	/**
-	 * Resolve a goer's skin by uuid off-thread (Mojang session lookup → texture load),
-	 * caching the result. Rate-limited per uuid ({@link #SKIN_RETRY_MS}) so a failed or
-	 * empty resolve backs off instead of re-submitting every frame the head is drawn; a
-	 * success caches the skin, which is then served before this method is called again.
-	 */
-	private static void fetchSkin(Minecraft mc, UUID uuid, String name) {
-		long now = System.currentTimeMillis();
-		Long next = skinNextAttempt.get(uuid);
-		if (next != null && now < next) {
-			return;
-		}
-		skinNextAttempt.put(uuid, now + SKIN_RETRY_MS);
-		LOGGER.debug("Resolving war-head skin for {} ({}) — not in the player list", name, uuid);
-		skinWorker.submit(() -> {
-			try {
-				var result = mc.services().sessionService().fetchProfile(uuid, false);
-				if (result != null) {
-					GameProfile profile = result.profile();
-					mc.execute(() -> mc.getSkinManager().get(profile).thenAccept(skin -> skin.ifPresent(value -> resolvedSkins.put(uuid, value))));
-				}
-			} catch (RuntimeException e) {
-				LOGGER.debug("War-head skin fetch failed for {}", uuid, e);
-			}
-		});
+		return PlayerSkinResolver.skinForId(mc, uuidStr, fallbackName);
 	}
 
 	/**
