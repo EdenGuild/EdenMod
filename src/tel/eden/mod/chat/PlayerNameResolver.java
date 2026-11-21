@@ -105,8 +105,8 @@ public final class PlayerNameResolver {
 	}
 
 	/**
-	 * Resolve {@code displayed} only when span metadata (hover/insertion), the learned alias
-	 * cache, live tab list, or guild member list confirms a canonical IGN.
+	 * Resolve {@code displayed} only when span metadata (hover/insertion), an exact learned
+	 * alias, an exact live tab-list profile name, or the guild member list confirms a canonical IGN.
 	 */
 	public static Optional<String> resolveVerified(Component message, String displayed) {
 		if (displayed == null) {
@@ -117,7 +117,7 @@ public final class PlayerNameResolver {
 			recordAlias(displayed, metadata);
 			return Optional.of(metadata);
 		}
-		return resolveKnown(displayed);
+		return resolveKnown(displayed, false);
 	}
 
 	/** Resolve a rendered player name and retain any hover-provided nickname mapping. */
@@ -182,6 +182,10 @@ public final class PlayerNameResolver {
 	 * (a balance deduction, a Discord post) is worse than omitting the data point.
 	 */
 	public static Optional<String> resolveKnown(String name) {
+		return resolveKnown(name, true);
+	}
+
+	private static Optional<String> resolveKnown(String name, boolean allowLoose) {
 		if (name == null) {
 			return Optional.empty();
 		}
@@ -201,14 +205,16 @@ public final class PlayerNameResolver {
 					continue;
 				}
 				String entryClean = cleanKey(entry.getKey());
-				if (entryClean.equals(clean) || (clean.length() >= 4 && entryClean.startsWith(clean))) {
+				if (entryClean.equals(clean) || (allowLoose && clean.length() >= 4 && entryClean.startsWith(clean))) {
 					return Optional.of(entry.getValue());
 				}
 			}
 		}
-		String fromTabList = resolveFromTabList(trimmed);
+		String fromTabList = resolveFromTabList(trimmed, allowLoose);
 		if (fromTabList != null) {
-			recordAlias(trimmed, fromTabList);
+			if (allowLoose) {
+				recordAlias(trimmed, fromTabList);
+			}
 			return Optional.of(fromTabList);
 		}
 		String fromMemberList = memberMatch(trimmed);
@@ -219,6 +225,10 @@ public final class PlayerNameResolver {
 	}
 
 	private static String resolveFromTabList(String displayed) {
+		return resolveFromTabList(displayed, true);
+	}
+
+	private static String resolveFromTabList(String displayed, boolean allowLoose) {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc == null || mc.getConnection() == null) {
 			return null;
@@ -231,6 +241,9 @@ public final class PlayerNameResolver {
 			}
 			if (profileName.equalsIgnoreCase(displayed)) {
 				return profileName;
+			}
+			if (!allowLoose) {
+				continue;
 			}
 			String cleanProfile = profileName.toLowerCase(Locale.ROOT);
 			if (!cleanDisplayed.isEmpty() && (cleanProfile.equals(cleanDisplayed) || (cleanDisplayed.length() >= 3 && cleanProfile.startsWith(cleanDisplayed)))) {
