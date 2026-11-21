@@ -2,6 +2,7 @@ package tel.eden.mod.chat;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -164,63 +165,146 @@ public final class DiscordChatFormatter {
 		return out;
 	}
 
-	/** Format a backend {@code wikiReply} (single article card, clickable disambiguation, empty, or error). */
+	private static final Pattern WIKI_COORDS_PATTERN = Pattern.compile("\\(\\s*-?\\d+(?:\\s*,\\s*-?\\d+){1,2}\\s*\\)");
+	private static final int WIKI_BODY_RGB = 0xCCCCCC;
+	private static final int WIKI_WRAP_COLS = 54;
+
+	/** Format a backend {@code wikiReply} (single article card, compact clickable choices, empty, or error). */
 	public static Component wikiReply(tel.eden.mod.net.WikiReplyData reply) {
 		if (reply == null || "error".equals(reply.status())) {
 			String msg = (reply != null && !reply.error().isEmpty()) ? reply.error() : "Failed to look up wiki article.";
 			return systemLine(msg, ChatFormatting.RED);
 		}
 		if ("choices".equals(reply.status()) && !reply.choices().isEmpty()) {
-			MutableComponent out = Component.empty().append(prefix(SHIELD));
-			out.append(Component.literal("Multiple wiki matches for \"" + reply.query() + "\" (click one):").withStyle(ChatFormatting.GOLD));
+			MutableComponent out = Component.empty().append(prefix(SHIELD)).append(wikiPill(ChatFormatting.GOLD)).append(Component.literal(" Matches for \"" + reply.query() + "\" (click one):").withStyle(ChatFormatting.GOLD));
+			int rowLen = 0;
+			out.append(Component.literal("\n  "));
 			for (tel.eden.mod.net.WikiReplyData.WikiChoice choice : reply.choices()) {
-				String cmd = "/eden wiki " + choice.title();
-				URI uri = cmd.length() > 256 ? parseHttpUri(choice.url()) : null;
-				MutableComponent tip = Component.literal("Click to look up " + choice.title()).withStyle(ChatFormatting.AQUA);
-				if (!choice.snippet().isEmpty()) {
-					tip.append(Component.literal("\n" + choice.snippet()).withStyle(ChatFormatting.GRAY));
-				}
+				String title = choice.title();
+				String cmd = "/eden wiki " + title;
+				boolean canRun = cmd.length() <= 256;
+				URI uri = canRun ? null : parseHttpUri(choice.url());
+				Component tip = Component.literal(canRun ? "Click to look up " + title : "Open " + title + " on wynncraft.wiki.gg").withStyle(ChatFormatting.AQUA);
 				Style linkStyle = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withHoverEvent(new HoverEvent.ShowText(tip));
-				if (cmd.length() <= 256) {
+				if (canRun) {
 					linkStyle = linkStyle.withClickEvent(new ClickEvent.RunCommand(cmd));
 				} else if (uri != null) {
 					linkStyle = linkStyle.withClickEvent(new ClickEvent.OpenUrl(uri));
 				}
-				out.append(Component.literal("\n  • ").withStyle(ChatFormatting.GRAY)).append(Component.literal("[" + choice.title() + "]").setStyle(linkStyle));
-				if (!choice.snippet().isEmpty()) {
-					out.append(Component.literal(" — " + choice.snippet()).withStyle(ChatFormatting.GRAY));
+				int chipWidth = title.length() + 4;
+				if (rowLen > 0 && rowLen + chipWidth > WIKI_WRAP_COLS) {
+					out.append(Component.literal("\n  "));
+					rowLen = 0;
+				} else if (rowLen > 0) {
+					out.append(Component.literal("  "));
 				}
+				out.append(Component.literal("[" + title + "]").setStyle(linkStyle));
+				rowLen += chipWidth;
 			}
 			return out;
 		}
 		if (!"page".equals(reply.status()) || reply.title().isEmpty()) {
 			return systemLine("No wiki articles found for \"" + reply.query() + "\".", ChatFormatting.GOLD);
 		}
-		MutableComponent out = Component.empty().append(prefix(SHIELD));
-		out.append(Component.literal("Wiki: " + reply.title()).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+		ChatFormatting accent = wikiAccentColor(reply.fields());
+		MutableComponent out = Component.empty().append(prefix(SHIELD)).append(wikiPill(accent)).append(Component.literal(" " + reply.title()).withStyle(accent, ChatFormatting.BOLD));
 		URI pageUri = parseHttpUri(reply.url());
 		if (pageUri != null) {
 			Style link = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.OpenUrl(pageUri)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open " + reply.title() + " on wynncraft.wiki.gg")));
 			out.append(Component.literal("  ")).append(Component.literal("[Link]").setStyle(link));
 		}
 		if (!reply.lore().isEmpty()) {
-			out.append(Component.literal("\n  \"" + reply.lore() + "\"").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC));
+			out.append(Component.literal("\n  \"" + reply.lore() + "\"").withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
 		}
 		if (!reply.description().isEmpty()) {
-			out.append(Component.literal("\n  " + reply.description()).withStyle(ChatFormatting.WHITE));
-		}
-		if (!reply.obtaining().isEmpty()) {
-			out.append(Component.literal("\n  Obtaining: ").withStyle(ChatFormatting.GOLD)).append(Component.literal(reply.obtaining()).withStyle(ChatFormatting.WHITE));
-		}
-		if (!reply.location().isEmpty()) {
-			out.append(Component.literal("\n  Location: ").withStyle(ChatFormatting.AQUA)).append(Component.literal(reply.location()).withStyle(ChatFormatting.WHITE));
+			Style bodyStyle = Style.EMPTY.withColor(WIKI_BODY_RGB);
+			for (String para : reply.description().split("\\R")) {
+				String trimmed = para.trim();
+				if (!trimmed.isEmpty()) {
+					out.append(Component.literal("\n  " + trimmed).withStyle(bodyStyle));
+				}
+			}
 		}
 		List<tel.eden.mod.net.WikiReplyData.WikiField> fields = reply.fields();
 		for (int i = 0; i < fields.size(); i++) {
-			out.append(Component.literal(i % 3 == 0 ? "\n  " : " | ").withStyle(ChatFormatting.DARK_GRAY));
-			out.append(Component.literal(fields.get(i).name() + ": ").withStyle(ChatFormatting.GRAY)).append(Component.literal(fields.get(i).value()).withStyle(ChatFormatting.WHITE));
+			tel.eden.mod.net.WikiReplyData.WikiField f = fields.get(i);
+			boolean isTierField = "Tier".equalsIgnoreCase(f.name()) || "Rarity".equalsIgnoreCase(f.name());
+			out.append(Component.literal(i % 2 == 0 ? "\n  " : "  •  ").withStyle(ChatFormatting.DARK_GRAY));
+			out.append(Component.literal(f.name() + ": ").withStyle(ChatFormatting.GRAY)).append(Component.literal(f.value()).withStyle(isTierField ? accent : ChatFormatting.WHITE));
+		}
+		if (!reply.obtaining().isEmpty() || !reply.location().isEmpty()) {
+			out.append(Component.literal("\n  ────────────────────").withStyle(ChatFormatting.DARK_GRAY));
+		}
+		if (!reply.obtaining().isEmpty()) {
+			out.append(Component.literal("\n  ▸ Obtaining").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+			appendWikiBullets(out, reply.obtaining(), ChatFormatting.YELLOW, false);
+		}
+		if (!reply.location().isEmpty()) {
+			out.append(Component.literal("\n  ▸ Location").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
+			appendWikiBullets(out, reply.location(), ChatFormatting.WHITE, true);
 		}
 		return out;
+	}
+
+	private static Component wikiPill(ChatFormatting color) {
+		return Component.literal(pillLabel("wiki")).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(color));
+	}
+
+	private static ChatFormatting wikiAccentColor(List<tel.eden.mod.net.WikiReplyData.WikiField> fields) {
+		for (tel.eden.mod.net.WikiReplyData.WikiField field : fields) {
+			if (!"Rarity".equalsIgnoreCase(field.name()) && !"Tier".equalsIgnoreCase(field.name())) {
+				continue;
+			}
+			String v = field.value().toLowerCase(Locale.ROOT).trim();
+			if (v.contains("mythic")) {
+				return ChatFormatting.DARK_PURPLE;
+			}
+			if (v.contains("fabled")) {
+				return ChatFormatting.RED;
+			}
+			if (v.contains("legendary") || "3".equals(v)) {
+				return ChatFormatting.AQUA;
+			}
+			if (v.contains("rare") || "2".equals(v)) {
+				return ChatFormatting.LIGHT_PURPLE;
+			}
+			if (v.contains("unique") || "1".equals(v)) {
+				return ChatFormatting.YELLOW;
+			}
+			if (v.contains("set")) {
+				return ChatFormatting.GREEN;
+			}
+			if ("0".equals(v)) {
+				return ChatFormatting.GRAY;
+			}
+		}
+		return ChatFormatting.GOLD;
+	}
+
+	private static void appendWikiBullets(MutableComponent out, String text, ChatFormatting color, boolean highlightCoords) {
+		for (String raw : text.split("\\R")) {
+			String line = raw.trim();
+			if (line.isEmpty()) {
+				continue;
+			}
+			out.append(Component.literal("\n    • ").withStyle(ChatFormatting.DARK_GRAY));
+			if (!highlightCoords) {
+				out.append(Component.literal(line).withStyle(color));
+				continue;
+			}
+			Matcher m = WIKI_COORDS_PATTERN.matcher(line);
+			int last = 0;
+			while (m.find()) {
+				if (m.start() > last) {
+					out.append(Component.literal(line.substring(last, m.start())).withStyle(color));
+				}
+				out.append(Component.literal(m.group()).withStyle(ChatFormatting.GREEN));
+				last = m.end();
+			}
+			if (last < line.length()) {
+				out.append(Component.literal(line.substring(last)).withStyle(color));
+			}
+		}
 	}
 
 	private static URI parseHttpUri(String raw) {
