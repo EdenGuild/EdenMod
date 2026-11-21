@@ -329,6 +329,8 @@ public final class EdenModClient implements ClientModInitializer {
 	private final Object cycleSendLock = new Object();
 	private volatile long lastCycleQueryAtMs;
 	private volatile long lastLifetimeQueryAtMs;
+	private volatile long lastWikiQueryAtMs;
+	private static final long WIKI_CLIENT_COOLDOWN_MS = 1000L;
 	// GitHub update check: run once per game session; the prompt offers a one-click
 	// download (applied on game close) and a link to the release page.
 	private final UpdateChecker updateChecker = new UpdateChecker();
@@ -1989,6 +1991,11 @@ public final class EdenModClient implements ClientModInitializer {
 			source.sendFeedback(notConnected());
 			return 0;
 		}
+		long now = System.currentTimeMillis();
+		if (now - lastWikiQueryAtMs < WIKI_CLIENT_COOLDOWN_MS) {
+			source.sendFeedback(DiscordChatFormatter.systemLine("Wait a moment before searching the wiki again.", ChatFormatting.YELLOW));
+			return 0;
+		}
 		long id = wikiRequestSeq.incrementAndGet();
 		wikiPendingId.set(id);
 		if (!current.sendWikiRequest(query, id)) {
@@ -1996,6 +2003,7 @@ public final class EdenModClient implements ClientModInitializer {
 			source.sendFeedback(current.isConnected() ? DiscordChatFormatter.systemLine("Wiki lookup requires member or traveler access.", ChatFormatting.RED) : notConnected());
 			return 0;
 		}
+		lastWikiQueryAtMs = now;
 		partyCommandExecutor.schedule(() -> {
 			if (wikiPendingId.compareAndSet(id, 0)) {
 				display(() -> DiscordChatFormatter.systemLine("Wiki lookup timed out, try again later.", ChatFormatting.RED));
