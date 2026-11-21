@@ -1,6 +1,7 @@
 package tel.eden.mod.chat;
 
 import java.util.Optional;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.network.chat.Component;
 
@@ -15,7 +16,10 @@ import net.minecraft.network.chat.Component;
 public final class EconomyMessageFilter {
 	private static final Pattern FORMAT_CODES = Pattern.compile("(?i)[§&][0-9a-fk-orx]|&\\{[^}]+\\}");
 
-	private static final Pattern ECONOMY_PATTERN = Pattern.compile("^(?:" + "[^:]{1,64} changed \\d+ (?:upgrades|bonuses) on .+" + "|[^:]{1,64} changed the (?:global )?(?:ally )?tax(?: of .+)? to \\d+%" + "|[^:]{1,64} changed (?:the global style|the style of .+) to (?:fastest|cheapest)" + "|[^:]{1,64} changed (?:the global borders|the borders of .+) to (?:open|close)" + "|[^:]{1,64} set the guild headquarters to .+" + "|[^:]{1,64} set .+ (?:bonus|upgrade) to level \\d+ on .+" + "|[^:]{1,64} removed .+ (?:bonus|upgrade) from .+" + "|[^:]{1,64} applied the loadout(?:\\s+|:).+ on .+" + "|Territory .+ (?:is using|is producing) more resources than it can store[!.]?" + "|Territory .+ production has stabil(?:ised|ized)[.!]?" + ")$", Pattern.CASE_INSENSITIVE);
+	private static final String ACTOR_ACTIONS = "changed \\d+ (?:upgrades|bonuses) on .+" + "|changed the (?:global )?(?:ally )?tax(?: of .+)? to \\d+%" + "|changed (?:the global style|the style of .+) to (?:fastest|cheapest)" + "|changed (?:the global borders|the borders of .+) to (?:open|close)" + "|set the guild headquarters to .+" + "|set .+ (?:bonus|upgrade) to level \\d+ on .+" + "|removed .+ (?:bonus|upgrade) from .+" + "|applied the loadout(?:\\s+|:).+ on .+";
+
+	private static final Pattern ACTOR_ECONOMY_PATTERN = Pattern.compile("^([^:]{1,64}?)\\s+(" + ACTOR_ACTIONS + ")$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern SYSTEM_ECONOMY_PATTERN = Pattern.compile("^(?:Territory .+ (?:is using|is producing) more resources than it can store[!.]?|Territory .+ production has stabil(?:ised|ized)[.!]?)$", Pattern.CASE_INSENSITIVE);
 
 	private EconomyMessageFilter() {
 	}
@@ -30,9 +34,42 @@ public final class EconomyMessageFilter {
 		return parse(message).isPresent();
 	}
 
-	/** Parse a raw component into a normalized economy line, or empty if it is not an economy message. */
+	/** Parse a raw component into a normalized economy line, resolving known nicknames when possible. */
 	public static Optional<String> parse(Component message) {
-		return message == null ? Optional.empty() : parse(message.getString());
+		return parseComponent(message, false);
+	}
+
+	/**
+	 * Parse a component for backend relay, returning empty if a player actor is an
+	 * unresolved nickname so raw nicknames are never reported.
+	 */
+	public static Optional<String> parseForRelay(Component message) {
+		return parseComponent(message, true);
+	}
+
+	private static Optional<String> parseComponent(Component message, boolean requireVerifiedActor) {
+		if (message == null) {
+			return Optional.empty();
+		}
+		String rawText = message.getString();
+		if (rawText == null || rawText.isBlank()) {
+			return Optional.empty();
+		}
+		String normalized = normalize(rawText);
+		Matcher actorMatcher = ACTOR_ECONOMY_PATTERN.matcher(normalized);
+		if (actorMatcher.matches()) {
+			String displayedActor = actorMatcher.group(1).trim();
+			Optional<String> verified = PlayerNameResolver.resolveVerified(message, displayedActor);
+			if (requireVerifiedActor && verified.isEmpty()) {
+				return Optional.empty();
+			}
+			String actor = verified.orElse(displayedActor);
+			return Optional.of(clip(actor + " " + actorMatcher.group(2)));
+		}
+		if (SYSTEM_ECONOMY_PATTERN.matcher(normalized).matches()) {
+			return Optional.of(clip(normalized));
+		}
+		return Optional.empty();
 	}
 
 	/**
@@ -51,10 +88,14 @@ public final class EconomyMessageFilter {
 			return Optional.empty();
 		}
 		String normalized = normalize(rawText);
-		if (!ECONOMY_PATTERN.matcher(normalized).matches()) {
+		if (!ACTOR_ECONOMY_PATTERN.matcher(normalized).matches() && !SYSTEM_ECONOMY_PATTERN.matcher(normalized).matches()) {
 			return Optional.empty();
 		}
-		return Optional.of(normalized.length() > 300 ? normalized.substring(0, 300) : normalized);
+		return Optional.of(clip(normalized));
+	}
+
+	private static String clip(String normalized) {
+		return normalized.length() > 300 ? normalized.substring(0, 300) : normalized;
 	}
 
 	/**

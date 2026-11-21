@@ -93,4 +93,15 @@ class PlayerNameResolverTest {
 		assertEquals("SomePlayer", PlayerNameResolver.resolve(null, "SomePlayer"));
 		assertEquals(null, PlayerNameResolver.resolve(null, null));
 	}
+
+	@Test
+	void resolveConsultsKnownAliasWithoutOverwritingWhenMetadataAbsent() {
+		PlayerNameResolver.recordAlias("Xia Yu", "EternalOblivion");
+		net.minecraft.network.chat.Component plain = net.minecraft.network.chat.Component.literal("Xia Yu changed the style of Cinfras Outskirts to cheapest");
+
+		assertEquals("EternalOblivion", PlayerNameResolver.resolve(plain, "Xia Yu"));
+		assertEquals(Optional.of("EternalOblivion"), PlayerNameResolver.resolveVerified(plain, "Xia Yu"));
+		assertEquals(Optional.of("EternalOblivion"), PlayerNameResolver.resolveKnown("Xia Yu"));
+		assertEquals(Optional.empty(), PlayerNameResolver.resolveVerified(net.minecraft.network.chat.Component.literal("UnknownNick99 did something"), "UnknownNick99"));
+	}
 }

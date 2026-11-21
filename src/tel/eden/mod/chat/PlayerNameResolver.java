@@ -104,6 +104,22 @@ public final class PlayerNameResolver {
 		USERNAME_BY_DISPLAY.clear();
 	}
 
+	/**
+	 * Resolve {@code displayed} only when span metadata (hover/insertion), the learned alias
+	 * cache, live tab list, or guild member list confirms a canonical IGN.
+	 */
+	public static Optional<String> resolveVerified(Component message, String displayed) {
+		if (displayed == null) {
+			return Optional.empty();
+		}
+		String metadata = ChatText.resolveSpanMetadataName(message, displayed);
+		if (metadata != null) {
+			recordAlias(displayed, metadata);
+			return Optional.of(metadata);
+		}
+		return resolveKnown(displayed);
+	}
+
 	/** Resolve a rendered player name and retain any hover-provided nickname mapping. */
 	public static String resolve(Component message, String displayed) {
 		if (displayed == null) {
@@ -114,12 +130,12 @@ public final class PlayerNameResolver {
 		// (e.g. a catboy/FadeDave hover turned every recipient into FadeDave). Only
 		// accept metadata attached to this displayed span; a previously learned alias
 		// is the safe fallback when the server omits that span's hover.
-		String resolved = message != null ? ChatText.resolveRealName(message, displayed) : null;
-		if (resolved == null) {
-			resolved = canonicalize(displayed);
+		Optional<String> verified = resolveVerified(message, displayed);
+		if (verified.isPresent()) {
+			return verified.get();
 		}
-		recordAlias(displayed, resolved);
-		return resolved;
+		String fallback = ChatText.resolveRealName(null, displayed);
+		return fallback != null ? fallback : displayed.trim();
 	}
 
 	/** Return the remembered account name for a nickname, otherwise the supplied name. */

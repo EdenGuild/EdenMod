@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Optional;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import org.junit.jupiter.api.Test;
 
 class EconomyMessageFilterTest {
@@ -95,5 +96,21 @@ class EconomyMessageFilterTest {
 		assertEquals(Optional.empty(), EconomyMessageFilter.parse((String) null));
 		assertEquals(Optional.empty(), EconomyMessageFilter.parse("   "));
 		assertEquals(Optional.empty(), EconomyMessageFilter.parse((Component) null));
+	}
+
+	@Test
+	void parseForRelayResolvesNicknamesAndDropsUnverifiedActors() {
+		Component hovered = Component.empty().append(Component.literal("Xia Yu").withStyle(s -> s.withHoverEvent(new HoverEvent.ShowText(Component.literal("Xia Yu's real username is EternalOblivion"))))).append(" changed the style of Cinfras Outskirts to cheapest");
+		assertEquals(Optional.of("EternalOblivion changed the style of Cinfras Outskirts to cheapest"), EconomyMessageFilter.parseForRelay(hovered));
+
+		Component cached = Component.literal("Xia Yu set Tome Seeking bonus to level 3 on Gylia Research Cabin");
+		assertEquals(Optional.of("EternalOblivion set Tome Seeking bonus to level 3 on Gylia Research Cabin"), EconomyMessageFilter.parseForRelay(cached));
+
+		Component unknown = Component.literal("UnverifiedNick99 changed the global style to cheapest");
+		assertTrue(EconomyMessageFilter.isEconomyMessage(unknown));
+		assertEquals(Optional.empty(), EconomyMessageFilter.parseForRelay(unknown));
+
+		Component systemAlert = Component.literal("Territory Lake Rieke production has stabilised");
+		assertEquals(Optional.of("Territory Lake Rieke production has stabilised"), EconomyMessageFilter.parseForRelay(systemAlert));
 	}
 }
