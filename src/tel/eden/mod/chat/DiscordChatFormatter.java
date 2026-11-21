@@ -207,14 +207,20 @@ public final class DiscordChatFormatter {
 			return systemLine("No wiki articles found for \"" + reply.query() + "\".", ChatFormatting.GOLD);
 		}
 		ChatFormatting accent = wikiAccentColor(reply.fields());
-		MutableComponent out = Component.empty().append(prefix(SHIELD)).append(wikiPill(accent)).append(Component.literal(" " + reply.title()).withStyle(accent, ChatFormatting.BOLD));
+		Component cardTooltip = buildWikiCardTooltip(reply.card());
+		MutableComponent titleComp = Component.literal(" " + reply.title()).withStyle(style -> {
+			Style s = style.withColor(accent).withBold(true);
+			return cardTooltip != null ? s.withHoverEvent(new HoverEvent.ShowText(cardTooltip)) : s;
+		});
+		MutableComponent out = Component.empty().append(prefix(SHIELD)).append(wikiPill(accent)).append(titleComp);
+		if (cardTooltip != null) {
+			Style statsStyle = Style.EMPTY.withColor(ChatFormatting.YELLOW).withUnderlined(true).withHoverEvent(new HoverEvent.ShowText(cardTooltip));
+			out.append(Component.literal("  ")).append(Component.literal("[Stats]").setStyle(statsStyle));
+		}
 		URI pageUri = parseHttpUri(reply.url());
 		if (pageUri != null) {
 			Style link = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.OpenUrl(pageUri)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open " + reply.title() + " on wynncraft.wiki.gg")));
 			out.append(Component.literal("  ")).append(Component.literal("[Link]").setStyle(link));
-		}
-		if (!reply.lore().isEmpty()) {
-			out.append(Component.literal("\n  \"" + reply.lore() + "\"").withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
 		}
 		if (!reply.description().isEmpty()) {
 			Style bodyStyle = Style.EMPTY.withColor(WIKI_BODY_RGB);
@@ -228,9 +234,8 @@ public final class DiscordChatFormatter {
 		List<tel.eden.mod.net.WikiReplyData.WikiField> fields = reply.fields();
 		for (int i = 0; i < fields.size(); i++) {
 			tel.eden.mod.net.WikiReplyData.WikiField f = fields.get(i);
-			boolean isTierField = "Tier".equalsIgnoreCase(f.name()) || "Rarity".equalsIgnoreCase(f.name());
 			out.append(Component.literal(i % 2 == 0 ? "\n  " : "  •  ").withStyle(ChatFormatting.DARK_GRAY));
-			out.append(Component.literal(f.name() + ": ").withStyle(ChatFormatting.GRAY)).append(Component.literal(f.value()).withStyle(isTierField ? accent : ChatFormatting.WHITE));
+			out.append(Component.literal(f.name() + ": ").withStyle(ChatFormatting.GRAY)).append(Component.literal(f.value()).withStyle(wikiFieldValueColor(f.name(), f.value(), accent)));
 		}
 		if (!reply.obtaining().isEmpty() || !reply.location().isEmpty()) {
 			out.append(Component.literal("\n  ────────────────────").withStyle(ChatFormatting.DARK_GRAY));
@@ -244,6 +249,64 @@ public final class DiscordChatFormatter {
 			appendWikiBullets(out, reply.location(), ChatFormatting.WHITE, true);
 		}
 		return out;
+	}
+
+	private static ChatFormatting wikiFieldValueColor(String name, String value, ChatFormatting accent) {
+		if ("Tier".equalsIgnoreCase(name) || "Rarity".equalsIgnoreCase(name)) {
+			return accent;
+		}
+		if ("Professions".equalsIgnoreCase(name)) {
+			return ChatFormatting.GOLD;
+		}
+		if ("Level".equalsIgnoreCase(name) || "Min Level".equalsIgnoreCase(name)) {
+			return ChatFormatting.YELLOW;
+		}
+		boolean neg = value.startsWith("-");
+		if (name.toLowerCase(Locale.ROOT).contains("spell cost")) {
+			return neg ? ChatFormatting.GREEN : (value.startsWith("+") ? ChatFormatting.RED : ChatFormatting.WHITE);
+		}
+		if (value.startsWith("+")) {
+			return ChatFormatting.GREEN;
+		}
+		return neg ? ChatFormatting.RED : ChatFormatting.WHITE;
+	}
+
+	private static Component buildWikiCardTooltip(List<List<tel.eden.mod.net.WikiReplyData.CardSpan>> card) {
+		if (card == null || card.isEmpty()) {
+			return null;
+		}
+		MutableComponent tip = Component.empty();
+		for (int i = 0; i < card.size(); i++) {
+			if (i > 0) {
+				tip.append(Component.literal("\n"));
+			}
+			for (tel.eden.mod.net.WikiReplyData.CardSpan span : card.get(i)) {
+				ChatFormatting color = wikiCardColor(span.color());
+				tip.append(Component.literal(span.text()).withStyle(style -> {
+					Style s = style.withColor(color);
+					return span.bold() ? s.withBold(true) : s;
+				}));
+			}
+		}
+		return tip;
+	}
+
+	private static ChatFormatting wikiCardColor(String name) {
+		if (name == null) {
+			return ChatFormatting.WHITE;
+		}
+		return switch (name.toLowerCase(Locale.ROOT)) {
+			case "dark_purple" -> ChatFormatting.DARK_PURPLE;
+			case "red" -> ChatFormatting.RED;
+			case "aqua" -> ChatFormatting.AQUA;
+			case "light_purple" -> ChatFormatting.LIGHT_PURPLE;
+			case "yellow" -> ChatFormatting.YELLOW;
+			case "green" -> ChatFormatting.GREEN;
+			case "gold" -> ChatFormatting.GOLD;
+			case "gray" -> ChatFormatting.GRAY;
+			case "dark_gray" -> ChatFormatting.DARK_GRAY;
+			default -> ChatFormatting.WHITE;
+		};
 	}
 
 	private static Component wikiPill(ChatFormatting color) {

@@ -3,7 +3,7 @@ package tel.eden.mod.net;
 import java.util.List;
 
 /** Parsed {@code wikiReply} payload returned by the backend for {@code /eden wiki}. */
-public record WikiReplyData(long requestId, String status, String query, String title, String url, String lore, String description, String obtaining, String location, List<WikiField> fields, List<WikiChoice> choices, String error) {
+public record WikiReplyData(long requestId, String status, String query, String title, String url, String lore, String description, String obtaining, String location, List<WikiField> fields, List<WikiChoice> choices, String error, List<List<CardSpan>> card) {
 	public WikiReplyData {
 		status = status == null ? "" : status;
 		query = query == null ? "" : query;
@@ -16,6 +16,20 @@ public record WikiReplyData(long requestId, String status, String query, String 
 		fields = fields == null ? List.of() : List.copyOf(fields);
 		choices = choices == null ? List.of() : List.copyOf(choices);
 		error = error == null ? "" : error;
+		card = card == null ? List.of() : card.stream().map(line -> line == null ? List.<CardSpan>of() : List.copyOf(line)).toList();
+	}
+
+	/** Convenience constructor without hover card lines. */
+	public WikiReplyData(long requestId, String status, String query, String title, String url, String lore, String description, String obtaining, String location, List<WikiField> fields, List<WikiChoice> choices, String error) {
+		this(requestId, status, query, title, url, lore, description, obtaining, location, fields, choices, error, List.of());
+	}
+
+	/** One styled text span inside a hoverable Wynncraft item/ingredient card line. */
+	public record CardSpan(String text, String color, boolean bold) {
+		public CardSpan {
+			text = text == null ? "" : text;
+			color = color == null ? "white" : color;
+		}
 	}
 
 	/** One infobox key/value pair included on a {@code "page"} reply. */

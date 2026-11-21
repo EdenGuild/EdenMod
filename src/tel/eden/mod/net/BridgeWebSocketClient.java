@@ -2118,6 +2118,26 @@ public final class BridgeWebSocketClient {
 				}
 			}
 		}
-		return new WikiReplyData(getLong(obj, "requestId", 0L), get(obj, "status"), get(obj, "query"), get(obj, "title"), get(obj, "url"), get(obj, "lore"), get(obj, "description"), get(obj, "obtaining"), get(obj, "location"), fields, choices, get(obj, "error"));
+		java.util.List<java.util.List<WikiReplyData.CardSpan>> card = new java.util.ArrayList<>();
+		if (obj.has("card") && obj.get("card").isJsonArray()) {
+			for (var lineEl : obj.get("card").getAsJsonArray()) {
+				if (!lineEl.isJsonArray()) {
+					continue;
+				}
+				java.util.List<WikiReplyData.CardSpan> spans = new java.util.ArrayList<>();
+				for (var spanEl : lineEl.getAsJsonArray()) {
+					if (spanEl.isJsonObject()) {
+						JsonObject s = spanEl.getAsJsonObject();
+						String text = get(s, "t");
+						if (!text.isEmpty()) {
+							boolean bold = s.has("b") && s.get("b").isJsonPrimitive() && s.get("b").getAsBoolean();
+							spans.add(new WikiReplyData.CardSpan(text, get(s, "c"), bold));
+						}
+					}
+				}
+				card.add(spans);
+			}
+		}
+		return new WikiReplyData(getLong(obj, "requestId", 0L), get(obj, "status"), get(obj, "query"), get(obj, "title"), get(obj, "url"), get(obj, "lore"), get(obj, "description"), get(obj, "obtaining"), get(obj, "location"), fields, choices, get(obj, "error"), card);
 	}
 }
