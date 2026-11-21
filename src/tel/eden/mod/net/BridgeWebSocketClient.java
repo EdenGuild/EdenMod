@@ -234,6 +234,10 @@ public final class BridgeWebSocketClient {
 		/** Broadcast sent when a promotion cycle finishes and finalizes. */
 		default void onCycleConcluded(CycleLeaderboardData.ConcludedCycleSummary summary) {
 		}
+
+		/** Reply to an in-game {@code /eden wiki} lookup. */
+		default void onWikiReply(WikiReplyData reply) {
+		}
 	}
 
 	/**
@@ -1085,6 +1089,19 @@ public final class BridgeWebSocketClient {
 		enqueueSend(current, obj);
 	}
 
+	/** Request a Wynncraft wiki lookup ({@code /eden wiki <query>}) via the backend index. */
+	public boolean sendWikiRequest(String query, long requestId) {
+		WebSocket current = socket;
+		if (current == null || query == null || query.isBlank()) {
+			return false;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "wikiRequest");
+		obj.addProperty("query", query.trim());
+		obj.addProperty("requestId", requestId);
+		return enqueueSend(current, obj);
+	}
+
 	/** Ask the backend for this player's current long-event mission state. */
 	public void sendLongEventStateRequest() {
 		sendType("longEventStateRequest");
@@ -1645,6 +1662,7 @@ public final class BridgeWebSocketClient {
 				case "cycleLeaderboardReply" -> sink.onCycleLeaderboard(parseCycleSnapshot(obj));
 				case "lifetimeLeaderboardReply" -> sink.onLifetimeLeaderboard(parseLifetimeSnapshot(obj));
 				case "cycleConcluded" -> sink.onCycleConcluded(parseConcludedCycleSummary(obj));
+				case "wikiReply" -> sink.onWikiReply(parseWikiReply(obj));
 				case "authChallenge" -> handleAuthChallenge(get(obj, "serverId"));
 				case "authOk" -> {
 					authenticated = true;
@@ -2072,5 +2090,34 @@ public final class BridgeWebSocketClient {
 
 	static CycleLeaderboardData.ConcludedCycleSummary parseConcludedCycleSummary(JsonObject obj) {
 		return new CycleLeaderboardData.ConcludedCycleSummary(get(obj, "cycleCode"), parseLeaderboardEntries(obj, "topRaids"), parseLeaderboardEntries(obj, "topWars"), parseRaffleWinners(obj), getInt(obj, "totalRaids", 0), getInt(obj, "totalWars", 0), getInt(obj, "totalTickets", 0));
+	}
+
+	static WikiReplyData parseWikiReply(JsonObject obj) {
+		java.util.List<WikiReplyData.WikiField> fields = new java.util.ArrayList<>();
+		if (obj.has("fields") && obj.get("fields").isJsonArray()) {
+			for (var element : obj.get("fields").getAsJsonArray()) {
+				if (element.isJsonObject()) {
+					JsonObject f = element.getAsJsonObject();
+					String name = get(f, "name");
+					String value = get(f, "value");
+					if (!name.isEmpty() && !value.isEmpty()) {
+						fields.add(new WikiReplyData.WikiField(name, value));
+					}
+				}
+			}
+		}
+		java.util.List<WikiReplyData.WikiChoice> choices = new java.util.ArrayList<>();
+		if (obj.has("choices") && obj.get("choices").isJsonArray()) {
+			for (var element : obj.get("choices").getAsJsonArray()) {
+				if (element.isJsonObject() && choices.size() < 8) {
+					JsonObject c = element.getAsJsonObject();
+					String title = get(c, "title");
+					if (!title.isEmpty()) {
+						choices.add(new WikiReplyData.WikiChoice(title, get(c, "url"), get(c, "snippet")));
+					}
+				}
+			}
+		}
+		return new WikiReplyData(getLong(obj, "requestId", 0L), get(obj, "status"), get(obj, "query"), get(obj, "title"), get(obj, "url"), get(obj, "lore"), get(obj, "description"), get(obj, "obtaining"), get(obj, "location"), fields, choices, get(obj, "error"));
 	}
 }

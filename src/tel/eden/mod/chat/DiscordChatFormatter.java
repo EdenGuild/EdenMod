@@ -164,6 +164,78 @@ public final class DiscordChatFormatter {
 		return out;
 	}
 
+	/** Format a backend {@code wikiReply} (single article card, clickable disambiguation, empty, or error). */
+	public static Component wikiReply(tel.eden.mod.net.WikiReplyData reply) {
+		if (reply == null || "error".equals(reply.status())) {
+			String msg = (reply != null && !reply.error().isEmpty()) ? reply.error() : "Failed to look up wiki article.";
+			return systemLine(msg, ChatFormatting.RED);
+		}
+		if ("choices".equals(reply.status()) && !reply.choices().isEmpty()) {
+			MutableComponent out = Component.empty().append(prefix(SHIELD));
+			out.append(Component.literal("Multiple wiki matches for \"" + reply.query() + "\" (click one):").withStyle(ChatFormatting.GOLD));
+			for (tel.eden.mod.net.WikiReplyData.WikiChoice choice : reply.choices()) {
+				String cmd = "/eden wiki " + choice.title();
+				URI uri = cmd.length() > 256 ? parseHttpUri(choice.url()) : null;
+				MutableComponent tip = Component.literal("Click to look up " + choice.title()).withStyle(ChatFormatting.AQUA);
+				if (!choice.snippet().isEmpty()) {
+					tip.append(Component.literal("\n" + choice.snippet()).withStyle(ChatFormatting.GRAY));
+				}
+				Style linkStyle = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withHoverEvent(new HoverEvent.ShowText(tip));
+				if (cmd.length() <= 256) {
+					linkStyle = linkStyle.withClickEvent(new ClickEvent.RunCommand(cmd));
+				} else if (uri != null) {
+					linkStyle = linkStyle.withClickEvent(new ClickEvent.OpenUrl(uri));
+				}
+				out.append(Component.literal("\n  • ").withStyle(ChatFormatting.GRAY)).append(Component.literal("[" + choice.title() + "]").setStyle(linkStyle));
+				if (!choice.snippet().isEmpty()) {
+					out.append(Component.literal(" — " + choice.snippet()).withStyle(ChatFormatting.GRAY));
+				}
+			}
+			return out;
+		}
+		if (!"page".equals(reply.status()) || reply.title().isEmpty()) {
+			return systemLine("No wiki articles found for \"" + reply.query() + "\".", ChatFormatting.GOLD);
+		}
+		MutableComponent out = Component.empty().append(prefix(SHIELD));
+		out.append(Component.literal("Wiki: " + reply.title()).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+		URI pageUri = parseHttpUri(reply.url());
+		if (pageUri != null) {
+			Style link = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true).withClickEvent(new ClickEvent.OpenUrl(pageUri)).withHoverEvent(new HoverEvent.ShowText(Component.literal("Open " + reply.title() + " on wynncraft.wiki.gg")));
+			out.append(Component.literal("  ")).append(Component.literal("[Link]").setStyle(link));
+		}
+		if (!reply.lore().isEmpty()) {
+			out.append(Component.literal("\n  \"" + reply.lore() + "\"").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC));
+		}
+		if (!reply.description().isEmpty()) {
+			out.append(Component.literal("\n  " + reply.description()).withStyle(ChatFormatting.WHITE));
+		}
+		if (!reply.obtaining().isEmpty()) {
+			out.append(Component.literal("\n  Obtaining: ").withStyle(ChatFormatting.GOLD)).append(Component.literal(reply.obtaining()).withStyle(ChatFormatting.WHITE));
+		}
+		if (!reply.location().isEmpty()) {
+			out.append(Component.literal("\n  Location: ").withStyle(ChatFormatting.AQUA)).append(Component.literal(reply.location()).withStyle(ChatFormatting.WHITE));
+		}
+		List<tel.eden.mod.net.WikiReplyData.WikiField> fields = reply.fields();
+		for (int i = 0; i < fields.size(); i++) {
+			out.append(Component.literal(i % 3 == 0 ? "\n  " : " | ").withStyle(ChatFormatting.DARK_GRAY));
+			out.append(Component.literal(fields.get(i).name() + ": ").withStyle(ChatFormatting.GRAY)).append(Component.literal(fields.get(i).value()).withStyle(ChatFormatting.WHITE));
+		}
+		return out;
+	}
+
+	private static URI parseHttpUri(String raw) {
+		if (raw == null || raw.isBlank()) {
+			return null;
+		}
+		try {
+			URI parsed = URI.create(raw.trim());
+			String scheme = parsed.getScheme();
+			return ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) ? parsed : null;
+		} catch (IllegalArgumentException e) {
+			return null;
+		}
+	}
+
 	/** A green/gold/red client-side notice line with the guild shield prefix. */
 	public static Component systemLine(String text, ChatFormatting color) {
 		return Component.empty().append(prefix(SHIELD)).append(Component.literal(text).withStyle(color));

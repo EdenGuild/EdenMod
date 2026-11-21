@@ -22,7 +22,7 @@ public final class OutboundPolicy {
 		}
 	}
 
-	static final Set<String> TRAVELER_TYPES = Set.of("authResponse", "presence", "mailSend", "mailAck", "tccMapPos", "tccGolemDefeated", "tccExitReached", "witnessKill", "partyOpen", "partyJoin", "partyLeave", "partyList", "partyManage", "travelerChat", "travelerPrefs", "coinflip", "diceroll", "attestationFailure");
+	static final Set<String> TRAVELER_TYPES = Set.of("authResponse", "presence", "mailSend", "mailAck", "tccMapPos", "tccGolemDefeated", "tccExitReached", "witnessKill", "partyOpen", "partyJoin", "partyLeave", "partyList", "partyManage", "travelerChat", "travelerPrefs", "coinflip", "diceroll", "attestationFailure", "wikiRequest");
 
 	private OutboundPolicy() {
 	}

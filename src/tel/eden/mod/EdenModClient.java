@@ -61,6 +61,7 @@ import tel.eden.mod.net.MailEntry;
 import tel.eden.mod.net.PendingEntry;
 import tel.eden.mod.net.WarBoardEntry;
 import tel.eden.mod.net.WarCountEntry;
+import tel.eden.mod.net.WikiReplyData;
 import tel.eden.mod.reward.GuildRewards;
 import tel.eden.mod.update.UpdateChecker;
 import tel.eden.mod.update.UpdateInfo;
@@ -323,6 +324,8 @@ public final class EdenModClient implements ClientModInitializer {
 	private final java.util.concurrent.atomic.AtomicLong cyclePrintPendingId = new java.util.concurrent.atomic.AtomicLong();
 	private final java.util.concurrent.atomic.AtomicLong lifetimeRequestSeq = new java.util.concurrent.atomic.AtomicLong();
 	private final java.util.concurrent.atomic.AtomicLong lifetimeRequestPendingId = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong wikiRequestSeq = new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicLong wikiPendingId = new java.util.concurrent.atomic.AtomicLong();
 	private final Object cycleSendLock = new Object();
 	private volatile long lastCycleQueryAtMs;
 	private volatile long lastLifetimeQueryAtMs;
@@ -881,6 +884,7 @@ public final class EdenModClient implements ClientModInitializer {
 			tel.eden.mod.war.eco.TerritoryGuideController.reset();
 			guildAllyManager.requestCancel();
 			eventRewardsPendingId.set(0);
+			wikiPendingId.set(0);
 			// Connect if applicable; the backend reports link/membership standing via
 			// authOk (handleAuthStatus), which drives any "please link" prompt.
 			evaluateGating(client);
@@ -917,7 +921,7 @@ public final class EdenModClient implements ClientModInitializer {
 			}).then(ClientCommandManager.literal("download").executes(ctx -> {
 				updateDownload(ctx.getSource());
 				return 1;
-			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(buildEventCommand()).then(buildCycleCommand()).then(ClientCommandManager.literal("logscan").requires(guildOnly).executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").requires(guildOnly).then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").requires(guildOnly).executes(ctx -> {
+			}))).then(buildGiftCommand()).then(buildDeductCommand()).then(buildAllyCommand()).then(buildEventCommand()).then(buildCycleCommand()).then(buildWikiCommand()).then(ClientCommandManager.literal("logscan").requires(guildOnly).executes(ctx -> scanLog(ctx.getSource()))).then(ClientCommandManager.literal("dump").requires(guildOnly).then(ClientCommandManager.argument("member", StringArgumentType.word()).suggests(this::suggestMembers).executes(ctx -> dumpEmeralds(ctx.getSource(), StringArgumentType.getString(ctx, "member"))))).then(ClientCommandManager.literal("wars").requires(guildOnly).executes(ctx -> {
 				requestWarCounts(ctx.getSource(), 7);
 				return 1;
 			}).then(ClientCommandManager.argument("days", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 365)).executes(ctx -> {
@@ -1520,6 +1524,19 @@ public final class EdenModClient implements ClientModInitializer {
 				}
 
 				@Override
+				public void onWikiReply(WikiReplyData reply) {
+					long rid = reply.requestId();
+					if (rid > 0) {
+						if (!wikiPendingId.compareAndSet(rid, 0)) {
+							return;
+						}
+					} else {
+						wikiPendingId.set(0);
+					}
+					display(() -> DiscordChatFormatter.wikiReply(reply));
+				}
+
+				@Override
 				public void onLongEventState(LongEventState state, boolean hasSnapshot) {
 					if (state.error() != null && !state.error().isEmpty()) {
 						longEventError = state.error();
@@ -1948,6 +1965,43 @@ public final class EdenModClient implements ClientModInitializer {
 				display(() -> DiscordChatFormatter.systemLine("Unable to fetch ally info, try again later.", ChatFormatting.RED));
 			}
 		}, 5, TimeUnit.SECONDS);
+	}
+
+	private LiteralArgumentBuilder<FabricClientCommandSource> buildWikiCommand() {
+		return ClientCommandManager.literal("wiki").executes(ctx -> {
+			ctx.getSource().sendFeedback(DiscordChatFormatter.systemLine("Usage: /eden wiki <item or page name>", ChatFormatting.YELLOW));
+			return 0;
+		}).then(ClientCommandManager.argument("query", StringArgumentType.greedyString()).executes(ctx -> requestWiki(ctx.getSource(), StringArgumentType.getString(ctx, "query"))));
+	}
+
+	private int requestWiki(FabricClientCommandSource source, String rawQuery) {
+		String query = rawQuery == null ? "" : rawQuery.trim();
+		if (query.isEmpty()) {
+			source.sendFeedback(DiscordChatFormatter.systemLine("Usage: /eden wiki <item or page name>", ChatFormatting.YELLOW));
+			return 0;
+		}
+		if (query.length() > 200) {
+			source.sendFeedback(DiscordChatFormatter.systemLine("Wiki query is too long (max 200 characters).", ChatFormatting.RED));
+			return 0;
+		}
+		BridgeWebSocketClient current = socket;
+		if (current == null || !current.isConnected()) {
+			source.sendFeedback(notConnected());
+			return 0;
+		}
+		long id = wikiRequestSeq.incrementAndGet();
+		wikiPendingId.set(id);
+		if (!current.sendWikiRequest(query, id)) {
+			wikiPendingId.compareAndSet(id, 0);
+			source.sendFeedback(current.isConnected() ? DiscordChatFormatter.systemLine("Wiki lookup requires member or traveler access.", ChatFormatting.RED) : notConnected());
+			return 0;
+		}
+		partyCommandExecutor.schedule(() -> {
+			if (wikiPendingId.compareAndSet(id, 0)) {
+				display(() -> DiscordChatFormatter.systemLine("Wiki lookup timed out, try again later.", ChatFormatting.RED));
+			}
+		}, 10, TimeUnit.SECONDS);
+		return 1;
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> buildEventCommand() {
@@ -3098,7 +3152,7 @@ public final class EdenModClient implements ClientModInitializer {
 
 	private static final java.util.Set<String> GUILD_ONLY_COMMANDS = java.util.Set.of("online", "wars", "event", "cycle", "aspects", "emeralds", "warpay", "rewards", "gift", "dump", "deduct", "ally", "reply", "logscan");
 
-	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden tc <message>", "chat with travelers and members (alias /e)"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden event", "open the event missions screen"), new HelpEntry("/eden event rewards", "check your pending event LE"), new HelpEntry("/eden cycle", "open the promotion cycle leaderboard"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds/warpay and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden warpay optout [true|false]", "opt out of or into receiving warpay"), new HelpEntry("/eden help", "this help screen"));
+	private static final List<HelpEntry> HELP_ENTRIES = List.of(new HelpEntry("/eden config", "open the config screen"), new HelpEntry("/eden online", "who's connected to the bridge"), new HelpEntry("/eden mail <player> <message>", "leave a member a message for their next login"), new HelpEntry("/eden cf", "flip a coin"), new HelpEntry("/eden diceroll", "roll a die"), new HelpEntry("/eden tc <message>", "chat with travelers and members (alias /e)"), new HelpEntry("/eden wars [days]", "guild war counts (same as Discord)"), new HelpEntry("/eden emojis", "open the chat emote picker"), new HelpEntry("/eden event", "open the event missions screen"), new HelpEntry("/eden event rewards", "check your pending event LE"), new HelpEntry("/eden cycle", "open the promotion cycle leaderboard"), new HelpEntry("/eden wiki <query>", "look up a Wynncraft wiki page"), new HelpEntry("/eden party", "list open parties (click to join)"), new HelpEntry("/eden party create <raid> [note]", "open a raid party"), new HelpEntry("/eden party join <id>", "join a party"), new HelpEntry("/eden party leave [id]", "leave your party"), new HelpEntry("/eden party disband", "disband your hosted party"), new HelpEntry("/eden anni <size> [note]", "open an Annihilation party (2-10)"), new HelpEntry("/eden command alias", "open the command alias editor"), new HelpEntry("/eden command keybind", "open the command keybind editor"), new HelpEntry("/eden update", "check for a pending update"), new HelpEntry("/eden update download", "download the update now (applies on exit)"), new HelpEntry("/eden aspects pending", "members' pending aspects — Chiefs only"), new HelpEntry("/eden gift <member> <aspect|emerald|tome> <amount>", "gift guild rewards — Chiefs only"), new HelpEntry("/eden dump <member>", "gift all guild-bank emeralds to a member — Chiefs only"), new HelpEntry("/eden deduct <aspects|emeralds> <member> <amount>", "deduct a payout from pending rewards — Chiefs only"), new HelpEntry("/eden ally view", "view guild ally activity (most inactive to active)"), new HelpEntry("/eden ally add <name>", "add a guild ally — Strategist+ only"), new HelpEntry("/eden ally remove <name>", "remove a guild ally — Strategist+ only"), new HelpEntry("/eden rewards", "check your pending aspects/emeralds/warpay and opt-out status"), new HelpEntry("/eden aspects optout [true|false]", "opt out of or into receiving aspects"), new HelpEntry("/eden emeralds optout [true|false]", "opt out of or into receiving emeralds"), new HelpEntry("/eden warpay optout [true|false]", "opt out of or into receiving warpay"), new HelpEntry("/eden help", "this help screen"));
 
 	private static final class TrackedCommandKeybind {
 		private final String input;
@@ -3368,6 +3422,8 @@ public final class EdenModClient implements ClientModInitializer {
 		cyclePrintPendingId.set(0);
 		lifetimeRequestSeq.incrementAndGet();
 		lifetimeRequestPendingId.set(0);
+		wikiRequestSeq.incrementAndGet();
+		wikiPendingId.set(0);
 		knownCycleLeaderboard = null;
 		cycleLeaderboardGeneration.set(0);
 		cycleLeaderboardError = "";
