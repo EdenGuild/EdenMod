@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -120,9 +119,17 @@ public final class BridgeConfigScreen extends EdenScreen {
 		}, popupSettings));
 
 		int clearW = 20;
-		searchBox = new EditBox(this.font, cx, 117, cw - clearW - 4, 20, Component.literal("Search settings"));
+		searchBox = new EditBox(this.font, cx, 117, cw - clearW - 4, 20, Component.literal("Search settings")) {
+			@Override
+			public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+				super.renderWidget(g, mouseX, mouseY, partialTick);
+				if (getValue().isEmpty()) {
+					// Match the 6px top offset (5px inside the 1px border) on the left edge.
+					g.drawString(BridgeConfigScreen.this.font, "Search settings...", getX() + 6, getY() + 6, 0xFFAAAAAA);
+				}
+			}
+		};
 		searchBox.setMaxLength(64);
-		searchBox.setHint(Component.literal("  Search settings...").withStyle(ChatFormatting.GRAY));
 		searchBox.setValue(searchQuery);
 		clearSearchButton = Button.builder(Component.literal("×"), button -> searchBox.setValue("")).bounds(cx + cw - clearW, 117, clearW, 20).build();
 		clearSearchButton.active = !searchQuery.isEmpty();
