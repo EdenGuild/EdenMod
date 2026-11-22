@@ -46,7 +46,7 @@ public final class BridgeConfigScreen extends EdenScreen {
 	private static final int CONTROL_W = 96;
 	private static final int RESET_W = 20;
 	private static final int SCROLLBAR_W = 6;
-	private static final int HEADER_BOTTOM = 144;
+	private static final int HEADER_BOTTOM = 146;
 	private static final int FOOTER_HEIGHT = 40;
 	// Fraction of the remaining distance the list glides each frame (smoothness).
 	private static final double SCROLL_EASE = 0.4;
@@ -120,11 +120,11 @@ public final class BridgeConfigScreen extends EdenScreen {
 		}, popupSettings));
 
 		int clearW = 20;
-		searchBox = new EditBox(this.font, cx, 116, cw - clearW - 4, 20, Component.literal("Search settings"));
+		searchBox = new EditBox(this.font, cx, 117, cw - clearW - 4, 20, Component.literal("Search settings"));
 		searchBox.setMaxLength(64);
-		searchBox.setHint(Component.literal("Search settings...").withStyle(ChatFormatting.GRAY));
+		searchBox.setHint(Component.literal("  Search settings...").withStyle(ChatFormatting.GRAY));
 		searchBox.setValue(searchQuery);
-		clearSearchButton = Button.builder(Component.literal("×"), button -> searchBox.setValue("")).bounds(cx + cw - clearW, 116, clearW, 20).build();
+		clearSearchButton = Button.builder(Component.literal("×"), button -> searchBox.setValue("")).bounds(cx + cw - clearW, 117, clearW, 20).build();
 		clearSearchButton.active = !searchQuery.isEmpty();
 		searchBox.setResponder(value -> {
 			searchQuery = value;
