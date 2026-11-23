@@ -104,6 +104,22 @@ public final class PlayerNameResolver {
 		USERNAME_BY_DISPLAY.clear();
 	}
 
+	/**
+	 * Resolve {@code displayed} only when span metadata (hover/insertion), an exact learned
+	 * alias, an exact live tab-list profile name, or the guild member list confirms a canonical IGN.
+	 */
+	public static Optional<String> resolveVerified(Component message, String displayed) {
+		if (displayed == null) {
+			return Optional.empty();
+		}
+		String metadata = ChatText.resolveSpanMetadataName(message, displayed);
+		if (metadata != null) {
+			recordAlias(displayed, metadata);
+			return Optional.of(metadata);
+		}
+		return resolveKnown(displayed, false);
+	}
+
 	/** Resolve a rendered player name and retain any hover-provided nickname mapping. */
 	public static String resolve(Component message, String displayed) {
 		if (displayed == null) {
@@ -114,12 +130,12 @@ public final class PlayerNameResolver {
 		// (e.g. a catboy/FadeDave hover turned every recipient into FadeDave). Only
 		// accept metadata attached to this displayed span; a previously learned alias
 		// is the safe fallback when the server omits that span's hover.
-		String resolved = message != null ? ChatText.resolveRealName(message, displayed) : null;
-		if (resolved == null) {
-			resolved = canonicalize(displayed);
+		Optional<String> verified = resolveVerified(message, displayed);
+		if (verified.isPresent()) {
+			return verified.get();
 		}
-		recordAlias(displayed, resolved);
-		return resolved;
+		String fallback = ChatText.resolveRealName(null, displayed);
+		return fallback != null ? fallback : displayed.trim();
 	}
 
 	/** Return the remembered account name for a nickname, otherwise the supplied name. */
@@ -166,6 +182,10 @@ public final class PlayerNameResolver {
 	 * (a balance deduction, a Discord post) is worse than omitting the data point.
 	 */
 	public static Optional<String> resolveKnown(String name) {
+		return resolveKnown(name, true);
+	}
+
+	private static Optional<String> resolveKnown(String name, boolean allowLoose) {
 		if (name == null) {
 			return Optional.empty();
 		}
@@ -185,14 +205,16 @@ public final class PlayerNameResolver {
 					continue;
 				}
 				String entryClean = cleanKey(entry.getKey());
-				if (entryClean.equals(clean) || (clean.length() >= 4 && entryClean.startsWith(clean))) {
+				if (entryClean.equals(clean) || (allowLoose && clean.length() >= 4 && entryClean.startsWith(clean))) {
 					return Optional.of(entry.getValue());
 				}
 			}
 		}
-		String fromTabList = resolveFromTabList(trimmed);
+		String fromTabList = resolveFromTabList(trimmed, allowLoose);
 		if (fromTabList != null) {
-			recordAlias(trimmed, fromTabList);
+			if (allowLoose) {
+				recordAlias(trimmed, fromTabList);
+			}
 			return Optional.of(fromTabList);
 		}
 		String fromMemberList = memberMatch(trimmed);
@@ -203,6 +225,10 @@ public final class PlayerNameResolver {
 	}
 
 	private static String resolveFromTabList(String displayed) {
+		return resolveFromTabList(displayed, true);
+	}
+
+	private static String resolveFromTabList(String displayed, boolean allowLoose) {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc == null || mc.getConnection() == null) {
 			return null;
@@ -215,6 +241,9 @@ public final class PlayerNameResolver {
 			}
 			if (profileName.equalsIgnoreCase(displayed)) {
 				return profileName;
+			}
+			if (!allowLoose) {
+				continue;
 			}
 			String cleanProfile = profileName.toLowerCase(Locale.ROOT);
 			if (!cleanDisplayed.isEmpty() && (cleanProfile.equals(cleanDisplayed) || (cleanDisplayed.length() >= 3 && cleanProfile.startsWith(cleanDisplayed)))) {

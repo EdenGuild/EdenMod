@@ -34,6 +34,35 @@ public final class ChatText {
 	private ChatText() {
 	}
 
+	/** Resolve ONLY from span-local hover or insertion metadata, or null when absent. */
+	static String resolveSpanMetadataName(Component message, String displayed) {
+		if (message == null || displayed == null) {
+			return null;
+		}
+		List<MetaChar> chars = flatten(message);
+		String text = text(chars);
+		int start = text.indexOf(displayed);
+		if (start < 0) {
+			return null;
+		}
+		int end = Math.min(start + displayed.length(), chars.size());
+		for (int i = start; i < end; i++) {
+			if (chars.get(i).hover() != null) {
+				return chars.get(i).hover();
+			}
+		}
+		// No hover on the name: a nicked sender's real account name may instead ride
+		// along as the name's shift-click insertion (guild chat relies on this too).
+		String trimmed = displayed.trim();
+		for (int i = start; i < end; i++) {
+			String insertion = chars.get(i).insertion();
+			if (insertion != null && IGN.matcher(insertion).matches() && !insertion.equalsIgnoreCase(trimmed)) {
+				return insertion;
+			}
+		}
+		return null;
+	}
+
 	/**
 	 * Resolve a displayed (possibly nicked) name to its real account username by
 	 * locating the name in the component's flattened text and reading the hover of
@@ -44,29 +73,9 @@ public final class ChatText {
 		if (displayed == null) {
 			return null;
 		}
-		if (message == null) {
-			String cleaned = displayed.replaceAll("[^a-zA-Z0-9_]", "");
-			return IGN.matcher(cleaned).matches() ? cleaned : null;
-		}
-		List<MetaChar> chars = flatten(message);
-		String text = text(chars);
-		int start = text.indexOf(displayed);
-		if (start >= 0) {
-			int end = Math.min(start + displayed.length(), chars.size());
-			for (int i = start; i < end; i++) {
-				if (chars.get(i).hover() != null) {
-					return chars.get(i).hover();
-				}
-			}
-			// No hover on the name: a nicked sender's real account name may instead ride
-			// along as the name's shift-click insertion (guild chat relies on this too).
-			String trimmed = displayed.trim();
-			for (int i = start; i < end; i++) {
-				String insertion = chars.get(i).insertion();
-				if (insertion != null && IGN.matcher(insertion).matches() && !insertion.equalsIgnoreCase(trimmed)) {
-					return insertion;
-				}
-			}
+		String metadata = resolveSpanMetadataName(message, displayed);
+		if (metadata != null) {
+			return metadata;
 		}
 		String cleaned = displayed.replaceAll("[^a-zA-Z0-9_]", "");
 		return IGN.matcher(cleaned).matches() ? cleaned : null;

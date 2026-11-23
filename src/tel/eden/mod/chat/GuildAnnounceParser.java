@@ -1,10 +1,12 @@
 package tel.eden.mod.chat;
 
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.minecraft.network.chat.Component;
 
 /**
- * Detects guild "flavour" announcements that should be mirrored verbatim into the
+ * Detects guild "flavour" announcements that should be mirrored into the
  * Discord bridge chat (not the management feed), e.g.:
  *
  * <pre>
@@ -12,11 +14,10 @@ import net.minecraft.network.chat.Component;
  *   m1ngx210 has started boosting the guild
  * </pre>
  *
- * <p>Returns the cleaned line to relay as-is so Discord shows the same message.
+ * <p>Resolves nicknames to real account names via {@link PlayerNameResolver}.
  */
 public final class GuildAnnounceParser {
-	private static final String WEEKLY = "(?i)^.+ has finished their weekly objective\\.?$";
-	private static final String BOOST = "(?i)^.+ has started boosting the guild\\.?$";
+	private static final Pattern ANNOUNCE_PATTERN = Pattern.compile("^(.+?)\\s+(has finished their weekly objective\\.?|has started boosting the guild\\.?)$", Pattern.CASE_INSENSITIVE);
 
 	private GuildAnnounceParser() {
 	}
@@ -30,15 +31,33 @@ public final class GuildAnnounceParser {
 		return plain.contains("weekly objective") || plain.contains("boosting the guild");
 	}
 
-	/** Parse a system-chat component, returning the line to relay if it is one. */
+	/** Parse a system-chat component, resolving known nicknames when possible. */
 	public static Optional<String> parse(Component message) {
+		return parseComponent(message, false);
+	}
+
+	/**
+	 * Parse a component for backend relay, returning empty if the player is an
+	 * unresolved nickname so raw nicknames are never reported.
+	 */
+	public static Optional<String> parseForRelay(Component message) {
+		return parseComponent(message, true);
+	}
+
+	private static Optional<String> parseComponent(Component message, boolean requireVerifiedActor) {
 		if (!isCandidate(message)) {
 			return Optional.empty();
 		}
-		String text = ChatText.normalize(message.getString());
-		if (text.matches(WEEKLY) || text.matches(BOOST)) {
-			return Optional.of(text);
+		Matcher matcher = ANNOUNCE_PATTERN.matcher(ChatText.normalize(message.getString()));
+		if (!matcher.matches()) {
+			return Optional.empty();
 		}
-		return Optional.empty();
+		String displayedActor = matcher.group(1).trim();
+		Optional<String> verified = PlayerNameResolver.resolveVerified(message, displayedActor);
+		if (requireVerifiedActor && verified.isEmpty()) {
+			return Optional.empty();
+		}
+		String actor = verified.orElse(displayedActor);
+		return Optional.of(actor + " " + matcher.group(2));
 	}
 }

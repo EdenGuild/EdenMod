@@ -3525,10 +3525,8 @@ public final class EdenModClient implements ClientModInitializer {
 			return;
 		}
 		// Territory economy/management announcements — tracked directly from chat for /manage log economy.
-		Optional<String> economy = EconomyMessageFilter.parse(message);
-		if (economy.isPresent()) {
-			String text = economy.get();
-			current.sendGuildEconomy(text, economySeq.next(text));
+		if (EconomyMessageFilter.isEconomyMessage(message)) {
+			EconomyMessageFilter.parseForRelay(message).ifPresent(text -> current.sendGuildEconomy(text, economySeq.next(text)));
 			return;
 		}
 		// Annihilation world-event warning (the only advance timing signal we get).
@@ -3582,13 +3580,13 @@ public final class EdenModClient implements ClientModInitializer {
 			return;
 		}
 		// Guild flavour announcements (weekly objective done, boosting) mirrored
-		// verbatim into the Discord bridge chat.
-		Optional<String> announce = GuildAnnounceParser.parse(message);
-		if (announce.isPresent()) {
-			String text = announce.get();
-			if (guildAnnounceRelay.shouldSend(new CapturedMessage("announce", null, text))) {
-				current.sendGuildAnnounce(text);
-			}
+		// into the Discord bridge chat only when the actor resolves to a real IGN.
+		if (GuildAnnounceParser.parse(message).isPresent()) {
+			GuildAnnounceParser.parseForRelay(message).ifPresent(text -> {
+				if (guildAnnounceRelay.shouldSend(new CapturedMessage("announce", null, text))) {
+					current.sendGuildAnnounce(text);
+				}
+			});
 			return;
 		}
 		// Guild level-up banner ("Eden is now level N  +<reward>"), relayed verbatim

@@ -93,4 +93,35 @@ class PlayerNameResolverTest {
 		assertEquals("SomePlayer", PlayerNameResolver.resolve(null, "SomePlayer"));
 		assertEquals(null, PlayerNameResolver.resolve(null, null));
 	}
+
+	@Test
+	void resolveConsultsKnownAliasWithoutOverwritingWhenMetadataAbsent() {
+		PlayerNameResolver.recordAlias("Xia Yu", "EternalOblivion");
+		net.minecraft.network.chat.Component plain = net.minecraft.network.chat.Component.literal("Xia Yu changed the style of Cinfras Outskirts to cheapest");
+
+		assertEquals("EternalOblivion", PlayerNameResolver.resolve(plain, "Xia Yu"));
+		assertEquals(Optional.of("EternalOblivion"), PlayerNameResolver.resolveVerified(plain, "Xia Yu"));
+		assertEquals(Optional.of("EternalOblivion"), PlayerNameResolver.resolveKnown("Xia Yu"));
+		assertEquals(Optional.empty(), PlayerNameResolver.resolveVerified(net.minecraft.network.chat.Component.literal("UnknownNick99 did something"), "UnknownNick99"));
+	}
+
+	@Test
+	void resolveDoesNotPrefixMatchAliasesAndLeavesUnmatchedRealIgnUnchanged() {
+		PlayerNameResolver.recordAlias("Kaironic", "OtherOwner");
+		net.minecraft.network.chat.Component msg = net.minecraft.network.chat.Component.literal("Kairo deposited 10le");
+
+		// resolve() and resolveVerified() require an exact match; loose prefix lookup stays for resolveKnown().
+		assertEquals("Kairo", PlayerNameResolver.resolve(msg, "Kairo"));
+		assertEquals(Optional.empty(), PlayerNameResolver.resolveVerified(msg, "Kairo"));
+		assertEquals("RealIgn99", PlayerNameResolver.resolve(net.minecraft.network.chat.Component.literal("RealIgn99 left"), "RealIgn99"));
+		assertEquals(Optional.of("OtherOwner"), PlayerNameResolver.resolveKnown("Kairo"));
+
+		try {
+			PlayerNameResolver.setMemberNames(() -> java.util.List.of("Kairo"));
+			assertEquals("Kairo", PlayerNameResolver.resolve(msg, "Kairo"));
+			assertEquals(Optional.of("Kairo"), PlayerNameResolver.resolveVerified(msg, "Kairo"));
+		} finally {
+			PlayerNameResolver.setMemberNames(java.util.List::of);
+		}
+	}
 }
