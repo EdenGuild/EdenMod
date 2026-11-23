@@ -379,6 +379,9 @@ public final class BridgeConfig {
 	/** Witness cooldown HUD timer for Orphion's Nexus of Light Room 2. */
 	public boolean witnessCooldownTracker = true;
 
+	/** Raid HUD panel sharing each party Acolyte's Blood Pool. */
+	public boolean bloodPoolTracker = true;
+
 	/** Custom palette for the 10 party slots. Defaults to PartyHighlightManager.DEFAULT_PALETTE. */
 	public List<Integer> partyColors = new ArrayList<>(tel.eden.mod.party.PartyHighlightManager.DEFAULT_PALETTE);
 

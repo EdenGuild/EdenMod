@@ -72,6 +72,8 @@ public final class RaidPartyTracker {
 	private static final Pattern PARTY_MEMBERS_PATTERN = Pattern.compile("^Party members:\\s*(.+)", Pattern.CASE_INSENSITIVE);
 	// Matched whole-line: while a reply is expected every system line passes through here
 	// and a matched one is hidden and never relayed, so a loose word match ate guild chat.
+	// This player leaving or losing their party (the lines wynnmod's PartyState also watches).
+	private static final Pattern LEFT_PARTY_PATTERN = Pattern.compile("^(?:You have left your current party|Your party has been disbanded|You have been kicked from your party)", Pattern.CASE_INSENSITIVE);
 	private static final Pattern NO_PARTY_PATTERN = Pattern.compile("^(?:You must be in a party to use this|You are not (?:currently )?in a party)\\.?$", Pattern.CASE_INSENSITIVE);
 	// A raid instance is compact and the party has to stay together to clear it, so this only
 	// has to reach across a room. Kept near the war radius for the same reason: wide enough to
@@ -125,6 +127,10 @@ public final class RaidPartyTracker {
 	// Wynntils' current party, copied once a second on the client thread so a completion on
 	// the netty thread never reads Wynntils' own list while it is being updated.
 	private static List<String> liveParty = List.of();
+	// The last "Party members:" reply seen, whoever asked for it. wynnmod cancels the replies
+	// to its own /party list before Wynntils sees them, which leaves Wynntils' party empty for
+	// its users. Survives raid resets; cleared on leaving the party or disconnecting.
+	private static List<String> observedParty = List.of();
 
 	/**
 	 * Drive the tracker. Called every client tick, but both the things it does are throttled:
@@ -258,23 +264,63 @@ public final class RaidPartyTracker {
 			Matcher matcher = PARTY_MEMBERS_PATTERN.matcher(plain);
 			if (matcher.find()) {
 				expectingPartyList = false;
-				String tail = matcher.group(1).trim();
-				String[] tokens = tail.split("\\s*,\\s*(?:and\\s+)?|\\s+and\\s+");
-				for (String token : tokens) {
-					String item = token.trim().replaceAll("[^a-zA-Z0-9_]", "");
-					if (!item.isEmpty()) {
-						String real = ChatText.resolveRealName(message, item);
-						if (real == null) {
-							real = PlayerNameResolver.resolve(message, item);
-						}
-						String finalName = (real != null && !real.isBlank()) ? real : item;
-						partyMembers.add(finalName);
-					}
-				}
+				partyMembers.addAll(parseMembers(message, matcher.group(1)));
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Watch every system line for the party's state, without hiding anything: a
+	 * {@code Party members:} reply replaces the observed party, and leaving or having no
+	 * party clears it. Called from the packet handler before other mods see the line.
+	 */
+	public static void observePartyChat(Component message) {
+		if (message == null) {
+			return;
+		}
+		String plain = stripCodes(ChatText.normalize(message.getString())).trim();
+		Matcher matcher = PARTY_MEMBERS_PATTERN.matcher(plain);
+		if (matcher.find()) {
+			List<String> members = parseMembers(message, matcher.group(1));
+			synchronized (LOCK) {
+				observedParty = members;
+			}
+		} else if (LEFT_PARTY_PATTERN.matcher(plain).find() || NO_PARTY_PATTERN.matcher(plain).matches()) {
+			synchronized (LOCK) {
+				observedParty = List.of();
+			}
+		}
+	}
+
+	/** The party from the last {@code Party members:} reply seen, real names where resolvable. */
+	public static List<String> observedParty() {
+		synchronized (LOCK) {
+			return observedParty;
+		}
+	}
+
+	/** Forget the observed party, on disconnect. */
+	public static void forgetObservedParty() {
+		synchronized (LOCK) {
+			observedParty = List.of();
+		}
+	}
+
+	private static List<String> parseMembers(Component message, String tail) {
+		List<String> out = new ArrayList<>();
+		for (String token : tail.trim().split("\\s*,\\s*(?:and\\s+)?|\\s+and\\s+")) {
+			String item = token.trim().replaceAll("[^a-zA-Z0-9_]", "");
+			if (!item.isEmpty()) {
+				String real = ChatText.resolveRealName(message, item);
+				if (real == null) {
+					real = PlayerNameResolver.resolve(message, item);
+				}
+				out.add(real != null && !real.isBlank() ? real : item);
+			}
+		}
+		return List.copyOf(out);
 	}
 
 	/**
@@ -451,6 +497,13 @@ public final class RaidPartyTracker {
 	public static List<String> partyMembers() {
 		synchronized (LOCK) {
 			return new ArrayList<>(partyMembers);
+		}
+	}
+
+	/** Whether the sidebar shows a raid, as of the last once-a-second read. */
+	public static boolean isRaiding() {
+		synchronized (LOCK) {
+			return raiding;
 		}
 	}
 

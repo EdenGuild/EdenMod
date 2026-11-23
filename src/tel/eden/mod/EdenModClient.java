@@ -850,6 +850,7 @@ public final class EdenModClient implements ClientModInitializer {
 				WarHud.render(config, graphics);
 				tel.eden.mod.raid.tcc.TccLabyrinthMapHud.render(config, graphics);
 				tel.eden.mod.raid.WitnessCooldownTracker.render(config, graphics);
+				tel.eden.mod.raid.BloodPoolTracker.render(config, graphics);
 			}
 		});
 		// War-suite territory outlines, added to the per-frame gizmo collector during
@@ -881,6 +882,7 @@ public final class EdenModClient implements ClientModInitializer {
 			AttackTimerMenu.onWorldJoin();
 			tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 			tel.eden.mod.raid.WitnessCooldownTracker.reset();
+			tel.eden.mod.raid.BloodPoolTracker.reset();
 			tel.eden.mod.war.WarStartPingTracker.reset();
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
 			tel.eden.mod.war.eco.TerritoryGuideController.reset();
@@ -986,6 +988,7 @@ public final class EdenModClient implements ClientModInitializer {
 			RaidPartyTracker.onTick();
 			RaidReadyTracker.onClientTick();
 			tel.eden.mod.raid.tcc.TccLabyrinthTracker.tick(config, socket);
+			tel.eden.mod.raid.BloodPoolTracker.tick(config, socket);
 			PartyHealthTracker.tick();
 			AttackMenuScraper.onTick(client);
 			AllianceMenuScraper.onTick(client);
@@ -1415,6 +1418,16 @@ public final class EdenModClient implements ClientModInitializer {
 							return;
 						}
 						tel.eden.mod.raid.tcc.TccLabyrinthTracker.onPeerExitReached(sender, path, x, z, config);
+					});
+				}
+
+				@Override
+				public void onBloodPool(String sender, String senderUuid, int pct, int cap) {
+					Minecraft mc = Minecraft.getInstance();
+					mc.execute(() -> {
+						if (mc.player != null) {
+							tel.eden.mod.raid.BloodPoolTracker.onRemote(config, mc.player.getUUID().toString().replace("-", ""), sender, senderUuid, pct, cap);
+						}
 					});
 				}
 
@@ -3408,12 +3421,14 @@ public final class EdenModClient implements ClientModInitializer {
 		// Likewise the raid tally: it holds players from the session that just ended, and
 		// after an account switch could attribute them to another guild's raid.
 		RaidPartyTracker.reset();
+		RaidPartyTracker.forgetObservedParty();
 		RaidReadyTracker.reset();
 		PartyHealthTracker.reset();
 		ChatReplyManager.reset();
 		tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 		tel.eden.mod.util.PlayerSkinResolver.reset();
 		tel.eden.mod.raid.WitnessCooldownTracker.reset();
+		tel.eden.mod.raid.BloodPoolTracker.reset();
 		tel.eden.mod.war.WarStartPingTracker.reset();
 		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();
 		tel.eden.mod.war.eco.TerritoryGuideController.reset();
@@ -3529,6 +3544,7 @@ public final class EdenModClient implements ClientModInitializer {
 			guildLogSync.onWorldJoin();
 			territoryDefendedTracker.clear();
 			tel.eden.mod.raid.WitnessCooldownTracker.reset();
+			tel.eden.mod.raid.BloodPoolTracker.reset();
 			tel.eden.mod.war.WarStartPingTracker.reset();
 			setInGameWorld(true);
 		}

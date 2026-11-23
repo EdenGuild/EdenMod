@@ -149,6 +149,7 @@ public final class WitnessCooldownTracker {
 		if (wynntilsMembers != null) {
 			members.addAll(wynntilsMembers);
 		}
+		members.addAll(tel.eden.mod.chat.RaidPartyTracker.observedParty());
 		List<String> tracked = PartyHealthTracker.getTrackedPartyNames();
 		if (tracked != null) {
 			members.addAll(tracked);

@@ -189,6 +189,10 @@ public final class BridgeWebSocketClient {
 		default void onWitnessKill(String sender, String senderUuid, long timestamp) {
 		}
 
+		/** A raid party member's Shaman Acolyte Blood Pool: {@code pct} of a {@code cap} of 80 to 160 in steps of 10. */
+		default void onBloodPool(String sender, String senderUuid, int pct, int cap) {
+		}
+
 		/** TCC Room 2 Labyrinth position from party member. */
 		default void onTccMapPos(String sender, String senderUuid, double x, double y, double z, float yaw, boolean isWings) {
 		}
@@ -755,6 +759,29 @@ public final class BridgeWebSocketClient {
 	// TCC Room 2 relays are scoped to the raid party each message carries. Every builder
 	// returns null without a party and nothing is sent: a party-less message would give the
 	// backend nobody to scope it to, and other raid groups must never see it.
+
+	/**
+	 * Broadcast this player's Blood Pool to their raid party. A negative {@code pct} (no
+	 * pool) sends only the party, which keeps this player matchable as a recipient.
+	 */
+	public void sendBloodPool(int pct, int cap, java.util.List<String> partyMembers) {
+		sendTcc(bloodPoolPayload(pct, cap, partyMembers));
+	}
+
+	static JsonObject bloodPoolPayload(int pct, int cap, java.util.List<String> partyMembers) {
+		JsonArray party = partyArray(partyMembers);
+		if (party == null) {
+			return null;
+		}
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "bloodPool");
+		if (pct >= 0) {
+			obj.addProperty("pct", pct);
+			obj.addProperty("max", cap);
+		}
+		obj.add("party", party);
+		return obj;
+	}
 
 	/** Broadcast this player's TCC Room 2 Labyrinth position to their raid party. */
 	public void sendTccMapPos(double x, double y, double z, float yaw, boolean isWings, java.util.List<String> partyMembers) {
@@ -1651,6 +1678,7 @@ public final class BridgeWebSocketClient {
 				case "radianceGroupCount" -> sink.onRadianceGroupCount(get(obj, "groupKey"), getInt(obj, "count", 0));
 				case "radianceCast" -> sink.onRadianceCast(get(obj, "sender"), get(obj, "senderUuid"), get(obj, "groupKey"), getInt(obj, "tier", 0), getLong(obj, "remainingMs", 0L), getLong(obj, "timestamp", System.currentTimeMillis()));
 				case "witnessKill" -> sink.onWitnessKill(get(obj, "sender"), get(obj, "senderUuid"), getLong(obj, "timestamp", System.currentTimeMillis()));
+				case "bloodPool" -> sink.onBloodPool(get(obj, "sender"), get(obj, "senderUuid"), getInt(obj, "pct", -1), getInt(obj, "max", 0));
 				case "tccMapPos" -> sink.onTccMapPos(get(obj, "sender"), get(obj, "senderUuid"), getDouble(obj, "x", 0.0), getDouble(obj, "y", 0.0), getDouble(obj, "z", 0.0), getFloat(obj, "yaw", 0.0f), getBool(obj, "isWings"));
 				case "tccGolemDefeated" -> sink.onTccGolemDefeated(get(obj, "sender"), get(obj, "golemId"));
 				case "tccExitReached" -> sink.onTccExitReached(get(obj, "sender"), get(obj, "path"), getDouble(obj, "x", 0.0), getDouble(obj, "z", 0.0));

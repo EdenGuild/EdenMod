@@ -219,6 +219,7 @@ public final class BridgeConfigScreen extends EdenScreen {
 		addToggleRow(Category.PARTY_RAIDS, "TCC exit discovery ping", () -> config.tccExitPing, v -> config.tccExitPing = v, "On", "Off", true);
 		addToggleRow(Category.PARTY_RAIDS, "Require guild raid to ready", () -> config.requireGuildRaid, v -> config.requireGuildRaid = v, "On", "Off", false);
 		addToggleRow(Category.PARTY_RAIDS, "Witness cooldown timer", () -> config.witnessCooldownTracker, v -> config.witnessCooldownTracker = v, "On", "Off", true);
+		addToggleRow(Category.PARTY_RAIDS, "Blood Pool tracker", () -> config.bloodPoolTracker, v -> config.bloodPoolTracker = v, "On", "Off", true);
 
 		// War & Territory
 		addToggleRow(Category.WAR, "Attack timers HUD", () -> config.warAttackTimers, v -> config.warAttackTimers = v, "On", "Off", true);

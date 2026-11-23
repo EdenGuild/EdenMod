@@ -618,7 +618,10 @@ public final class TccLabyrinthTracker {
 				}
 			}
 		}
-		for (String m : tel.eden.mod.chat.RaidPartyTracker.partyMembers()) {
+		// The observed /party list reply covers players whose Wynntils party another mod emptied.
+		java.util.List<String> fallback = new java.util.ArrayList<>(tel.eden.mod.chat.RaidPartyTracker.partyMembers());
+		fallback.addAll(tel.eden.mod.chat.RaidPartyTracker.observedParty());
+		for (String m : fallback) {
 			String canon = tel.eden.mod.chat.PlayerNameResolver.canonicalize(m);
 			if (canon != null && !canon.isBlank()) {
 				members.add(canon);

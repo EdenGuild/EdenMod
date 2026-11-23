@@ -137,6 +137,9 @@ public class ClientPacketListenerMixin {
 			ci.cancel();
 			return;
 		}
+		if (mod != null && mod.onWynncraft()) {
+			tel.eden.mod.chat.RaidPartyTracker.observePartyChat(packet.content());
+		}
 		if (tel.eden.mod.chat.RaidPartyTracker.isExpectingPartyList() && tel.eden.mod.chat.RaidPartyTracker.handlePartyListChat(packet.content())) {
 			tel.eden.mod.chat.PlayerNameResolver.observeMessage(packet.content());
 			ci.cancel();

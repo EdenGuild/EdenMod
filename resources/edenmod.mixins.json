@@ -28,6 +28,7 @@
     "ItemDecorationMixin",
     "ItemEntityRenderStateMixin",
     "ItemRenderMixin",
+    "LerpingBossEventAccessor",
     "LivingEntityRendererMixin",
     "MinecraftMixin",
     "OptionsMixin",
