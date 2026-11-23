@@ -17,7 +17,7 @@ import tel.eden.mod.config.BridgeConfig;
 import tel.eden.mod.net.OutboundPolicy.Standing;
 
 class OutboundPolicyTest {
-	private static final Set<String> TRAVELER = Set.of("authResponse", "presence", "mailSend", "mailAck", "tccMapPos", "tccGolemDefeated", "tccExitReached", "witnessKill", "partyOpen", "partyJoin", "partyLeave", "partyList", "partyManage", "travelerChat", "travelerPrefs", "coinflip", "diceroll", "attestationFailure");
+	private static final Set<String> TRAVELER = Set.of("authResponse", "presence", "mailSend", "mailAck", "tccMapPos", "tccGolemDefeated", "tccExitReached", "witnessKill", "partyOpen", "partyJoin", "partyLeave", "partyList", "partyManage", "travelerChat", "travelerPrefs", "coinflip", "diceroll", "attestationFailure", "wikiRequest");
 
 	// Every type BWSC sends that a traveler must NOT be able to send. A new send* type that is
 	// in neither set fails classifiesEveryTypeBwscCanSend until someone decides.
