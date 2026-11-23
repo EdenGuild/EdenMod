@@ -45,7 +45,7 @@ public final class BridgeConfigScreen extends EdenScreen {
 	private static final int CONTROL_W = 96;
 	private static final int RESET_W = 20;
 	private static final int SCROLLBAR_W = 6;
-	private static final int HEADER_BOTTOM = 120;
+	private static final int HEADER_BOTTOM = 146;
 	private static final int FOOTER_HEIGHT = 40;
 	// Fraction of the remaining distance the list glides each frame (smoothness).
 	private static final double SCROLL_EASE = 0.4;
@@ -74,6 +74,9 @@ public final class BridgeConfigScreen extends EdenScreen {
 	private final List<SettingRow> visibleRows = new ArrayList<>();
 	private Button linkButton;
 	private EdenDropdown<Category> categoryDropdown;
+	private EditBox searchBox;
+	private Button clearSearchButton;
+	private String searchQuery = "";
 	private double scroll;
 	private double scrollTarget;
 	private boolean draggingScrollbar;
@@ -104,12 +107,39 @@ public final class BridgeConfigScreen extends EdenScreen {
 		linkButton = this.addRenderableWidget(Button.builder(Component.literal("Link account"), button -> startLinkFlow()).bounds(cx, 92, linkW, 20).build());
 		this.addRenderableWidget(Button.builder(Component.literal("Edit HUD"), button -> this.minecraft.setScreen(new HudLayoutScreen(this, config))).bounds(cx + linkW + 6, 92, hudW, 20).build());
 
-		EdenDropdown.PopupSettings popupSettings = new EdenDropdown.PopupSettings(HEADER_BOTTOM, this.height - FOOTER_HEIGHT, 20, Category.values().length);
+		EdenDropdown.PopupSettings popupSettings = new EdenDropdown.PopupSettings(114, this.height - FOOTER_HEIGHT, 20, Category.values().length);
 		categoryDropdown = this.addRenderableWidget(new EdenDropdown<>(cx + linkW + hudW + 12, 92, dropW, 20, this.font, List.of(Category.values()), selectedCategory, cat -> "Category: " + cat.label(), newCat -> {
 			selectedCategory = newCat;
-			updateVisibleRows();
+			if (searchBox != null && !searchQuery.isEmpty()) {
+				searchBox.setValue("");
+			} else {
+				updateVisibleRows();
+			}
 		}, openDrop -> {
 		}, popupSettings));
+
+		int clearW = 20;
+		searchBox = new EditBox(this.font, cx, 117, cw - clearW - 4, 20, Component.literal("Search settings")) {
+			@Override
+			public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+				super.renderWidget(g, mouseX, mouseY, partialTick);
+				if (getValue().isEmpty()) {
+					// Match the 6px top offset (5px inside the 1px border) on the left edge.
+					g.drawString(BridgeConfigScreen.this.font, "Search settings...", getX() + 6, getY() + 6, 0xFFAAAAAA);
+				}
+			}
+		};
+		searchBox.setMaxLength(64);
+		searchBox.setValue(searchQuery);
+		clearSearchButton = Button.builder(Component.literal("×"), button -> searchBox.setValue("")).bounds(cx + cw - clearW, 117, clearW, 20).build();
+		clearSearchButton.active = !searchQuery.isEmpty();
+		searchBox.setResponder(value -> {
+			searchQuery = value;
+			clearSearchButton.active = !value.isEmpty();
+			updateVisibleRows();
+		});
+		this.addRenderableWidget(searchBox);
+		this.addRenderableWidget(clearSearchButton);
 
 		// --- One line per setting; the list handles layout + smooth scrolling. ---
 		// Travelers keep local features only: guild-bound rows are not built at all.
@@ -289,19 +319,45 @@ public final class BridgeConfigScreen extends EdenScreen {
 		allRows.add(new SettingRow(category, label, control, reset, refresh));
 	}
 
+	static boolean matchesSearch(String label, Category category, String query) {
+		if (query == null || query.isBlank()) {
+			return true;
+		}
+		String haystackLabel = label == null ? "" : label.toLowerCase(Locale.ROOT);
+		String haystackCategory = category == null ? "" : category.label().toLowerCase(Locale.ROOT);
+		for (String token : query.trim().toLowerCase(Locale.ROOT).split("\\s+")) {
+			if (!haystackLabel.contains(token) && !haystackCategory.contains(token)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private void updateVisibleRows() {
 		visibleRows.clear();
+		boolean searching = !searchQuery.isBlank();
 		for (SettingRow row : allRows) {
-			if (selectedCategory == Category.ALL || row.category == selectedCategory) {
+			boolean visible = searching ? matchesSearch(row.label, row.category, searchQuery) : (selectedCategory == Category.ALL || row.category == selectedCategory);
+			if (visible) {
 				visibleRows.add(row);
 			} else {
 				row.control.visible = false;
 				row.reset.visible = false;
+				clearControlFocus(row);
 			}
 		}
 		scrollTarget = 0;
 		scroll = 0;
 		layoutRows();
+	}
+
+	private void clearControlFocus(SettingRow row) {
+		if (row.control.isFocused()) {
+			row.control.setFocused(false);
+			if (this.getFocused() == row.control) {
+				this.setFocused(null);
+			}
+		}
 	}
 
 	private void saveConfig() {
@@ -447,6 +503,8 @@ public final class BridgeConfigScreen extends EdenScreen {
 			row.reset.visible = inView;
 			if (inView) {
 				positionRow(row, rowY);
+			} else {
+				clearControlFocus(row);
 			}
 		}
 	}
@@ -481,6 +539,9 @@ public final class BridgeConfigScreen extends EdenScreen {
 
 		int labelX = cx + 10;
 		g.enableScissor(cx, top, cx + cw, top + height);
+		if (visibleRows.isEmpty() && !searchQuery.isBlank()) {
+			g.drawCenteredString(this.font, Component.literal("No settings match \"" + searchQuery.trim() + "\""), centerX, top + 16, 0xFF888888);
+		}
 		for (int i = 0; i < visibleRows.size(); i++) {
 			int rowY = rowY(i);
 			if (!rowInView(rowY)) {
