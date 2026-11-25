@@ -883,6 +883,7 @@ public final class EdenModClient implements ClientModInitializer {
 			tel.eden.mod.raid.tcc.TccLabyrinthTracker.reset();
 			tel.eden.mod.raid.WitnessCooldownTracker.reset();
 			tel.eden.mod.raid.BloodPoolTracker.reset();
+			tel.eden.mod.raid.PartyFinderGambitScraper.reset();
 			tel.eden.mod.war.WarStartPingTracker.reset();
 			tel.eden.mod.war.radiance.RadianceTracker.onJoin();
 			tel.eden.mod.war.eco.TerritoryGuideController.reset();
@@ -993,6 +994,7 @@ public final class EdenModClient implements ClientModInitializer {
 			AttackMenuScraper.onTick(client);
 			AllianceMenuScraper.onTick(client);
 			GuildMenuScraper.onTick(client);
+			tel.eden.mod.raid.PartyFinderGambitScraper.onTick(client);
 			tel.eden.mod.chat.CharacterInfoNickname.onTick(client);
 			AttackTimerMenu.onTick(socket);
 			tel.eden.mod.emote.EmoteWheel.onTick(client);
@@ -3429,6 +3431,7 @@ public final class EdenModClient implements ClientModInitializer {
 		tel.eden.mod.util.PlayerSkinResolver.reset();
 		tel.eden.mod.raid.WitnessCooldownTracker.reset();
 		tel.eden.mod.raid.BloodPoolTracker.reset();
+		tel.eden.mod.raid.PartyFinderGambitScraper.reset();
 		tel.eden.mod.war.WarStartPingTracker.reset();
 		tel.eden.mod.war.radiance.RadianceTracker.onDisconnect();
 		tel.eden.mod.war.eco.TerritoryGuideController.reset();
