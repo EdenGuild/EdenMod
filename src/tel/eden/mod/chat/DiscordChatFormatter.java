@@ -571,7 +571,11 @@ public final class DiscordChatFormatter {
 		// on the glyph bitmap that corrupts non-standard glyphs like these, so bold
 		// only ever applies to the plain-text content segment, never the label.
 		// Emotes are swapped in before wrapping, so a :shortcode: can't be split across lines.
-		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(rgb))).append(processEmotes(Component.literal(" " + content).withStyle(style -> style.withColor(rgb).withBold(bold))));
+		// A pill carrying a link (e.g. the guess-the-member render) gets the same [Image]
+		// hover preview as a relayed Discord message; linkify also swaps in emotes.
+		Style textStyle = Style.EMPTY.withColor(rgb).withBold(bold);
+		Component text = content.contains("://") ? linkify(" " + content, null, textStyle) : processEmotes(Component.literal(" " + content).withStyle(textStyle));
+		MutableComponent body = Component.empty().append(Component.literal(pillLabel(label)).withStyle(Style.EMPTY.withFont(PILL_FONT).withColor(rgb))).append(text);
 		return withGuildPrefix(body);
 	}
 
