@@ -158,7 +158,13 @@ public final class BridgeConfigScreen extends EdenScreen {
 			EdenModClient.syncTravelerPrefs(config);
 		}, "On", "Off", true);
 		if (!traveler) {
-			addCycleRow(Category.GENERAL, "Login/logout messages", () -> config.loginLogoutMode.label(), () -> config.loginLogoutMode = nextLoginLogoutMode(config.loginLogoutMode), () -> config.loginLogoutMode = BridgeConfig.LoginLogoutMode.ALL);
+			addCycleRow(Category.GENERAL, "Login/logout messages", () -> config.loginLogoutMode.label(), () -> {
+				config.loginLogoutMode = nextLoginLogoutMode(config.loginLogoutMode);
+				EdenModClient.syncTravelerPrefs(config);
+			}, () -> {
+				config.loginLogoutMode = BridgeConfig.LoginLogoutMode.ALL;
+				EdenModClient.syncTravelerPrefs(config);
+			});
 		}
 		if (traveler) {
 			addToggleRow(Category.GENERAL, "Games shown", () -> config.travelerGames, v -> {

@@ -94,10 +94,12 @@ class OutboundPolicyTest {
 		assertFalse(chat.has("replyToMessageId"));
 		assertEquals("123", BridgeWebSocketClient.travelerChatPayload("hello", "123").get("replyToMessageId").getAsString());
 
-		JsonObject prefs = BridgeWebSocketClient.travelerPrefsPayload(false, "guild");
+		JsonObject prefs = BridgeWebSocketClient.travelerPrefsPayload(false, "guild", false);
 		assertEquals("travelerPrefs", prefs.get("type").getAsString());
 		assertFalse(prefs.get("chat").getAsBoolean());
 		assertEquals("guild", prefs.get("games").getAsString());
+		assertFalse(prefs.get("hideLogin").getAsBoolean());
+		assertTrue(BridgeWebSocketClient.travelerPrefsPayload(true, "guild", true).get("hideLogin").getAsBoolean());
 	}
 
 	@Test

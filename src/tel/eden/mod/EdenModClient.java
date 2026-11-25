@@ -1472,6 +1472,9 @@ public final class EdenModClient implements ClientModInitializer {
 					if ("reactions".equals(label) && config.gameDisplayMode == BridgeConfig.GameDisplayMode.NONE) {
 						return;
 					}
+					if ("streak".equals(label) && !shouldDisplayStreakPill(config.loginLogoutMode, own)) {
+						return;
+					}
 					Integer colorRgb = null;
 					if (colorHex != null && !colorHex.isEmpty()) {
 						try {
@@ -3321,9 +3324,17 @@ public final class EdenModClient implements ClientModInitializer {
 	}
 
 	/** On full access, begin this session: hand back deducts and announce login once. */
+	/** Whether an incoming {@code streak} pill should be shown in local chat for the user's mode. */
+	public static boolean shouldDisplayStreakPill(BridgeConfig.LoginLogoutMode mode, boolean own) {
+		return own || mode != BridgeConfig.LoginLogoutMode.HIDE_ALL;
+	}
+
+	/** On full access, begin this session: sync prefs first, then hand back deducts and announce login once. */
 	private void onBridgeConnected() {
 		handBackOutstandingDeducts("were not confirmed deducted before the bridge dropped");
 		reportAttestationFailure();
+		// Sync before login/presence so the server knows whether own login/streaks are hidden.
+		syncTravelerPrefs(config);
 		if (loginPending) {
 			loginPending = false;
 			BridgeWebSocketClient current = socket;
@@ -3338,7 +3349,6 @@ public final class EdenModClient implements ClientModInitializer {
 				current.sendPresence(inGameWorld); // send whatever state we already detected
 			}
 		}
-		syncTravelerPrefs(config);
 		syncRadianceGroup(config);
 		queryRewardStatus(true);
 	}
@@ -3377,7 +3387,8 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 		BridgeWebSocketClient current = instance.socket;
 		if (current != null) {
-			current.sendTravelerPrefs(config.travelerChat, BridgeWebSocketClient.gamesPref(instance.isTraveler(), config.memberGames, config.travelerGames));
+			boolean hideLogin = !instance.isTraveler() && config.loginLogoutMode != BridgeConfig.LoginLogoutMode.ALL;
+			current.sendTravelerPrefs(config.travelerChat, BridgeWebSocketClient.gamesPref(instance.isTraveler(), config.memberGames, config.travelerGames), hideLogin);
 		}
 	}
 
