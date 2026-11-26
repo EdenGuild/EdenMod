@@ -4,6 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.UUID;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundBossEventPacket;
+import net.minecraft.world.BossEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +22,33 @@ class BloodPoolTrackerTest {
 	@AfterEach
 	void clear() {
 		BloodPoolTracker.reset();
+		BloodPoolTracker.forgetBar();
+	}
+
+	@Test
+	void readsOwnBarFromPacketsWithoutTheOverlay() {
+		UUID id = UUID.randomUUID();
+		BossEvent bar = new BossEvent(id, Component.literal("Blood Pool [82%]"), BossEvent.BossBarColor.RED, BossEvent.BossBarOverlay.PROGRESS) {
+		};
+		bar.setProgress(82f / 150);
+		BossEvent other = new BossEvent(UUID.randomUUID(), Component.literal("Tower - Ragni"), BossEvent.BossBarColor.RED, BossEvent.BossBarOverlay.PROGRESS) {
+		};
+		BloodPoolTracker.onBossPacket(ClientboundBossEventPacket.createAddPacket(bar));
+		BloodPoolTracker.onBossPacket(ClientboundBossEventPacket.createAddPacket(other));
+		BloodPoolTracker.readOwnBar();
+		assertEquals(new Row("Me", 82, 150), BloodPoolTracker.visibleRows("Me").get(0));
+
+		bar.setName(Component.literal("Blood Pool [30%]"));
+		bar.setProgress(30f / 150);
+		BloodPoolTracker.onBossPacket(ClientboundBossEventPacket.createUpdateNamePacket(bar));
+		BloodPoolTracker.onBossPacket(ClientboundBossEventPacket.createUpdateProgressPacket(bar));
+		BloodPoolTracker.onBossPacket(ClientboundBossEventPacket.createRemovePacket(other.getId()));
+		BloodPoolTracker.readOwnBar();
+		assertEquals(new Row("Me", 30, 150), BloodPoolTracker.visibleRows("Me").get(0));
+
+		BloodPoolTracker.onBossPacket(ClientboundBossEventPacket.createRemovePacket(id));
+		BloodPoolTracker.readOwnBar();
+		assertEquals(new Row("Me", 0, 150), BloodPoolTracker.visibleRows("Me").get(0));
 	}
 
 	@Test
@@ -41,6 +72,8 @@ class BloodPoolTrackerTest {
 		assertEquals(150, BloodPoolTracker.capFor(75, 0.5f, 0));
 		assertEquals(150, BloodPoolTracker.capFor(82, 82f / 150, 0));
 		assertEquals(90, BloodPoolTracker.capFor(45, 0.5f, 0));
+		assertEquals(200, BloodPoolTracker.capFor(100, 0.5f, 0));
+		assertEquals(170, BloodPoolTracker.capFor(85, 0.5f, 0));
 	}
 
 	@Test
@@ -67,7 +100,7 @@ class BloodPoolTrackerTest {
 	@Test
 	void capAlwaysHoldsThePool() {
 		assertEquals(110, BloodPoolTracker.capFor(105, 0f, 100));
-		assertEquals(160, BloodPoolTracker.capFor(160, 0.5f, 0));
+		assertEquals(200, BloodPoolTracker.capFor(200, 0.5f, 0));
 	}
 
 	@Test
@@ -92,7 +125,7 @@ class BloodPoolTrackerTest {
 		BloodPoolTracker.onRemote(config, ME, "Alice", "1", 161, 160);
 		BloodPoolTracker.onRemote(config, ME, "Alice", "1", 90, 80);
 		BloodPoolTracker.onRemote(config, ME, "Alice", "1", 50, 155);
-		BloodPoolTracker.onRemote(config, ME, "Alice", "1", 50, 170);
+		BloodPoolTracker.onRemote(config, ME, "Alice", "1", 50, 210);
 		BloodPoolTracker.onRemote(config, ME, "Alice", "1", -1, 0);
 		BloodPoolTracker.onRemote(config, ME, "", "1", 10, 160);
 		BloodPoolTracker.onRemote(config, ME, "Alice", null, 10, 160);

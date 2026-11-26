@@ -8,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
+import net.minecraft.network.protocol.game.ClientboundBossEventPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerClosePacket;
@@ -33,6 +34,14 @@ public class ClientPacketListenerMixin {
 					tel.eden.mod.raid.WitnessCooldownTracker.onMessage(packet.text());
 				}
 			}
+		}
+	}
+
+	// Before BossHealthOverlay.update, where Wynntils drops bars its own overlays draw.
+	@Inject(method = "handleBossUpdate", at = @At("HEAD"))
+	private void edenBridge$observeBossBar(ClientboundBossEventPacket packet, CallbackInfo ci) {
+		if (Minecraft.getInstance().isSameThread()) {
+			tel.eden.mod.raid.BloodPoolTracker.onBossPacket(packet);
 		}
 	}
 

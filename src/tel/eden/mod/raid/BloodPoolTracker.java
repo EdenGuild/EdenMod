@@ -5,12 +5,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.LongSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.LerpingBossEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundBossEventPacket;
+import net.minecraft.world.BossEvent;
 import tel.eden.mod.EdenLogger;
 import tel.eden.mod.chat.RaidPartyTracker;
 import tel.eden.mod.config.BridgeConfig;
@@ -18,8 +21,6 @@ import tel.eden.mod.hud.HudPanel;
 import tel.eden.mod.hud.HudRender;
 import tel.eden.mod.hud.RectangleElement;
 import tel.eden.mod.hud.TextElement;
-import tel.eden.mod.mixin.BossHealthOverlayAccessor;
-import tel.eden.mod.mixin.LerpingBossEventAccessor;
 import tel.eden.mod.net.BridgeWebSocketClient;
 import tel.eden.mod.raid.tcc.TccLabyrinthTracker;
 import tel.eden.mod.war.WarDPS;
@@ -28,8 +29,10 @@ import tel.eden.mod.war.WarDPS;
  * Shares each Shaman Acolyte's Blood Pool with their raid party, for the whole raid.
  *
  * <p>Wynncraft shows the pool only to its owner, as a boss bar named {@code Blood Pool [N%]}
- * whose fill is N divided by the player's cap (80 to 160 in steps of 10), so the cap is read
- * from the ratio. The bar is removed when the pool hits 0. Each client reads its own bar
+ * whose fill is N divided by the player's cap (80 to 200 in steps of 10), so the cap is read
+ * from the ratio. The bar is removed when the pool hits 0. It is read from the boss bar
+ * packets, not the overlay: Wynntils' Blood Pool overlay stops the vanilla bar being added.
+ * Each client reads its own bar
  * and EdenBot relays the level to the party; rows are keyed by the sender's UUID, so any
  * number of Acolytes in one party stay apart. Everything runs on the client thread.
  */
@@ -40,9 +43,9 @@ public final class BloodPoolTracker {
 	public static final String PANEL = "bloodPool";
 	public static final float DEFAULT_X = 0.45f;
 	public static final float DEFAULT_Y = 0.46f;
-	// Caps run 80 to 160 in steps of 10 (gear and abilities move it).
+	// Caps run 80 to 200 in steps of 10 (gear and abilities move it).
 	static final int MIN_CAP = 80;
-	static final int MAX_CAP = 160;
+	static final int MAX_CAP = 200;
 	static final int CAP_STEP = 10;
 	static final long SEND_INTERVAL_MS = 100L;
 	// The bot drops a party claim after 15s. Re-sending inside that keeps it, so teammates
@@ -76,10 +79,60 @@ public final class BloodPoolTracker {
 	private static long lastSendMs;
 	private static long lastClaimMs;
 	private static long notRaidingSinceMs;
+	// The Blood Pool bar as the server last sent it, kept across raids as the overlay keeps it.
+	private static UUID barId;
+	private static int barPct;
+	private static float barProgress;
+	private static final ClientboundBossEventPacket.Handler BAR_PACKETS = new ClientboundBossEventPacket.Handler() {
+		@Override
+		public void add(UUID id, Component name, float progress, BossEvent.BossBarColor color, BossEvent.BossBarOverlay overlay, boolean darkenScreen, boolean playMusic, boolean createWorldFog) {
+			onBarName(id, name);
+			updateProgress(id, progress);
+		}
+
+		@Override
+		public void updateName(UUID id, Component name) {
+			onBarName(id, name);
+		}
+
+		@Override
+		public void updateProgress(UUID id, float progress) {
+			if (id.equals(barId)) {
+				barProgress = progress;
+			}
+		}
+
+		@Override
+		public void remove(UUID id) {
+			if (id.equals(barId)) {
+				barId = null;
+			}
+		}
+	};
 	private static LongSupplier timeSupplier = System::currentTimeMillis;
 
 	public static void setTimeSupplier(LongSupplier supplier) {
 		timeSupplier = supplier != null ? supplier : System::currentTimeMillis;
+	}
+
+	/** Every boss bar packet, ahead of the overlay and of mods that hide bars from it. Client thread. */
+	public static void onBossPacket(ClientboundBossEventPacket packet) {
+		packet.dispatch(BAR_PACKETS);
+	}
+
+	private static void onBarName(UUID id, Component name) {
+		int pct = parsePct(WarDPS.clean(name.getString()));
+		if (pct >= 0) {
+			barId = id;
+			barPct = pct;
+		} else if (id.equals(barId)) {
+			barId = null;
+		}
+	}
+
+	/** A new connection starts with no boss bars, as the overlay does. */
+	public static void forgetBar() {
+		barId = null;
 	}
 
 	/** The N in a {@code Blood Pool [N%]} bar name, or -1 for any other bar. */
@@ -133,7 +186,7 @@ public final class BloodPoolTracker {
 			return;
 		}
 		notRaidingSinceMs = 0L;
-		readOwnBar(mc);
+		readOwnBar();
 		maybeSend(socket, now);
 	}
 
@@ -142,22 +195,18 @@ public final class BloodPoolTracker {
 		return TccLabyrinthTracker.getRaidPartyMembers();
 	}
 
-	private static void readOwnBar(Minecraft mc) {
-		var events = ((BossHealthOverlayAccessor) mc.gui.getBossOverlay()).edenmod$events();
-		for (LerpingBossEvent event : events.values()) {
-			int pct = parsePct(WarDPS.clean(event.getName().getString()));
-			if (pct >= 0) {
-				ownCap = capFor(pct, ((LerpingBossEventAccessor) event).edenmod$targetPercent(), ownCap);
-				if (!loggedOwnBar) {
-					loggedOwnBar = true;
-					LOGGER.info("[BloodPool] reading own bar: {}% of cap {}", pct, ownCap);
-				}
-				ownPct = pct;
-				return;
-			}
+	static void readOwnBar() {
+		if (barId == null) {
+			// The bar is removed at 0; a cap already read keeps the row showing an empty pool.
+			ownPct = 0;
+			return;
 		}
-		// The bar is removed at 0; a cap already read keeps the row showing an empty pool.
-		ownPct = 0;
+		ownCap = capFor(barPct, barProgress, ownCap);
+		if (!loggedOwnBar) {
+			loggedOwnBar = true;
+			LOGGER.info("[BloodPool] reading own bar: {}% of cap {}", barPct, ownCap);
+		}
+		ownPct = barPct;
 	}
 
 	private static void maybeSend(BridgeWebSocketClient socket, long now) {
