@@ -714,10 +714,10 @@ public final class BridgeWebSocketClient {
 		return current != null && enqueueSend(current, obj);
 	}
 
-	/** Tell the backend whether to deliver traveler chat and which game lines to show ("guild", "all" or "off"). */
-	public boolean sendTravelerPrefs(boolean chat, String games) {
+	/** Tell the backend whether to deliver traveler chat, which game lines to show, and whether to keep own login/streaks private. */
+	public boolean sendTravelerPrefs(boolean chat, String games, boolean hideLogin) {
 		WebSocket current = socket;
-		return current != null && enqueueSend(current, travelerPrefsPayload(chat, games));
+		return current != null && enqueueSend(current, travelerPrefsPayload(chat, games, hideLogin));
 	}
 
 	/** The {@code games} value for travelerPrefs: members choose guild/all/off, travelers all/off. */
@@ -738,11 +738,12 @@ public final class BridgeWebSocketClient {
 		return obj;
 	}
 
-	static JsonObject travelerPrefsPayload(boolean chat, String games) {
+	static JsonObject travelerPrefsPayload(boolean chat, String games, boolean hideLogin) {
 		JsonObject obj = new JsonObject();
 		obj.addProperty("type", "travelerPrefs");
 		obj.addProperty("chat", chat);
 		obj.addProperty("games", games);
+		obj.addProperty("hideLogin", hideLogin);
 		return obj;
 	}
 
