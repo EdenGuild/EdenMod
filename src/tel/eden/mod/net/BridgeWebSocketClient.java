@@ -1130,6 +1130,30 @@ public final class BridgeWebSocketClient {
 		return enqueueSend(current, obj);
 	}
 
+	/** Build a {@code gambitReport} frame carrying the 4 daily gambits observed in Party Finder. */
+	public static JsonObject gambitReportPayload(java.util.List<tel.eden.mod.raid.PartyFinderGambitScraper.GambitEntry> gambits) {
+		JsonObject obj = new JsonObject();
+		obj.addProperty("type", "gambitReport");
+		JsonArray array = new JsonArray();
+		for (var gambit : gambits) {
+			JsonObject item = new JsonObject();
+			item.addProperty("name", gambit.name());
+			item.addProperty("description", gambit.description());
+			array.add(item);
+		}
+		obj.add("gambits", array);
+		return obj;
+	}
+
+	/** Report the 4 daily gambits observed in Party Finder (sent by both members and travelers). */
+	public boolean sendGambitReport(java.util.List<tel.eden.mod.raid.PartyFinderGambitScraper.GambitEntry> gambits) {
+		WebSocket current = socket;
+		if (current == null || !authenticated || gambits == null || gambits.size() != tel.eden.mod.raid.PartyFinderGambitScraper.EXPECTED_GAMBIT_COUNT) {
+			return false;
+		}
+		return enqueueSend(current, gambitReportPayload(gambits));
+	}
+
 	/** Ask the backend for this player's current long-event mission state. */
 	public void sendLongEventStateRequest() {
 		sendType("longEventStateRequest");
