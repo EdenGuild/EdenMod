@@ -3323,7 +3323,6 @@ public final class EdenModClient implements ClientModInitializer {
 		}
 	}
 
-	/** On full access, begin this session: hand back deducts and announce login once. */
 	/** Whether an incoming {@code streak} pill should be shown in local chat for the user's mode. */
 	public static boolean shouldDisplayStreakPill(BridgeConfig.LoginLogoutMode mode, boolean own) {
 		return own || mode != BridgeConfig.LoginLogoutMode.HIDE_ALL;
